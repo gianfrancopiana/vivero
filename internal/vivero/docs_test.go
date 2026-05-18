@@ -22,9 +22,8 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 		"Project routes, selectors, QA flows, and restart commands belong in `vivero.yml`.",
 		"Keep Vivero-specific orchestration in project config",
 		"Do not duplicate runtime facts that already live in the app.",
-		"For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly",
-		"or point `image`/`prebuild` at the app-owned build output",
-		"Use `dockerfileInline` only when the Dockerfile is an example, test fixture, or throwaway prototype.",
+		"use app-owned assets: `prebuild` for app build commands, `image` for the resulting image, or `build.dockerfile`",
+		"Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.",
 		"## Basic use",
 		"public:` config",
 		"## License\n\n[MIT](LICENSE)",
@@ -57,7 +56,7 @@ func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 		"Keep `vivero.yml` as thin orchestration metadata",
 		"do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them",
 		"Reference app-owned images, Dockerfiles, or prebuild commands instead",
-		"Inline Dockerfiles are for examples, fixtures, and throwaway prototypes",
+		"Inline Dockerfiles are intentionally unsupported",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("bundled skill should include thin runtime boundary guidance %q", want)
@@ -86,7 +85,7 @@ func TestBundledExamplesLoad(t *testing.T) {
 	}
 }
 
-func TestGumroadExampleKeepsInlineRuntimeFixture(t *testing.T) {
+func TestGumroadExampleReferencesAppOwnedRuntimeAssets(t *testing.T) {
 	path := "../../examples/gumroad"
 	bodyBytes, err := os.ReadFile(path + "/vivero.yml")
 	if err != nil {
@@ -95,9 +94,8 @@ func TestGumroadExampleKeepsInlineRuntimeFixture(t *testing.T) {
 	body := string(bodyBytes)
 	for _, want := range []string{
 		"Vivero owns preview orchestration",
-		"reference Gumroad-owned Dockerfiles/images/prebuild commands",
-		"instead of copying runtime internals into long-lived Vivero YAML",
-		"self-contained fixture",
+		"Gumroad owns the",
+		"instead of copying",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("gumroad example should document thin runtime boundary with %q", want)
@@ -112,11 +110,31 @@ func TestGumroadExampleKeepsInlineRuntimeFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := cfg.Services["gumroad-web"].Build
-	if build.Dockerfile != "" {
-		t.Fatalf("bundled gumroad example should not pretend to reference an app-owned Dockerfile, got %q", build.Dockerfile)
+	if build.Dockerfile != "docker/web/Dockerfile" {
+		t.Fatalf("bundled gumroad example should reference Gumroad's app-owned Dockerfile, got %q", build.Dockerfile)
 	}
-	if strings.TrimSpace(build.DockerfileInline) == "" {
-		t.Fatal("bundled gumroad example should keep its preview runtime as an inline fixture")
+	if strings.Contains(body, "dockerfileInline") {
+		t.Fatal("bundled gumroad example should not inline Dockerfiles")
+	}
+}
+
+func TestConfigRejectsInlineDockerfiles(t *testing.T) {
+	dir := t.TempDir()
+	config := `project:
+  name: inline
+services:
+  web:
+    build:
+      context: .
+      dockerfileInline: |
+        FROM scratch
+`
+	if err := os.WriteFile(dir+"/vivero.yml", []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := loadProjectConfig(dir)
+	if err == nil || !strings.Contains(err.Error(), "unsupported dockerfileInline") {
+		t.Fatalf("expected dockerfileInline rejection, got %v", err)
 	}
 }
 

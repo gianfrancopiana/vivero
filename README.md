@@ -50,7 +50,7 @@ See `examples/helper-host-products/vivero.yml`: its default profile runs Helper 
 
 ## `vivero.yml`
 
-Keep Vivero-specific orchestration in project config: source selectors, profiles, service wiring, health checks, smoke tests, QA flows, public URL policy, and warm volume policy. Do not duplicate runtime facts that already live in the app. For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly, or point `image`/`prebuild` at the app-owned build output. Use `dockerfileInline` only when the Dockerfile is an example, test fixture, or throwaway prototype.
+Keep Vivero-specific orchestration in project config: source selectors, profiles, service wiring, health checks, smoke tests, QA flows, public URL policy, and warm volume policy. Do not duplicate runtime facts that already live in the app. For real app previews, use app-owned assets: `prebuild` for app build commands, `image` for the resulting image, or `build.dockerfile` when the app repo already has a suitable Dockerfile. Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.
 
 ```yaml
 project:
@@ -69,16 +69,21 @@ warm:
       - package-lock.json
       - db/migrate
 
+prebuild:
+  app:
+    steps:
+      - docker build -t webapp-preview -f docker/dev/Dockerfile .
+
 services:
   web:
     source: app
-    image: node:22-alpine
+    image: webapp-preview
     workingDir: .
     dependencyVolumes:
       - name: node_modules
         target: /app/node_modules
         lifetime: smart
-    command: npm run dev -- --host 127.0.0.1 --port 3000
+    command: ./script/vivero-server --host 0.0.0.0 --port 3000
     port: 3000
     health:
       path: /

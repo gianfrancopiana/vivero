@@ -257,9 +257,6 @@ func (a *App) buildServiceImages(project ProjectRecord, previewID string, source
 		if err != nil {
 			return err
 		}
-		if spec.TempDockerfile != "" {
-			defer os.Remove(spec.TempDockerfile)
-		}
 		a.recordEvent(previewID, "info", "image.building", "building service image", name, map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile})
 		if err := buildDockerImage(spec); err != nil {
 			return fmt.Errorf("build image for service %s: %w", name, err)
@@ -282,28 +279,7 @@ func dockerBuildSpecForService(projectPath, projectName, previewID, service stri
 		return dockerBuildSpec{}, fmt.Errorf("resolve build context for service %s: %w", service, err)
 	}
 	dockerfile := strings.TrimSpace(build.Dockerfile)
-	inlineDockerfile := strings.TrimSpace(build.DockerfileInline)
-	if dockerfile != "" && inlineDockerfile != "" {
-		return dockerBuildSpec{}, fmt.Errorf("service %s build cannot declare both dockerfile and dockerfileInline", service)
-	}
-	tempDockerfile := ""
-	if inlineDockerfile != "" {
-		file, err := os.CreateTemp("", "vivero-dockerfile-*")
-		if err != nil {
-			return dockerBuildSpec{}, fmt.Errorf("create inline dockerfile for service %s: %w", service, err)
-		}
-		if _, err := file.WriteString(build.DockerfileInline); err != nil {
-			_ = file.Close()
-			_ = os.Remove(file.Name())
-			return dockerBuildSpec{}, fmt.Errorf("write inline dockerfile for service %s: %w", service, err)
-		}
-		if err := file.Close(); err != nil {
-			_ = os.Remove(file.Name())
-			return dockerBuildSpec{}, fmt.Errorf("close inline dockerfile for service %s: %w", service, err)
-		}
-		dockerfile = file.Name()
-		tempDockerfile = file.Name()
-	} else if dockerfile != "" {
+	if dockerfile != "" {
 		resolvedDockerfile, err := resolveProjectPath(resolvedContext, dockerfile)
 		if err != nil {
 			return dockerBuildSpec{}, fmt.Errorf("resolve build dockerfile for service %s: %w", service, err)
@@ -314,7 +290,7 @@ func dockerBuildSpecForService(projectPath, projectName, previewID, service stri
 	if tag == "" {
 		tag = defaultServiceImageTag(projectName, previewID, service)
 	}
-	return dockerBuildSpec{Tag: tag, Context: resolvedContext, Dockerfile: dockerfile, Args: build.Args, TempDockerfile: tempDockerfile}, nil
+	return dockerBuildSpec{Tag: tag, Context: resolvedContext, Dockerfile: dockerfile, Args: build.Args}, nil
 }
 
 func resolveSourcePath(projectPath, value string) (string, error) {

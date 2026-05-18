@@ -33,11 +33,10 @@ type dockerServiceSpec struct {
 }
 
 type dockerBuildSpec struct {
-	Tag            string
-	Context        string
-	Dockerfile     string
-	Args           map[string]string
-	TempDockerfile string
+	Tag        string
+	Context    string
+	Dockerfile string
+	Args       map[string]string
 }
 
 func dockerRunArgs(spec dockerServiceSpec) ([]string, error) {
