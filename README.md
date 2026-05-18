@@ -7,6 +7,7 @@ For coding agents, Vivero is a nursery for app changes. It starts a preview from
 ## What Vivero handles
 
 - Reads project setup from `vivero.yml`.
+- Selects optional profiles, so one config can run the default app or a coupled multi-app preview.
 - Starts app and support services through a Docker-compatible engine, such as Docker Desktop or OrbStack.
 - Keeps expensive dependency volumes warm without sharing branch writes back into the main baseline.
 - Waits for the app to be healthy before returning a preview URL.
@@ -36,7 +37,13 @@ vivero down webapp-local --archive-patch --json --no-input --quiet
 
 Use `--discard` only when preview changes do not need saving.
 
-For multi-service previews, put each app under `services`. Containers can reach each other by service name, and Vivero reports a URL for each app service. See `examples/gumroad-helper/vivero.yml`.
+For multi-service previews, put each app under `services`. Containers can reach each other by service name, and Vivero reports a URL for each app service. Use `profiles:` when a project should normally start a small default service set but sometimes needs a coupled preview:
+
+```sh
+vivero up helper-host-products --id helper-gumroad --profile gumroad --wait --json --no-input --quiet
+```
+
+See `examples/helper-host-products/vivero.yml`: its default profile runs Helper alone, while explicit `gumroad` and `flexile` profiles add one host product and use `serviceEnv` to point Helper at that service.
 
 ## `vivero.yml`
 
@@ -104,7 +111,20 @@ agent:
             steps:
               - visit: home
               - screenshot: homepage
+
+profiles:
+  default:
+    services: [web]
+    smokeTests: [homepage]
+  full:
+    services: [web]
+    smokeTests: [homepage]
+    serviceEnv:
+      web:
+        FEATURE_MODE: full
 ```
+
+Profiles are optional. If `profiles.default` exists, `vivero up` uses it when `--profile` is omitted. A profile may select app `services`, `backingServices`, and `smokeTests`, and may add or override per-service env with `serviceEnv`. Setup steps, sources, QA pages, and QA flows are filtered to the selected services.
 
 Warm dependency volumes:
 - `preview` (default): removed by `vivero down --discard`.

@@ -93,6 +93,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 		var body struct {
 			Project  string            `json:"project"`
 			ID       string            `json:"id"`
+			Profile  string            `json:"profile"`
 			Sources  map[string]string `json:"sources"`
 			Labels   map[string]string `json:"labels"`
 			Metadata map[string]string `json:"metadata"`
@@ -107,7 +108,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 		if err != nil {
 			return nil, 400, err
 		}
-		p, err := a.Up(UpRequest{Project: body.Project, ID: body.ID, Sources: body.Sources, Labels: body.Labels, Metadata: body.Metadata, Wait: body.Wait, Timeout: d, Public: body.Public})
+		p, err := a.Up(UpRequest{Project: body.Project, ID: body.ID, Profile: body.Profile, Sources: body.Sources, Labels: body.Labels, Metadata: body.Metadata, Wait: body.Wait, Timeout: d, Public: body.Public})
 		return map[string]any{"preview": p}, 200, err
 	}))
 	mux.HandleFunc("GET /previews", jsonHandler(func(r *http.Request) (any, int, error) {

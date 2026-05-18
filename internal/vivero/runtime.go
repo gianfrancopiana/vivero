@@ -27,6 +27,11 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if err != nil {
 		return PreviewRecord{}, err
 	}
+	runtimeConfig, activeProfile, err := projectConfigForRequestedProfile(project.Config, req.Profile)
+	if err != nil {
+		return PreviewRecord{}, err
+	}
+	req.Profile = activeProfile
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
 	}
@@ -55,16 +60,20 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 			return PreviewRecord{}, fmt.Errorf("resource cap reached: %d previews running", running)
 		}
 	}
-	p := PreviewRecord{ID: req.ID, Project: req.Project, Status: "pending", Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
+	p := PreviewRecord{ID: req.ID, Project: req.Project, Profile: activeProfile, Status: "pending", Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
 	if err := a.upsertPreview(p); err != nil {
 		return p, err
 	}
-	a.recordEvent(req.ID, "info", "preview.created", "preview requested", "", nil)
+	eventMetadata := map[string]string{}
+	if activeProfile != "" {
+		eventMetadata["profile"] = activeProfile
+	}
+	a.recordEvent(req.ID, "info", "preview.created", "preview requested", "", eventMetadata)
 	if err := a.setPreviewStatus(req.ID, "preparing_source"); err != nil {
 		return p, err
 	}
-	for name, src := range project.Config.Sources {
-		resolved, err := a.resolveSource(project.Config.Project.Name, project.Path, req.ID, name, src, req.Sources)
+	for name, src := range runtimeConfig.Sources {
+		resolved, err := a.resolveSource(runtimeConfig.Project.Name, project.Path, req.ID, name, src, req.Sources)
 		if err != nil {
 			a.recordEvent(req.ID, "error", "source.failed", err.Error(), name, nil)
 			_ = a.setPreviewStatus(req.ID, "unhealthy")
@@ -76,7 +85,6 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		}
 		a.recordEvent(req.ID, "info", "source.ready", "source ready", name, map[string]string{"path": resolved.Path, "mode": resolved.Mode, "ref": resolved.Ref})
 	}
-	runtimeConfig := project.Config
 	if err := a.validateNamedPublicRouteConflicts(req, runtimeConfig); err != nil {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
@@ -1413,8 +1421,13 @@ func (a *App) Smoke(previewID, name string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg, err := projectConfigForPreview(proj, p)
+	if err != nil {
+		return nil, err
+	}
+	defaultService := defaultPreviewService(cfg.Agent, p)
 	var tests []SmokeTest
-	for _, t := range proj.Config.Agent.SmokeTests {
+	for _, t := range cfg.Agent.SmokeTests {
 		if name == "" || t.Name == name {
 			tests = append(tests, t)
 		}
@@ -1426,15 +1439,19 @@ func (a *App) Smoke(previewID, name string) (map[string]any, error) {
 	okAll := true
 	for _, t := range tests {
 		res := map[string]any{"name": t.Name, "ok": false}
+		service := strings.TrimSpace(t.Service)
+		if service == "" {
+			service = defaultService
+		}
 		if t.Command != "" {
 			parts := []string{"/bin/sh", "-lc", t.Command}
-			ex, _ := a.Exec(previewID, t.Service, parts)
+			ex, _ := a.Exec(previewID, service, parts)
 			res["exec"] = ex
 			if ex != nil && ex["exitCode"].(int) == 0 {
 				res["ok"] = true
 			}
 		} else {
-			svc, exists := p.Services[t.Service]
+			svc, exists := p.Services[service]
 			if !exists {
 				res["error"] = "service not found"
 			} else {

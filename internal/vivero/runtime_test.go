@@ -227,6 +227,173 @@ agent:
 	}
 }
 
+func TestContainerPreviewProfilesSelectServicesBackingSourcesAndSmoke(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("VIVERO_HOME", home)
+	installFakeDocker(t)
+	root := t.TempDir()
+	helper := filepath.Join(root, "helper")
+	if err := os.MkdirAll(helper, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("hello app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helper, "index.html"), []byte("hello helper"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appPort := freePort(t)
+	helperPort := freePort(t)
+	cfg := []byte(`project:
+  name: profiled-site
+sources:
+  app:
+    path: .
+  helper:
+    path: helper
+backingServices:
+  redis:
+    image: busybox:latest
+    command: sleep 60
+  mailhog:
+    image: busybox:latest
+    command: sleep 60
+services:
+  web:
+    source: app
+    runtime: docker
+    image: python:3.12-alpine
+    command: python3 -m http.server ` + strconv.Itoa(appPort) + ` --bind 0.0.0.0
+    port: ` + strconv.Itoa(appPort) + `
+    health:
+      path: /index.html
+      expectStatus: 200
+      timeout: 20s
+  helper-web:
+    source: helper
+    runtime: docker
+    image: python:3.12-alpine
+    command: python3 -m http.server ` + strconv.Itoa(helperPort) + ` --bind 0.0.0.0
+    port: ` + strconv.Itoa(helperPort) + `
+    health:
+      path: /index.html
+      expectStatus: 200
+      timeout: 20s
+setup:
+  afterSeeds:
+    - service: web
+      command: printf web > web-setup.txt
+    - service: helper-web
+      command: printf helper > helper-setup.txt
+agent:
+  defaultPreviewService: web
+  commonPages:
+    home:
+      service: web
+      path: /index.html
+    helper:
+      service: helper-web
+      path: /index.html
+  smokeTests:
+    - name: homepage
+      service: web
+      path: /index.html
+      expectStatus: 200
+    - name: helper-homepage
+      service: helper-web
+      path: /index.html
+      expectStatus: 200
+profiles:
+  default:
+    services: [web]
+    backingServices: [redis]
+    smokeTests: [homepage]
+  helper:
+    services: [web, helper-web]
+    backingServices: [redis, mailhog]
+    smokeTests: [homepage, helper-homepage]
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := a.Up(UpRequest{Project: "profiled-site", ID: "profile-default", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("profile-default", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Profile != "default" {
+		t.Fatalf("default profile = %q", preview.Profile)
+	}
+	if _, ok := preview.Services["web"]; !ok {
+		t.Fatal("default profile should start web")
+	}
+	if _, ok := preview.Services["redis"]; !ok {
+		t.Fatal("default profile should start redis")
+	}
+	for _, absent := range []string{"helper-web", "mailhog"} {
+		if _, ok := preview.Services[absent]; ok {
+			t.Fatalf("default profile should not start %s", absent)
+		}
+	}
+	if _, ok := preview.Sources["helper"]; ok {
+		t.Fatal("default profile should not resolve inactive helper source")
+	}
+	if _, err := os.Stat(filepath.Join(root, "helper", "helper-setup.txt")); !os.IsNotExist(err) {
+		t.Fatalf("default profile should not run helper setup, stat err=%v", err)
+	}
+	smoke, err := a.Smoke("profile-default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := smoke["results"].([]map[string]any)
+	if len(results) != 1 || results[0]["name"] != "homepage" || results[0]["ok"] != true {
+		t.Fatalf("default profile smoke should only run homepage: %#v", results)
+	}
+	qaPlan, err := a.QAPlan("profile-default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tests := qaPlan["smokeTests"].([]SmokeTest); len(tests) != 1 || tests[0].Name != "homepage" {
+		t.Fatalf("default profile QA should only include homepage smoke: %#v", tests)
+	}
+	if _, err := a.Down("profile-default", "discard"); err != nil {
+		t.Fatal(err)
+	}
+
+	helperPreview, err := a.Up(UpRequest{Project: "profiled-site", ID: "profile-helper", Profile: "helper", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("profile-helper", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if helperPreview.Profile != "helper" {
+		t.Fatalf("helper profile = %q", helperPreview.Profile)
+	}
+	for _, present := range []string{"web", "helper-web", "redis", "mailhog"} {
+		if _, ok := helperPreview.Services[present]; !ok {
+			t.Fatalf("helper profile should start %s", present)
+		}
+	}
+	if _, ok := helperPreview.Sources["helper"]; !ok {
+		t.Fatal("helper profile should resolve helper source")
+	}
+	helperSmoke, err := a.Smoke("profile-helper", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperResults := helperSmoke["results"].([]map[string]any)
+	if len(helperResults) != 2 {
+		t.Fatalf("helper profile smoke should run both tests: %#v", helperResults)
+	}
+}
+
 func TestContainerPreviewStartsBackingServicesBeforeSetupAndApps(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)

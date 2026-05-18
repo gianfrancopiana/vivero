@@ -42,8 +42,8 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 
 func TestBundledExamplesLoad(t *testing.T) {
 	examples := map[string]string{
-		"../../examples/gumroad":        "gumroad-main",
-		"../../examples/gumroad-helper": "gumroad-helper",
+		"../../examples/gumroad":              "gumroad-main",
+		"../../examples/helper-host-products": "helper-host-products",
 	}
 	for path, wantName := range examples {
 		t.Run(wantName, func(t *testing.T) {
@@ -58,6 +58,44 @@ func TestBundledExamplesLoad(t *testing.T) {
 				t.Fatalf("%s should declare app services", path)
 			}
 		})
+	}
+}
+
+func TestHelperHostProductsExampleUsesExplicitHostProfiles(t *testing.T) {
+	_, cfg, err := loadProjectConfig("../../examples/helper-host-products")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"default", "gumroad", "flexile"} {
+		if _, ok := cfg.Profiles[name]; !ok {
+			t.Fatalf("helper-host-products example should declare %s profile", name)
+		}
+	}
+	defaultCfg, active, err := projectConfigForRequestedProfile(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != "default" {
+		t.Fatalf("omitted profile should select default, got %q", active)
+	}
+	if _, ok := defaultCfg.Services["helper-web"]; !ok || len(defaultCfg.Services) != 1 {
+		t.Fatalf("default profile should only run helper-web: %#v", defaultCfg.Services)
+	}
+
+	gumroadCfg, _, err := projectConfigForRequestedProfile(cfg, "gumroad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gumroadCfg.Services["helper-web"].Env["HOST_PRODUCT"] != "gumroad" || gumroadCfg.Services["helper-web"].Env["GUMROAD_URL"] != "http://gumroad-web:3310" {
+		t.Fatalf("gumroad profile should point Helper at gumroad-web: %#v", gumroadCfg.Services["helper-web"].Env)
+	}
+
+	flexileCfg, _, err := projectConfigForRequestedProfile(cfg, "flexile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flexileCfg.Services["helper-web"].Env["HOST_PRODUCT"] != "flexile" || flexileCfg.Services["helper-web"].Env["FLEXILE_URL"] != "http://flexile-web:3000" {
+		t.Fatalf("flexile profile should point Helper at flexile-web: %#v", flexileCfg.Services["helper-web"].Env)
 	}
 }
 

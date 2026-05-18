@@ -1,0 +1,177 @@
+# Helper with optional host-product previews.
+#
+# Default profile keeps Helper close to a normal local clone: Helper and its own
+# backing service only. Gumroad and Flexile are explicit integration profiles,
+# because Helper needs a host product to exercise product-specific workflows, but
+# host products do not need Helper for their default previews.
+project:
+  name: helper-host-products
+
+sources:
+  helper:
+    mode: external
+    path: ~/src/helper
+    defaultRef: main
+  gumroad:
+    mode: external
+    path: ~/src/gumroad
+    defaultRef: main
+  flexile:
+    mode: external
+    path: ~/src/flexile
+    defaultRef: main
+
+backingServices:
+  helper-db:
+    image: postgres:16-alpine
+    env:
+      POSTGRES_PASSWORD: password
+    health:
+      command: pg_isready -U postgres
+      timeout: 1m
+      interval: 2s
+  gumroad-db:
+    image: mysql:8.0
+    env:
+      MYSQL_ROOT_PASSWORD: password
+    health:
+      command: mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent
+      timeout: 2m
+      interval: 2s
+  gumroad-redis:
+    image: redis:7-alpine
+  flexile-db:
+    image: postgres:16-alpine
+    env:
+      POSTGRES_PASSWORD: password
+    health:
+      command: pg_isready -U postgres
+      timeout: 1m
+      interval: 2s
+
+services:
+  helper-web:
+    source: helper
+    runtime: docker
+    image: node:22-alpine
+    workingDir: .
+    env:
+      NODE_ENV: development
+      HOST_PRODUCT: standalone
+      DATABASE_URL: postgres://postgres:password@helper-db:5432/postgres
+    command: pnpm dev --host 0.0.0.0 --port 3010
+    ports:
+      http:
+        container: 3010
+    primaryPort: http
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 2m
+      interval: 2s
+
+  gumroad-web:
+    source: gumroad
+    runtime: docker
+    image: ruby:3.4-alpine
+    workingDir: .
+    env:
+      DATABASE_URL: mysql2://root:password@gumroad-db:3306/gumroad_development
+      REDIS_URL: redis://gumroad-redis:6379/0
+    command: bin/rails server -b 0.0.0.0 -p 3310
+    ports:
+      http:
+        container: 3310
+    primaryPort: http
+    originHost: localhost
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 2m
+      interval: 2s
+
+  flexile-web:
+    source: flexile
+    runtime: docker
+    image: node:22-alpine
+    workingDir: .
+    env:
+      DATABASE_URL: postgres://postgres:password@flexile-db:5432/postgres
+    command: pnpm dev --host 0.0.0.0 --port 3000
+    ports:
+      http:
+        container: 3000
+    primaryPort: http
+    originHost: localhost
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 2m
+      interval: 2s
+
+agent:
+  defaultPreviewService: helper-web
+  commonPages:
+    helper-home:
+      service: helper-web
+      path: /
+    gumroad-login:
+      service: gumroad-web
+      path: /login
+    flexile-home:
+      service: flexile-web
+      path: /
+  smokeTests:
+    - name: helper-home
+      service: helper-web
+      path: /
+      expectStatus: 200
+    - name: gumroad-login
+      service: gumroad-web
+      path: /login
+      expectStatus: 200
+    - name: flexile-home
+      service: flexile-web
+      path: /
+      expectStatus: 200
+
+profiles:
+  default:
+    services:
+      - helper-web
+    backingServices:
+      - helper-db
+    smokeTests:
+      - helper-home
+
+  gumroad:
+    services:
+      - helper-web
+      - gumroad-web
+    backingServices:
+      - helper-db
+      - gumroad-db
+      - gumroad-redis
+    smokeTests:
+      - helper-home
+      - gumroad-login
+    serviceEnv:
+      helper-web:
+        HOST_PRODUCT: gumroad
+        GUMROAD_URL: http://gumroad-web:3310
+        GUMROAD_APP_URL: http://gumroad-web:3310
+
+  flexile:
+    services:
+      - helper-web
+      - flexile-web
+    backingServices:
+      - helper-db
+      - flexile-db
+    smokeTests:
+      - helper-home
+      - flexile-home
+    serviceEnv:
+      helper-web:
+        HOST_PRODUCT: flexile
+        FLEXILE_URL: http://flexile-web:3000
