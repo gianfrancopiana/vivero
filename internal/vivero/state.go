@@ -31,6 +31,12 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Vivero commands are often launched concurrently by agents to bring up
+	// multiple previews. Keep each process to one SQLite connection and give
+	// cross-process writers time to wait instead of failing immediately with
+	// SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	a := &App{Home: home, db: db}
 	if err := a.initDB(); err != nil {
 		db.Close()
@@ -48,9 +54,10 @@ func (a *App) Close() error {
 
 func (a *App) initDB() error {
 	stmts := []string{
+		`PRAGMA busy_timeout = 30000;`,
 		`PRAGMA journal_mode=WAL;`,
 		`CREATE TABLE IF NOT EXISTS projects (name TEXT PRIMARY KEY, path TEXT NOT NULL, config_json TEXT NOT NULL, synced_at TEXT NOT NULL);`,
-		`CREATE TABLE IF NOT EXISTS previews (id TEXT PRIMARY KEY, project TEXT NOT NULL, status TEXT NOT NULL, labels_json TEXT, metadata_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS previews (id TEXT PRIMARY KEY, project TEXT NOT NULL, profile TEXT, status TEXT NOT NULL, labels_json TEXT, metadata_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS preview_sources (preview_id TEXT NOT NULL, name TEXT NOT NULL, mode TEXT NOT NULL, ref TEXT, path TEXT NOT NULL, owned INTEGER NOT NULL, PRIMARY KEY(preview_id, name));`,
 		`CREATE TABLE IF NOT EXISTS preview_services (preview_id TEXT NOT NULL, name TEXT NOT NULL, source TEXT, runtime TEXT, container_id TEXT, status TEXT NOT NULL, pid INTEGER, proxy_pid INTEGER, tunnel_pid INTEGER, port INTEGER, url TEXT, origin_url TEXT, proxy_url TEXT, log_path TEXT, tunnel_log_path TEXT, command TEXT, started_at TEXT, last_health TEXT, ports_json TEXT, PRIMARY KEY(preview_id, name));`,
 		`CREATE TABLE IF NOT EXISTS preview_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, preview_id TEXT NOT NULL, timestamp TEXT NOT NULL, level TEXT NOT NULL, type TEXT NOT NULL, message TEXT NOT NULL, service_name TEXT, metadata_json TEXT);`,
@@ -60,14 +67,19 @@ func (a *App) initDB() error {
 			return err
 		}
 	}
-	for _, c := range []struct{ name, def string }{
-		{"proxy_pid", "INTEGER"},
-		{"proxy_url", "TEXT"},
-		{"runtime", "TEXT"},
-		{"container_id", "TEXT"},
-		{"ports_json", "TEXT"},
+	for _, c := range []struct {
+		table string
+		name  string
+		def   string
+	}{
+		{"previews", "profile", "TEXT"},
+		{"preview_services", "proxy_pid", "INTEGER"},
+		{"preview_services", "proxy_url", "TEXT"},
+		{"preview_services", "runtime", "TEXT"},
+		{"preview_services", "container_id", "TEXT"},
+		{"preview_services", "ports_json", "TEXT"},
 	} {
-		if _, err := a.db.Exec(fmt.Sprintf(`ALTER TABLE preview_services ADD COLUMN %s %s`, c.name, c.def)); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		if _, err := a.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, c.table, c.name, c.def)); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 			return err
 		}
 	}
@@ -132,9 +144,12 @@ func (a *App) upsertPreview(p PreviewRecord) error {
 		p.CreatedAt = nowUTC()
 	}
 	p.UpdatedAt = nowUTC()
+	if p.Profile == "" && p.Metadata != nil {
+		p.Profile = strings.TrimSpace(p.Metadata["profile"])
+	}
 	labels := jsonString(p.Labels)
 	meta := jsonString(p.Metadata)
-	_, err := a.db.Exec(`INSERT INTO previews(id,project,status,labels_json,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project=excluded.project,status=excluded.status,labels_json=excluded.labels_json,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`, p.ID, p.Project, p.Status, labels, meta, p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
+	_, err := a.db.Exec(`INSERT INTO previews(id,project,profile,status,labels_json,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project=excluded.project,profile=excluded.profile,status=excluded.status,labels_json=excluded.labels_json,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`, p.ID, p.Project, p.Profile, p.Status, labels, meta, p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
 	return err
 }
 
@@ -161,7 +176,7 @@ func (a *App) saveService(previewID string, s PreviewService) error {
 func (a *App) getPreview(id string) (PreviewRecord, error) {
 	var p PreviewRecord
 	var labels, meta, created, updated string
-	err := a.db.QueryRow(`SELECT id,project,status,labels_json,metadata_json,created_at,updated_at FROM previews WHERE id=?`, id).Scan(&p.ID, &p.Project, &p.Status, &labels, &meta, &created, &updated)
+	err := a.db.QueryRow(`SELECT id,project,COALESCE(profile,''),status,labels_json,metadata_json,created_at,updated_at FROM previews WHERE id=?`, id).Scan(&p.ID, &p.Project, &p.Profile, &p.Status, &labels, &meta, &created, &updated)
 	if err == sql.ErrNoRows {
 		return p, fmt.Errorf("preview not found: %s", id)
 	}
@@ -170,6 +185,9 @@ func (a *App) getPreview(id string) (PreviewRecord, error) {
 	}
 	p.Labels, _ = fromJSONString[map[string]string](labels)
 	p.Metadata, _ = fromJSONString[map[string]string](meta)
+	if p.Profile == "" && p.Metadata != nil {
+		p.Profile = strings.TrimSpace(p.Metadata["profile"])
+	}
 	p.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	p.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 	p.Sources = map[string]PreviewSource{}

@@ -16,6 +16,7 @@ type ProjectConfig struct {
 	Setup           SetupConfig               `yaml:"setup" json:"setup,omitempty"`
 	Routes          map[string]string         `yaml:"routes" json:"routes,omitempty"`
 	Agent           AgentConfig               `yaml:"agent" json:"agent,omitempty"`
+	Profiles        map[string]ProfileConfig  `yaml:"profiles" json:"profiles,omitempty"`
 	Resources       ResourceConfig            `yaml:"resources" json:"resources,omitempty"`
 }
 
@@ -267,6 +268,13 @@ type ResourceConfig struct {
 	MaxConcurrentPreviews int `yaml:"maxConcurrentPreviews" json:"maxConcurrentPreviews,omitempty"`
 }
 
+type ProfileConfig struct {
+	Services        []string                     `yaml:"services" json:"services,omitempty"`
+	BackingServices []string                     `yaml:"backingServices" json:"backingServices,omitempty"`
+	SmokeTests      []string                     `yaml:"smokeTests" json:"smokeTests,omitempty"`
+	ServiceEnv      map[string]map[string]string `yaml:"serviceEnv" json:"serviceEnv,omitempty"`
+}
+
 type ResourceLimits struct {
 	CPUs   string `yaml:"cpus" json:"cpus,omitempty"`
 	Memory string `yaml:"memory" json:"memory,omitempty"`
@@ -282,6 +290,7 @@ type ProjectRecord struct {
 type PreviewRecord struct {
 	ID        string                    `json:"id"`
 	Project   string                    `json:"project"`
+	Profile   string                    `json:"profile,omitempty"`
 	Status    string                    `json:"status"`
 	Labels    map[string]string         `json:"labels,omitempty"`
 	Metadata  map[string]string         `json:"metadata,omitempty"`
@@ -344,6 +353,7 @@ type Event struct {
 type UpRequest struct {
 	Project  string            `json:"project"`
 	ID       string            `json:"id"`
+	Profile  string            `json:"profile,omitempty"`
 	Sources  map[string]string `json:"sources,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`

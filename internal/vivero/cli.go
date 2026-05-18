@@ -123,7 +123,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		p, err := a.Up(UpRequest{Project: pos[0], ID: id, Sources: sources, Labels: labels, Metadata: metadata, Wait: hasArg(rest, "--wait"), Timeout: timeout, Public: hasArg(rest, "--public")})
+		profile, _ := flagValue(rest, "--profile")
+		p, err := a.Up(UpRequest{Project: pos[0], ID: id, Profile: profile, Sources: sources, Labels: labels, Metadata: metadata, Wait: hasArg(rest, "--wait"), Timeout: timeout, Public: hasArg(rest, "--public")})
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
@@ -609,7 +610,7 @@ func usage() string {
 Common commands:
   vivero capabilities --json
   vivero projects sync <path> --json
-  vivero up <project> --id <preview-id> --source app.path=/repo --wait --json --no-input
+  vivero up <project> --id <preview-id> --profile <name> --source app.path=/repo --wait --json --no-input
   vivero inspect <preview-id> --json
   vivero smoke <preview-id> --json
   vivero qa plan <preview-id> --json --no-input
@@ -642,7 +643,11 @@ func previewsHuman(ps []PreviewRecord) string {
 }
 func previewHuman(p PreviewRecord) string {
 	var b strings.Builder
-	b.WriteString(p.ID + " " + p.Status + "\n")
+	if p.Profile != "" {
+		b.WriteString(p.ID + " " + p.Status + " profile=" + p.Profile + "\n")
+	} else {
+		b.WriteString(p.ID + " " + p.Status + "\n")
+	}
 	for _, k := range sortedMapKeys(p.Services) {
 		s := p.Services[k]
 		b.WriteString(fmt.Sprintf("%s\t%s\t%s\n", s.Name, s.Status, s.URL))

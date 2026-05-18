@@ -27,6 +27,11 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if err != nil {
 		return PreviewRecord{}, err
 	}
+	runtimeConfig, activeProfile, err := projectConfigForRequestedProfile(project.Config, req.Profile)
+	if err != nil {
+		return PreviewRecord{}, err
+	}
+	req.Profile = activeProfile
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
 	}
@@ -55,16 +60,20 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 			return PreviewRecord{}, fmt.Errorf("resource cap reached: %d previews running", running)
 		}
 	}
-	p := PreviewRecord{ID: req.ID, Project: req.Project, Status: "pending", Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
+	p := PreviewRecord{ID: req.ID, Project: req.Project, Profile: activeProfile, Status: "pending", Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
 	if err := a.upsertPreview(p); err != nil {
 		return p, err
 	}
-	a.recordEvent(req.ID, "info", "preview.created", "preview requested", "", nil)
+	eventMetadata := map[string]string{}
+	if activeProfile != "" {
+		eventMetadata["profile"] = activeProfile
+	}
+	a.recordEvent(req.ID, "info", "preview.created", "preview requested", "", eventMetadata)
 	if err := a.setPreviewStatus(req.ID, "preparing_source"); err != nil {
 		return p, err
 	}
-	for name, src := range project.Config.Sources {
-		resolved, err := a.resolveSource(project.Config.Project.Name, project.Path, req.ID, name, src, req.Sources)
+	for name, src := range runtimeConfig.Sources {
+		resolved, err := a.resolveSource(runtimeConfig.Project.Name, project.Path, req.ID, name, src, req.Sources)
 		if err != nil {
 			a.recordEvent(req.ID, "error", "source.failed", err.Error(), name, nil)
 			_ = a.setPreviewStatus(req.ID, "unhealthy")
@@ -76,7 +85,6 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		}
 		a.recordEvent(req.ID, "info", "source.ready", "source ready", name, map[string]string{"path": resolved.Path, "mode": resolved.Mode, "ref": resolved.Ref})
 	}
-	runtimeConfig := project.Config
 	if err := a.validateNamedPublicRouteConflicts(req, runtimeConfig); err != nil {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
@@ -614,6 +622,37 @@ func (a *App) envForService(projectName string, svc ServiceConfig, includeSecret
 	return env
 }
 
+type headerRewriteProxyStarter func(previewID, service, originURL, hostHeader string, publicRewrite PublicRewriteConfig, h HealthConfig) (string, int, error)
+
+func serviceIsPublic(svc ServiceConfig, forcePublic bool) bool {
+	return forcePublic || svc.Public
+}
+
+func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewService, svc ServiceConfig, forcePublic bool, start headerRewriteProxyStarter) (PreviewService, string, error) {
+	tunnelOriginURL := ps.OriginURL
+	if tunnelOriginURL == "" {
+		tunnelOriginURL = ps.URL
+	}
+	hostHeader := strings.TrimSpace(svc.TunnelHostHeader)
+	if hostHeader == "" || tunnelOriginURL == "" {
+		return ps, tunnelOriginURL, nil
+	}
+	proxyURL, proxyPID, err := start(previewID, name, tunnelOriginURL, hostHeader, svc.PublicRewrite, svc.Health)
+	if err != nil {
+		return ps, tunnelOriginURL, err
+	}
+	if proxyURL == "" {
+		return ps, tunnelOriginURL, fmt.Errorf("header rewrite proxy returned an empty URL")
+	}
+	ps.ProxyPID = proxyPID
+	ps.ProxyURL = proxyURL
+	tunnelOriginURL = proxyURL
+	if !serviceIsPublic(svc, forcePublic) {
+		ps.URL = proxyURL
+	}
+	return ps, tunnelOriginURL, nil
+}
+
 func (a *App) startService(req UpRequest, name string, svc ServiceConfig, sources map[string]PreviewSource, cfg ProjectConfig, forcePublic bool, includeSecrets bool) (PreviewService, error) {
 	previewID := req.ID
 	runtime := serviceRuntime(svc)
@@ -715,70 +754,68 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		ps.LastHealth = "ok"
 		a.recordEvent(previewID, "info", "service.healthy", "health check passed", name, map[string]string{"url": originURL})
 	}
-	if (forcePublic || svc.Public) && originURL != "" {
-		tunnelOriginURL := originURL
-		if svc.TunnelHostHeader != "" {
-			proxyURL, proxyPID, err := a.startHeaderRewriteProxy(previewID, name, originURL, svc.TunnelHostHeader, svc.PublicRewrite, svc.Health)
-			if err != nil {
-				if cleanupErr := cleanupStarted(); cleanupErr != nil {
-					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-				}
-				return ps, err
+	if originURL != "" {
+		var tunnelOriginURL string
+		var proxyErr error
+		ps, tunnelOriginURL, proxyErr = exposeServiceThroughHeaderRewriteProxy(previewID, name, ps, svc, forcePublic, a.startHeaderRewriteProxy)
+		if proxyErr != nil {
+			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+				proxyErr = fmt.Errorf("%w; cleanup failed: %v", proxyErr, cleanupErr)
 			}
-			ps.ProxyPID = proxyPID
-			ps.ProxyURL = proxyURL
-			tunnelOriginURL = proxyURL
+			return ps, proxyErr
 		}
-		if isNamedPublicTunnel(cfg.Public) {
-			url, err := publicURLForService(cfg.Public, req, name)
+		if serviceIsPublic(svc, forcePublic) {
+			if isNamedPublicTunnel(cfg.Public) {
+				url, err := publicURLForService(cfg.Public, req, name)
+				if err != nil {
+					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+					}
+					return ps, err
+				}
+				ps.URL = url
+				if err := a.saveService(previewID, ps); err != nil {
+					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+					}
+					return ps, err
+				}
+				if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
+					ps.Status = "unhealthy"
+					ps.LastHealth = err.Error()
+					err = fmt.Errorf("public named tunnel health failed for %s: %w", name, err)
+					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+					}
+					_ = a.saveService(previewID, ps)
+					return ps, err
+				}
+				a.recordEvent(previewID, "info", "tunnel.ready", "stable public URL health check passed", name, map[string]string{"url": url, "origin": tunnelOriginURL})
+				return ps, nil
+			}
+			url, pid, tlog, err := a.startQuickTunnel(previewID, name, tunnelOriginURL, "")
 			if err != nil {
 				if cleanupErr := cleanupStarted(); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 				}
 				return ps, err
 			}
+			ps.TunnelPID = pid
+			ps.TunnelLogPath = tlog
 			ps.URL = url
-			if err := a.saveService(previewID, ps); err != nil {
-				if cleanupErr := cleanupStarted(); cleanupErr != nil {
-					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-				}
-				return ps, err
-			}
+			// Verify the public URL before returning it. Vivero's core guarantee is URL = works.
 			if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
 				ps.Status = "unhealthy"
 				ps.LastHealth = err.Error()
-				err = fmt.Errorf("public named tunnel health failed for %s: %w", name, err)
+				err = fmt.Errorf("public tunnel health failed for %s: %w", name, err)
 				if cleanupErr := cleanupStarted(); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 				}
 				_ = a.saveService(previewID, ps)
 				return ps, err
 			}
-			a.recordEvent(previewID, "info", "tunnel.ready", "stable public URL health check passed", name, map[string]string{"url": url, "origin": tunnelOriginURL})
-			return ps, nil
+			a.recordEvent(previewID, "info", "tunnel.ready", "public URL health check passed", name, map[string]string{"url": url})
 		}
-		url, pid, tlog, err := a.startQuickTunnel(previewID, name, tunnelOriginURL, "")
-		if err != nil {
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-			}
-			return ps, err
-		}
-		ps.TunnelPID = pid
-		ps.TunnelLogPath = tlog
-		ps.URL = url
-		// Verify the public URL before returning it. Vivero's core guarantee is URL = works.
-		if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
-			ps.Status = "unhealthy"
-			ps.LastHealth = err.Error()
-			err = fmt.Errorf("public tunnel health failed for %s: %w", name, err)
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-			}
-			_ = a.saveService(previewID, ps)
-			return ps, err
-		}
-		a.recordEvent(previewID, "info", "tunnel.ready", "public URL health check passed", name, map[string]string{"url": url})
 	}
 	if ps.Status == "starting" {
 		ps.Status = "running"
@@ -1413,8 +1450,13 @@ func (a *App) Smoke(previewID, name string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg, err := projectConfigForPreview(proj, p)
+	if err != nil {
+		return nil, err
+	}
+	defaultService := defaultPreviewService(cfg.Agent, p)
 	var tests []SmokeTest
-	for _, t := range proj.Config.Agent.SmokeTests {
+	for _, t := range cfg.Agent.SmokeTests {
 		if name == "" || t.Name == name {
 			tests = append(tests, t)
 		}
@@ -1426,15 +1468,19 @@ func (a *App) Smoke(previewID, name string) (map[string]any, error) {
 	okAll := true
 	for _, t := range tests {
 		res := map[string]any{"name": t.Name, "ok": false}
+		service := strings.TrimSpace(t.Service)
+		if service == "" {
+			service = defaultService
+		}
 		if t.Command != "" {
 			parts := []string{"/bin/sh", "-lc", t.Command}
-			ex, _ := a.Exec(previewID, t.Service, parts)
+			ex, _ := a.Exec(previewID, service, parts)
 			res["exec"] = ex
 			if ex != nil && ex["exitCode"].(int) == 0 {
 				res["ok"] = true
 			}
 		} else {
-			svc, exists := p.Services[t.Service]
+			svc, exists := p.Services[service]
 			if !exists {
 				res["error"] = "service not found"
 			} else {

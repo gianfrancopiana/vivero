@@ -22,7 +22,11 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	agent := project.Config.Agent
+	cfg, err := projectConfigForPreview(project, p)
+	if err != nil {
+		return nil, err
+	}
+	agent := cfg.Agent
 	scopes, selectedScope, err := selectedQAScopes(agent, scopeName)
 	if err != nil {
 		return nil, err
@@ -53,15 +57,19 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 		return nil, err
 	}
 
+	previewInfo := map[string]any{
+		"id":      p.ID,
+		"project": p.Project,
+		"status":  p.Status,
+	}
+	if p.Profile != "" {
+		previewInfo["profile"] = p.Profile
+	}
 	return map[string]any{
 		"version": 1,
-		"preview": map[string]any{
-			"id":      p.ID,
-			"project": p.Project,
-			"status":  p.Status,
-		},
-		"target": target,
-		"driver": driver,
+		"preview": previewInfo,
+		"target":  target,
+		"driver":  driver,
 		"artifacts": map[string]any{
 			"dir":        artifactDir,
 			"runPath":    filepath.Join(artifactDir, "run.json"),

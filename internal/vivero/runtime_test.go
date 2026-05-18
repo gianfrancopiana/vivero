@@ -227,6 +227,173 @@ agent:
 	}
 }
 
+func TestContainerPreviewProfilesSelectServicesBackingSourcesAndSmoke(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("VIVERO_HOME", home)
+	installFakeDocker(t)
+	root := t.TempDir()
+	helper := filepath.Join(root, "helper")
+	if err := os.MkdirAll(helper, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("hello app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helper, "index.html"), []byte("hello helper"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appPort := freePort(t)
+	helperPort := freePort(t)
+	cfg := []byte(`project:
+  name: profiled-site
+sources:
+  app:
+    path: .
+  helper:
+    path: helper
+backingServices:
+  redis:
+    image: busybox:latest
+    command: sleep 60
+  mailhog:
+    image: busybox:latest
+    command: sleep 60
+services:
+  web:
+    source: app
+    runtime: docker
+    image: python:3.12-alpine
+    command: python3 -m http.server ` + strconv.Itoa(appPort) + ` --bind 0.0.0.0
+    port: ` + strconv.Itoa(appPort) + `
+    health:
+      path: /index.html
+      expectStatus: 200
+      timeout: 20s
+  helper-web:
+    source: helper
+    runtime: docker
+    image: python:3.12-alpine
+    command: python3 -m http.server ` + strconv.Itoa(helperPort) + ` --bind 0.0.0.0
+    port: ` + strconv.Itoa(helperPort) + `
+    health:
+      path: /index.html
+      expectStatus: 200
+      timeout: 20s
+setup:
+  afterSeeds:
+    - service: web
+      command: printf web > web-setup.txt
+    - service: helper-web
+      command: printf helper > helper-setup.txt
+agent:
+  defaultPreviewService: web
+  commonPages:
+    home:
+      service: web
+      path: /index.html
+    helper:
+      service: helper-web
+      path: /index.html
+  smokeTests:
+    - name: homepage
+      service: web
+      path: /index.html
+      expectStatus: 200
+    - name: helper-homepage
+      service: helper-web
+      path: /index.html
+      expectStatus: 200
+profiles:
+  default:
+    services: [web]
+    backingServices: [redis]
+    smokeTests: [homepage]
+  helper:
+    services: [web, helper-web]
+    backingServices: [redis, mailhog]
+    smokeTests: [homepage, helper-homepage]
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := a.Up(UpRequest{Project: "profiled-site", ID: "profile-default", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("profile-default", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Profile != "default" {
+		t.Fatalf("default profile = %q", preview.Profile)
+	}
+	if _, ok := preview.Services["web"]; !ok {
+		t.Fatal("default profile should start web")
+	}
+	if _, ok := preview.Services["redis"]; !ok {
+		t.Fatal("default profile should start redis")
+	}
+	for _, absent := range []string{"helper-web", "mailhog"} {
+		if _, ok := preview.Services[absent]; ok {
+			t.Fatalf("default profile should not start %s", absent)
+		}
+	}
+	if _, ok := preview.Sources["helper"]; ok {
+		t.Fatal("default profile should not resolve inactive helper source")
+	}
+	if _, err := os.Stat(filepath.Join(root, "helper", "helper-setup.txt")); !os.IsNotExist(err) {
+		t.Fatalf("default profile should not run helper setup, stat err=%v", err)
+	}
+	smoke, err := a.Smoke("profile-default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := smoke["results"].([]map[string]any)
+	if len(results) != 1 || results[0]["name"] != "homepage" || results[0]["ok"] != true {
+		t.Fatalf("default profile smoke should only run homepage: %#v", results)
+	}
+	qaPlan, err := a.QAPlan("profile-default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tests := qaPlan["smokeTests"].([]SmokeTest); len(tests) != 1 || tests[0].Name != "homepage" {
+		t.Fatalf("default profile QA should only include homepage smoke: %#v", tests)
+	}
+	if _, err := a.Down("profile-default", "discard"); err != nil {
+		t.Fatal(err)
+	}
+
+	helperPreview, err := a.Up(UpRequest{Project: "profiled-site", ID: "profile-helper", Profile: "helper", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("profile-helper", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if helperPreview.Profile != "helper" {
+		t.Fatalf("helper profile = %q", helperPreview.Profile)
+	}
+	for _, present := range []string{"web", "helper-web", "redis", "mailhog"} {
+		if _, ok := helperPreview.Services[present]; !ok {
+			t.Fatalf("helper profile should start %s", present)
+		}
+	}
+	if _, ok := helperPreview.Sources["helper"]; !ok {
+		t.Fatal("helper profile should resolve helper source")
+	}
+	helperSmoke, err := a.Smoke("profile-helper", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperResults := helperSmoke["results"].([]map[string]any)
+	if len(helperResults) != 2 {
+		t.Fatalf("helper profile smoke should run both tests: %#v", helperResults)
+	}
+}
+
 func TestContainerPreviewStartsBackingServicesBeforeSetupAndApps(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)
@@ -634,6 +801,81 @@ func TestHeaderRewriteProxyRewritesDevOriginsToLocalProxyOrigin(t *testing.T) {
 	}
 	if got := rec.Header().Get("Link"); !strings.Contains(got, "http://127.0.0.1:64874/packs/css/design.css") {
 		t.Fatalf("Link header was not rewritten to local proxy origin: %s", got)
+	}
+}
+
+func TestExposeLocalServiceThroughHeaderRewriteProxyUsesProxyURL(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+	svc := ServiceConfig{
+		TunnelHostHeader: "localhost",
+		PublicRewrite:    PublicRewriteConfig{Origins: []string{"http://localhost:3310"}},
+		Health:           HealthConfig{Path: "/", Timeout: "1s"},
+	}
+	var called bool
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		called = true
+		if previewID != "gumroad-main" || service != "web" || originURL != ps.OriginURL || hostHeader != "localhost" {
+			t.Fatalf("unexpected proxy args: preview=%s service=%s origin=%s host=%s", previewID, service, originURL, hostHeader)
+		}
+		if len(rewrite.Origins) != 1 || rewrite.Origins[0] != "http://localhost:3310" {
+			t.Fatalf("rewrite config not passed through: %#v", rewrite)
+		}
+		return "http://127.0.0.1:56072", 1234, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("expected local preview to start the header rewrite proxy")
+	}
+	if got.URL != "http://127.0.0.1:56072" {
+		t.Fatalf("local service URL = %q; want proxy URL", got.URL)
+	}
+	if got.ProxyURL != got.URL || got.ProxyPID != 1234 {
+		t.Fatalf("proxy metadata not recorded: %#v", got)
+	}
+	if got.OriginURL != ps.OriginURL {
+		t.Fatalf("origin URL should be preserved, got %q", got.OriginURL)
+	}
+	if tunnelOriginURL != got.ProxyURL {
+		t.Fatalf("tunnel origin = %q; want proxy URL %q", tunnelOriginURL, got.ProxyURL)
+	}
+}
+
+func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+	svc := ServiceConfig{TunnelHostHeader: "localhost", Public: true}
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-pr", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		return "http://127.0.0.1:56073", 5678, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != ps.URL {
+		t.Fatalf("public service URL should remain available for tunnel replacement later, got %q", got.URL)
+	}
+	if got.ProxyURL != "http://127.0.0.1:56073" || got.ProxyPID != 5678 {
+		t.Fatalf("proxy metadata not recorded: %#v", got)
+	}
+	if tunnelOriginURL != got.ProxyURL {
+		t.Fatalf("public tunnel should use proxy origin, got %q", tunnelOriginURL)
+	}
+}
+
+func TestExposeServiceThroughHeaderRewriteProxySkipsServicesWithoutHostHeader(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, ServiceConfig{}, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		t.Fatal("proxy should not start without tunnelHostHeader")
+		return "", 0, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != ps.URL || got.ProxyURL != "" || tunnelOriginURL != ps.OriginURL {
+		t.Fatalf("service without host header should stay on origin URL: got=%#v tunnel=%s", got, tunnelOriginURL)
 	}
 }
 

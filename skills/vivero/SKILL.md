@@ -39,7 +39,7 @@ vivero project inspect <project> --json --no-input
 vivero skill doctor --json --no-input
 ```
 
-Use project inspection to learn the available sources, services, health checks, smoke tests, useful routes, QA scopes, screenshot breakpoints, artifact paths, restart commands, dependency volume lifetimes, and setup-step policies.
+Use project inspection to learn the available sources, services, profiles, health checks, smoke tests, useful routes, QA scopes, screenshot breakpoints, artifact paths, restart commands, dependency volume lifetimes, and setup-step policies.
 
 ## Agent invariants
 
@@ -49,6 +49,7 @@ Use project inspection to learn the available sources, services, health checks, 
 - Use `--wait --timeout <duration>` when readiness matters.
 - Prefer exact commit SHAs or explicit local source paths.
 - Use stable preview IDs, usually `<project>-<purpose>` or `<project>-pr<id>`.
+- Pass `--profile <name>` when the project has profiles and the task needs a non-default service set. If `profiles.default` exists, omitted `--profile` uses it.
 - Never announce a preview URL until `vivero up` or `vivero inspect` reports the relevant service healthy. The contract is **URL = works**.
 - Mutate source through Vivero-managed host worktrees or explicit external paths, not by editing container files.
 - Use `vivero inspect`, `vivero events`, and `vivero logs` before guessing why a preview failed.
@@ -75,6 +76,20 @@ vivero up webapp \
   --json --no-input --quiet
 ```
 
+For a non-default profile, add `--profile`:
+
+```sh
+vivero up helper-host-products \
+  --id helper-gumroad \
+  --profile gumroad \
+  --source helper.path=/path/to/helper \
+  --source gumroad.path=/path/to/gumroad \
+  --wait --timeout 5m \
+  --json --no-input --quiet
+```
+
+Profiles should keep the default boring. For a helper-style app, make `profiles.default` run only the app's local clone shape, then add explicit host-product profiles such as `gumroad` or `flexile`. Use `serviceEnv` to point the helper service at the selected host product service by Docker service name, for example `GUMROAD_URL=http://gumroad-web:3310`.
+
 Expected shape:
 
 ```json
@@ -82,6 +97,7 @@ Expected shape:
   "preview": {
     "id": "webapp-local",
     "project": "webapp",
+    "profile": "default",
     "status": "running",
     "services": {
       "web": {
@@ -136,6 +152,26 @@ setup:
 - `lifetime: smart` lets baseline refs update a canonical warm volume while branch previews receive copied preview-local volumes. Use this for branch-sensitive DB/index/cache state.
 - `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers.
 - `policy: once-per-project` skips a setup command after it has succeeded once for the matching project/config step. With smart volumes, markers are fingerprint-aware so changed migrations or lockfiles rerun setup on the affected warm volume.
+
+## Project-local configs from examples
+
+When the caller wants to run a real local checkout from a bundled example, copy the example to a local config directory, rewrite only project/source identity, then sync that directory:
+
+```sh
+mkdir -p ~/.vivero/configs/<preview-project>
+cp examples/<example>/vivero.yml ~/.vivero/configs/<preview-project>/vivero.yml
+python3 - <<'PY'
+from pathlib import Path
+p = Path.home() / '.vivero/configs/<preview-project>/vivero.yml'
+s = p.read_text()
+s = s.replace('name: <example-project>', 'name: <preview-project>', 1)
+s = s.replace('path: ~/src/<repo>', 'path: /absolute/path/to/<repo>')
+p.write_text(s)
+PY
+vivero projects sync ~/.vivero/configs/<preview-project> --json --no-input
+```
+
+Keep the example's service graph, profiles, checked-in Dockerfile references or image build fields, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
 
 ## Live iteration
 
