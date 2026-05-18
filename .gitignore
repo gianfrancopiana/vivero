@@ -1,0 +1,14 @@
+# build artifacts
+/bin/
+/dist/
+/coverage.out
+
+# local runtime/state
+.vivero/
+*.log
+/tmp/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

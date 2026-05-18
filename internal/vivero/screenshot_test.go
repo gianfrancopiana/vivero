@@ -1,0 +1,140 @@
+package vivero
+
+import (
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestCropScreenshotOuterWhitespaceRemovesBlankViewportPadding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shot.png")
+	img := image.NewRGBA(image.Rect(0, 0, 1280, 884))
+	bg := color.RGBA{R: 248, G: 248, B: 244, A: 255}
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: bg}, image.Point{}, draw.Src)
+
+	// Model an app-shell screenshot: real UI in the top-left, blank app
+	// background filling the rest of the Playwright viewport.
+	draw.Draw(img, image.Rect(0, 0, 640, 442), &image.Uniform{C: color.Black}, image.Point{}, draw.Src)
+
+	writePNG(t, path, img)
+	result, err := cropScreenshotOuterWhitespace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Cropped {
+		t.Fatal("expected screenshot to be cropped")
+	}
+	if result.OriginalWidth != 1280 || result.OriginalHeight != 884 {
+		t.Fatalf("original dimensions = %dx%d", result.OriginalWidth, result.OriginalHeight)
+	}
+	if result.Width > 700 || result.Height > 500 {
+		t.Fatalf("cropped dimensions still include too much blank space: %dx%d", result.Width, result.Height)
+	}
+
+	cropped := readPNG(t, path)
+	if cropped.Bounds().Dx() != result.Width || cropped.Bounds().Dy() != result.Height {
+		t.Fatalf("written dimensions = %dx%d, result = %dx%d", cropped.Bounds().Dx(), cropped.Bounds().Dy(), result.Width, result.Height)
+	}
+}
+
+func TestCropScreenshotOuterWhitespaceLeavesUniformScreenshotsAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shot.png")
+	img := image.NewRGBA(image.Rect(0, 0, 640, 480))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.Black}, image.Point{}, draw.Src)
+
+	writePNG(t, path, img)
+	result, err := cropScreenshotOuterWhitespace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Cropped {
+		t.Fatalf("uniform screenshot should not be cropped: %#v", result)
+	}
+	if result.Width != 640 || result.Height != 480 {
+		t.Fatalf("dimensions changed: %#v", result)
+	}
+}
+
+func TestNormalizeScreenshotOptionsDefaultsToViewportCapture(t *testing.T) {
+	opts := normalizeScreenshotOptions(ScreenshotOptions{})
+	if opts.Path != "/" {
+		t.Fatalf("path = %q", opts.Path)
+	}
+	if opts.Width != 1280 || opts.Height != 800 {
+		t.Fatalf("viewport = %dx%d", opts.Width, opts.Height)
+	}
+	if opts.Crop {
+		t.Fatal("crop should be opt-in so screenshots stay true viewport-sized by default")
+	}
+}
+
+func TestParseScreenshotBreakpoint(t *testing.T) {
+	bp, err := parseScreenshotBreakpoint("mobile=390x844")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bp.Name != "mobile" || bp.Width != 390 || bp.Height != 844 {
+		t.Fatalf("breakpoint = %#v", bp)
+	}
+
+	bp, err = parseScreenshotBreakpoint("1280x720")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bp.Name != "1280x720" || bp.Width != 1280 || bp.Height != 720 {
+		t.Fatalf("unnamed breakpoint = %#v", bp)
+	}
+}
+
+func TestScreenshotBreakpointsPreferExplicitThenProjectThenViewport(t *testing.T) {
+	explicit := []ScreenshotBreakpoint{{Name: "desktop", Width: 1440, Height: 900}}
+	project := []ScreenshotBreakpoint{{Name: "mobile", Width: 390, Height: 844}}
+	got := screenshotBreakpoints(ScreenshotOptions{Breakpoints: explicit, UseProjectBreakpoints: true}, project)
+	if len(got) != 1 || got[0].Name != "desktop" {
+		t.Fatalf("explicit breakpoints not preferred: %#v", got)
+	}
+	got = screenshotBreakpoints(ScreenshotOptions{UseProjectBreakpoints: true}, project)
+	if len(got) != 1 || got[0].Name != "mobile" {
+		t.Fatalf("project breakpoints not used: %#v", got)
+	}
+	got = screenshotBreakpoints(ScreenshotOptions{Width: 800, Height: 600}, project)
+	if len(got) != 1 || got[0].Width != 800 || got[0].Height != 600 {
+		t.Fatalf("viewport fallback = %#v", got)
+	}
+}
+
+func writePNG(t *testing.T, path string, img image.Image) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readPNG(t *testing.T, path string) image.Image {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(f)
+	closeErr := f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	return img
+}
