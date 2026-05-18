@@ -1,8 +1,8 @@
 # Gumroad container preview example.
 #
-# Vivero owns the app container and backing service containers. The web image is
-# built from Gumroad's base Dockerfile, then the selected source checkout is bind
-# mounted into /app so previews still reflect local source changes.
+# Vivero owns the app container and backing service containers. This bundled
+# example keeps the preview runtime inline as a fixture; in a real app repo,
+# prefer pointing at an existing Dockerfile or a prebuilt image when possible.
 project:
   name: gumroad-main
 

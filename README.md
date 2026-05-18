@@ -47,7 +47,7 @@ See `examples/helper-host-products/vivero.yml`: its default profile runs Helper 
 
 ## `vivero.yml`
 
-Keep app-specific setup, routes, checks, and QA flows in project config.
+Keep app-specific setup, routes, checks, and QA flows in project config. For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly. Use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype.
 
 ```yaml
 project:

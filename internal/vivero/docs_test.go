@@ -18,6 +18,8 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 		"## What Vivero handles",
 		"Docker-compatible engine, such as Docker Desktop or OrbStack",
 		"Project routes, selectors, QA flows, and restart commands belong in `vivero.yml`.",
+		"For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly.",
+		"Use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype.",
 		"## Basic use",
 		"public:` config",
 		"## License\n\n[MIT](LICENSE)",
@@ -58,6 +60,20 @@ func TestBundledExamplesLoad(t *testing.T) {
 				t.Fatalf("%s should declare app services", path)
 			}
 		})
+	}
+}
+
+func TestGumroadExampleKeepsInlineRuntimeFixture(t *testing.T) {
+	_, cfg, err := loadProjectConfig("../../examples/gumroad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := cfg.Services["gumroad-web"].Build
+	if build.Dockerfile != "" {
+		t.Fatalf("bundled gumroad example should not pretend to reference an app-owned Dockerfile, got %q", build.Dockerfile)
+	}
+	if strings.TrimSpace(build.DockerfileInline) == "" {
+		t.Fatal("bundled gumroad example should keep its preview runtime as an inline fixture")
 	}
 }
 
