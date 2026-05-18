@@ -1,8 +1,13 @@
-# Gumroad container preview example.
+# Gumroad container preview fixture.
 #
-# Vivero owns the app container and backing service containers. This bundled
-# example keeps the preview runtime inline as a fixture; in a real app repo,
-# prefer pointing at an existing Dockerfile or a prebuilt image when possible.
+# Vivero owns preview orchestration: isolated sources, dynamic ports, service
+# wiring, warm volumes, health checks, URLs, and QA metadata. A real Gumroad
+# integration should reference Gumroad-owned Dockerfiles/images/prebuild commands
+# instead of copying runtime internals into long-lived Vivero YAML.
+#
+# This bundled example deliberately keeps the runtime inline because it is a
+# self-contained fixture and cannot assume Gumroad's private build base is
+# already built or pullable on the user's machine.
 project:
   name: gumroad-main
 

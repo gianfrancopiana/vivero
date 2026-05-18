@@ -6,8 +6,9 @@ For coding agents, Vivero is a nursery for app changes. It starts a preview from
 
 ## What Vivero handles
 
-- Reads project setup from `vivero.yml`.
+- Reads thin orchestration metadata from `vivero.yml`.
 - Selects optional profiles, so one config can run the default app or a coupled multi-app preview.
+- References app-owned runtime assets such as images, Dockerfiles, and setup commands instead of duplicating them when they already exist.
 - Starts app and support services through a Docker-compatible engine, such as Docker Desktop or OrbStack.
 - Keeps expensive dependency volumes warm without sharing branch writes back into the main baseline.
 - Waits for the app to be healthy before returning a preview URL.
@@ -47,7 +48,7 @@ See `examples/helper-host-products/vivero.yml`: its default profile runs Helper 
 
 ## `vivero.yml`
 
-Keep app-specific setup, routes, checks, and QA flows in project config. For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly. Use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype.
+Keep Vivero-specific orchestration in project config: source selectors, profiles, service wiring, health checks, smoke tests, QA flows, public URL policy, and warm volume policy. Do not duplicate runtime facts that already live in the app. For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly, or point `image`/`prebuild` at the app-owned build output. Use `dockerfileInline` only when the Dockerfile is an example, test fixture, or throwaway prototype.
 
 ```yaml
 project:

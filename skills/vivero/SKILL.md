@@ -26,7 +26,7 @@ Vivero:
   captures evidence, and tears down safely.
 ```
 
-Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill.
+Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are for examples, fixtures, and throwaway prototypes.
 
 ## First checks
 
@@ -172,7 +172,7 @@ PY
 vivero projects sync ~/.vivero/configs/<preview-project> --json --no-input
 ```
 
-Keep the example's service graph, profiles, Docker image build fields, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. For real app previews, prefer `build.dockerfile` pointing at an existing app Dockerfile when it can build the preview image directly; use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
+Keep the example's service graph, profiles, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. Rewrite only project/source identity and other local path/ref values. Do not copy runtime facts from an app-owned Dockerfile, compose file, Makefile, or env contract into long-lived YAML just to make an agent-generated config feel complete. For real app previews, prefer `build.dockerfile` pointing at an existing app Dockerfile when it can build the preview image directly, or `image`/`prebuild` pointing at an app-owned build output. Use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
 
 ## Live iteration
 

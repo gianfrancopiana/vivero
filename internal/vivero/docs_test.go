@@ -16,10 +16,15 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 		"Vivero is Spanish for “nursery”",
 		"For coding agents, Vivero is a nursery for app changes.",
 		"## What Vivero handles",
+		"Reads thin orchestration metadata from `vivero.yml`.",
+		"References app-owned runtime assets such as images, Dockerfiles, and setup commands instead of duplicating them when they already exist.",
 		"Docker-compatible engine, such as Docker Desktop or OrbStack",
 		"Project routes, selectors, QA flows, and restart commands belong in `vivero.yml`.",
-		"For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly.",
-		"Use `dockerfileInline` when the Dockerfile is only an example, test fixture, or throwaway prototype.",
+		"Keep Vivero-specific orchestration in project config",
+		"Do not duplicate runtime facts that already live in the app.",
+		"For real app previews, point `build.dockerfile` at an existing app Dockerfile when it can build the preview image directly",
+		"or point `image`/`prebuild` at the app-owned build output",
+		"Use `dockerfileInline` only when the Dockerfile is an example, test fixture, or throwaway prototype.",
 		"## Basic use",
 		"public:` config",
 		"## License\n\n[MIT](LICENSE)",
@@ -38,6 +43,24 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 	for _, avoid := range []string{"```mermaid", "## Flow", "## Core idea", "## Agent workflow", "## Repository layout", "agents and humans", "Human or agent", "Docker preview", "health-gated", "control plane", "Nursery, place where", "Leaves product decisions"} {
 		if strings.Contains(body, avoid) {
 			t.Fatalf("README should avoid jargon, noisy sections, or mixed framing %q", avoid)
+		}
+	}
+}
+
+func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
+	skill, err := os.ReadFile("../../skills/vivero/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(skill)
+	for _, want := range []string{
+		"Keep `vivero.yml` as thin orchestration metadata",
+		"do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them",
+		"Reference app-owned images, Dockerfiles, or prebuild commands instead",
+		"Inline Dockerfiles are for examples, fixtures, and throwaway prototypes",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("bundled skill should include thin runtime boundary guidance %q", want)
 		}
 	}
 }
@@ -64,7 +87,27 @@ func TestBundledExamplesLoad(t *testing.T) {
 }
 
 func TestGumroadExampleKeepsInlineRuntimeFixture(t *testing.T) {
-	_, cfg, err := loadProjectConfig("../../examples/gumroad")
+	path := "../../examples/gumroad"
+	bodyBytes, err := os.ReadFile(path + "/vivero.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	for _, want := range []string{
+		"Vivero owns preview orchestration",
+		"reference Gumroad-owned Dockerfiles/images/prebuild commands",
+		"instead of copying runtime internals into long-lived Vivero YAML",
+		"self-contained fixture",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("gumroad example should document thin runtime boundary with %q", want)
+		}
+	}
+	if strings.Contains(body, "Vivero owns the app container") {
+		t.Fatal("gumroad example should not claim Vivero owns the app runtime source of truth")
+	}
+
+	_, cfg, err := loadProjectConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
