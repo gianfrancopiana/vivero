@@ -1284,6 +1284,64 @@ func TestCleanupExistingPreviewForUpDeletesStaleServiceRows(t *testing.T) {
 	}
 }
 
+func TestUpRefreshesProjectConfigFromDisk(t *testing.T) {
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	installFakeDocker(t)
+
+	root := t.TempDir()
+	oldPort := freePort(t)
+	newPort := freePort(t)
+	writeConfig := func(port int) {
+		t.Helper()
+		cfg := []byte(`project:
+  name: refresh-site
+services:
+  web:
+    runtime: docker
+    image: python:3.12-alpine
+    command: ` + pythonPath + ` -m http.server ` + strconv.Itoa(port) + ` --bind 127.0.0.1
+    port: ` + strconv.Itoa(port) + `
+    originHost: localhost
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 20s
+`)
+		if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeConfig(oldPort)
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(newPort)
+
+	preview, err := a.Up(UpRequest{Project: "refresh-site", ID: "refresh-pr", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("refresh-pr", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := preview.Services["web"]
+	wantOrigin := "http://localhost:" + strconv.Itoa(newPort)
+	if web.OriginURL != wantOrigin || web.URL != wantOrigin {
+		t.Fatalf("up should use refreshed config URL %s, got origin=%s url=%s", wantOrigin, web.OriginURL, web.URL)
+	}
+	if web.Port != newPort {
+		t.Fatalf("up should use refreshed config port %d, got %d", newPort, web.Port)
+	}
+}
+
 func TestUpPersistsFailedServiceResourcesWhenCleanupFails(t *testing.T) {
 	pythonPath, err := exec.LookPath("python3")
 	if err != nil {

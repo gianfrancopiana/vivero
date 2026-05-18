@@ -36,6 +36,8 @@ vivero qa run webapp-local --scope public --json --no-input --quiet
 vivero down webapp-local --archive-patch --json --no-input --quiet
 ```
 
+`vivero projects sync` registers the project path. `vivero up` reloads that path's current `vivero.yml` before starting a preview, so app-owned config changes are not lost behind stale synced metadata.
+
 Use `--discard` only when preview changes do not need saving.
 
 For multi-service previews, put each app under `services`. Containers can reach each other by service name, and Vivero reports a URL for each app service. Use `profiles:` when a project should normally start a small default service set but sometimes needs a coupled preview:

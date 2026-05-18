@@ -173,6 +173,18 @@ func (a *App) SyncProject(path string) (ProjectRecord, error) {
 	return a.saveProject(abs, cfg)
 }
 
+func (a *App) refreshProjectConfig(project ProjectRecord) (ProjectRecord, error) {
+	root, cfg, err := loadProjectConfig(project.Path)
+	if err != nil {
+		return project, fmt.Errorf("refresh project config %s: %w", project.Path, err)
+	}
+	if cfg.Project.Name != project.Name {
+		return project, fmt.Errorf("refresh project config %s: project.name is %q, want %q", project.Path, cfg.Project.Name, project.Name)
+	}
+	abs, _ := filepath.Abs(root)
+	return a.saveProject(abs, cfg)
+}
+
 func serviceRuntime(s ServiceConfig) string {
 	runtime := strings.ToLower(strings.TrimSpace(s.Runtime))
 	switch runtime {

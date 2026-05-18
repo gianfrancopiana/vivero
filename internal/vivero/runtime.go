@@ -27,6 +27,10 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if err != nil {
 		return PreviewRecord{}, err
 	}
+	project, err = a.refreshProjectConfig(project)
+	if err != nil {
+		return PreviewRecord{}, err
+	}
 	runtimeConfig, activeProfile, err := projectConfigForRequestedProfile(project.Config, req.Profile)
 	if err != nil {
 		return PreviewRecord{}, err
