@@ -804,6 +804,81 @@ func TestHeaderRewriteProxyRewritesDevOriginsToLocalProxyOrigin(t *testing.T) {
 	}
 }
 
+func TestExposeLocalServiceThroughHeaderRewriteProxyUsesProxyURL(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+	svc := ServiceConfig{
+		TunnelHostHeader: "localhost",
+		PublicRewrite:    PublicRewriteConfig{Origins: []string{"http://localhost:3310"}},
+		Health:           HealthConfig{Path: "/", Timeout: "1s"},
+	}
+	var called bool
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		called = true
+		if previewID != "gumroad-main" || service != "web" || originURL != ps.OriginURL || hostHeader != "localhost" {
+			t.Fatalf("unexpected proxy args: preview=%s service=%s origin=%s host=%s", previewID, service, originURL, hostHeader)
+		}
+		if len(rewrite.Origins) != 1 || rewrite.Origins[0] != "http://localhost:3310" {
+			t.Fatalf("rewrite config not passed through: %#v", rewrite)
+		}
+		return "http://127.0.0.1:56072", 1234, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("expected local preview to start the header rewrite proxy")
+	}
+	if got.URL != "http://127.0.0.1:56072" {
+		t.Fatalf("local service URL = %q; want proxy URL", got.URL)
+	}
+	if got.ProxyURL != got.URL || got.ProxyPID != 1234 {
+		t.Fatalf("proxy metadata not recorded: %#v", got)
+	}
+	if got.OriginURL != ps.OriginURL {
+		t.Fatalf("origin URL should be preserved, got %q", got.OriginURL)
+	}
+	if tunnelOriginURL != got.ProxyURL {
+		t.Fatalf("tunnel origin = %q; want proxy URL %q", tunnelOriginURL, got.ProxyURL)
+	}
+}
+
+func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+	svc := ServiceConfig{TunnelHostHeader: "localhost", Public: true}
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-pr", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		return "http://127.0.0.1:56073", 5678, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != ps.URL {
+		t.Fatalf("public service URL should remain available for tunnel replacement later, got %q", got.URL)
+	}
+	if got.ProxyURL != "http://127.0.0.1:56073" || got.ProxyPID != 5678 {
+		t.Fatalf("proxy metadata not recorded: %#v", got)
+	}
+	if tunnelOriginURL != got.ProxyURL {
+		t.Fatalf("public tunnel should use proxy origin, got %q", tunnelOriginURL)
+	}
+}
+
+func TestExposeServiceThroughHeaderRewriteProxySkipsServicesWithoutHostHeader(t *testing.T) {
+	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
+
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, ServiceConfig{}, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+		t.Fatal("proxy should not start without tunnelHostHeader")
+		return "", 0, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != ps.URL || got.ProxyURL != "" || tunnelOriginURL != ps.OriginURL {
+		t.Fatalf("service without host header should stay on origin URL: got=%#v tunnel=%s", got, tunnelOriginURL)
+	}
+}
+
 func TestHeaderRewriteProxyAppliesConfiguredPublicRewrites(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
