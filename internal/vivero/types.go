@@ -58,11 +58,10 @@ type PortConfig struct {
 }
 
 type ImageBuildConfig struct {
-	Context          string            `yaml:"context" json:"context,omitempty"`
-	Dockerfile       string            `yaml:"dockerfile" json:"dockerfile,omitempty"`
-	DockerfileInline string            `yaml:"dockerfileInline" json:"dockerfileInline,omitempty"`
-	Tag              string            `yaml:"tag" json:"tag,omitempty"`
-	Args             map[string]string `yaml:"args" json:"args,omitempty"`
+	Context    string            `yaml:"context" json:"context,omitempty"`
+	Dockerfile string            `yaml:"dockerfile" json:"dockerfile,omitempty"`
+	Tag        string            `yaml:"tag" json:"tag,omitempty"`
+	Args       map[string]string `yaml:"args" json:"args,omitempty"`
 }
 
 type PublicRewriteConfig struct {

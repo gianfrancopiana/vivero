@@ -26,7 +26,7 @@ Vivero:
   captures evidence, and tears down safely.
 ```
 
-Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill.
+Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are intentionally unsupported.
 
 ## First checks
 
@@ -152,6 +152,7 @@ setup:
 - `lifetime: smart` lets baseline refs update a canonical warm volume while branch previews receive copied preview-local volumes. Use this for branch-sensitive DB/index/cache state.
 - `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers.
 - `policy: once-per-project` skips a setup command after it has succeeded once for the matching project/config step. With smart volumes, markers are fingerprint-aware so changed migrations or lockfiles rerun setup on the affected warm volume.
+- Avoid running two baseline previews for the same project at once; they use the same canonical smart volumes. For throwaway checks against a local path while a baseline preview is already running, pass a non-baseline `--metadata ref=<check-name>` or a branch `--source <source>.ref=...` so Vivero creates preview-local derived volumes.
 
 ## Project-local configs from examples
 
@@ -171,7 +172,7 @@ PY
 vivero projects sync ~/.vivero/configs/<preview-project> --json --no-input
 ```
 
-Keep the example's service graph, profiles, checked-in Dockerfile references or image build fields, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
+Keep the example's service graph, profiles, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. Rewrite only project/source identity and other local path/ref values. Do not copy runtime facts from an app-owned Dockerfile, compose file, Makefile, or env contract into long-lived YAML just to make an agent-generated config feel complete. For real app previews, prefer `build.dockerfile` pointing at an existing app Dockerfile when it can build the preview image directly, or `image`/`prebuild` pointing at an app-owned build output. Inline Dockerfiles are unsupported; move that content into the app repo first. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
 
 ## Live iteration
 

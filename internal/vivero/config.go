@@ -25,8 +25,15 @@ func loadProjectConfig(path string) (string, ProjectConfig, error) {
 	if err != nil {
 		return "", ProjectConfig{}, err
 	}
+	var node yaml.Node
+	if err := yaml.Unmarshal(b, &node); err != nil {
+		return "", ProjectConfig{}, err
+	}
+	if err := rejectConfigKey(configPath, &node, "dockerfileInline"); err != nil {
+		return "", ProjectConfig{}, err
+	}
 	var cfg ProjectConfig
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
+	if err := node.Decode(&cfg); err != nil {
 		return "", ProjectConfig{}, err
 	}
 	if cfg.Project.Name == "" {
@@ -51,6 +58,31 @@ func loadProjectConfig(path string) (string, ProjectConfig, error) {
 		return "", ProjectConfig{}, err
 	}
 	return root, cfg, nil
+}
+
+func rejectConfigKey(configPath string, node *yaml.Node, key string) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			k := node.Content[i]
+			v := node.Content[i+1]
+			if k.Value == key {
+				return fmt.Errorf("%s uses unsupported %s; keep Dockerfiles in the app repo and reference build.dockerfile or prebuild/image instead", configPath, key)
+			}
+			if err := rejectConfigKey(configPath, v, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, child := range node.Content {
+		if err := rejectConfigKey(configPath, child, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateProjectConfig(configPath string, cfg ProjectConfig) error {
@@ -161,13 +193,25 @@ func validateWarmConfig(configPath string, warm WarmConfig) error {
 }
 
 func imageBuildConfigured(build ImageBuildConfig) bool {
-	return strings.TrimSpace(build.Context) != "" || strings.TrimSpace(build.Dockerfile) != "" || strings.TrimSpace(build.DockerfileInline) != "" || strings.TrimSpace(build.Tag) != "" || len(build.Args) > 0
+	return strings.TrimSpace(build.Context) != "" || strings.TrimSpace(build.Dockerfile) != "" || strings.TrimSpace(build.Tag) != "" || len(build.Args) > 0
 }
 
 func (a *App) SyncProject(path string) (ProjectRecord, error) {
 	root, cfg, err := loadProjectConfig(path)
 	if err != nil {
 		return ProjectRecord{}, err
+	}
+	abs, _ := filepath.Abs(root)
+	return a.saveProject(abs, cfg)
+}
+
+func (a *App) refreshProjectConfig(project ProjectRecord) (ProjectRecord, error) {
+	root, cfg, err := loadProjectConfig(project.Path)
+	if err != nil {
+		return project, fmt.Errorf("refresh project config %s: %w", project.Path, err)
+	}
+	if cfg.Project.Name != project.Name {
+		return project, fmt.Errorf("refresh project config %s: project.name is %q, want %q", project.Path, cfg.Project.Name, project.Name)
 	}
 	abs, _ := filepath.Abs(root)
 	return a.saveProject(abs, cfg)

@@ -445,26 +445,25 @@ func TestDockerBuildArgsUsesContextDockerfileTagAndArgs(t *testing.T) {
 	}
 }
 
-func TestDockerBuildSpecForServiceSupportsInlineDockerfile(t *testing.T) {
+func TestDockerBuildSpecForServiceResolvesAppOwnedDockerfile(t *testing.T) {
 	root := t.TempDir()
-	spec, err := dockerBuildSpecForService(root, "inline-app", "preview-1", "web", ImageBuildConfig{
-		Context:          ".",
-		DockerfileInline: "FROM scratch\n",
-		Tag:              "vivero/inline-web:test",
+	if err := os.Mkdir(filepath.Join(root, "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := filepath.Join(root, "docker", "Dockerfile")
+	if err := os.WriteFile(dockerfile, []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := dockerBuildSpecForService(root, "app-owned", "preview-1", "web", ImageBuildConfig{
+		Context:    ".",
+		Dockerfile: "docker/Dockerfile",
+		Tag:        "vivero/app-owned-web:test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(spec.TempDockerfile)
-	if spec.Dockerfile == "" || spec.TempDockerfile == "" {
-		t.Fatalf("inline dockerfile should be materialized: %#v", spec)
-	}
-	content, err := os.ReadFile(spec.Dockerfile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "FROM scratch\n" {
-		t.Fatalf("unexpected inline dockerfile content: %q", content)
+	if spec.Dockerfile != dockerfile {
+		t.Fatalf("dockerfile should resolve from project path; got %q want %q", spec.Dockerfile, dockerfile)
 	}
 	if spec.Context != root {
 		t.Fatalf("context should resolve from project path; got %q want %q", spec.Context, root)
@@ -473,17 +472,11 @@ func TestDockerBuildSpecForServiceSupportsInlineDockerfile(t *testing.T) {
 
 func TestDockerBuildSpecRejectsContextOutsideProjectRoot(t *testing.T) {
 	root := t.TempDir()
-	_, err := dockerBuildSpecForService(root, "escape-app", "preview-1", "web", ImageBuildConfig{
-		Context:          "..",
-		DockerfileInline: "FROM scratch\n",
-	})
+	_, err := dockerBuildSpecForService(root, "escape-app", "preview-1", "web", ImageBuildConfig{Context: ".."})
 	if err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("expected context escape error, got %v", err)
 	}
-	_, err = dockerBuildSpecForService(root, "escape-app", "preview-1", "web", ImageBuildConfig{
-		Context:          root,
-		DockerfileInline: "FROM scratch\n",
-	})
+	_, err = dockerBuildSpecForService(root, "escape-app", "preview-1", "web", ImageBuildConfig{Context: root})
 	if err == nil || !strings.Contains(err.Error(), "must be relative") {
 		t.Fatalf("expected absolute context error, got %v", err)
 	}
@@ -851,7 +844,7 @@ func TestUpValidatesNamedPublicRouteBeforeStartingDockerNetwork(t *testing.T) {
 		},
 		Services: map[string]ServiceConfig{
 			"web": {
-				Build:  ImageBuildConfig{Context: ".", DockerfileInline: "FROM scratch\n"},
+				Image:  "alpine:latest",
 				Port:   3000,
 				Public: true,
 			},
@@ -1281,6 +1274,64 @@ func TestCleanupExistingPreviewForUpDeletesStaleServiceRows(t *testing.T) {
 	}
 	if len(updated.Sources) != 0 {
 		t.Fatalf("stale sources should be deleted before restart: %#v", updated.Sources)
+	}
+}
+
+func TestUpRefreshesProjectConfigFromDisk(t *testing.T) {
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	installFakeDocker(t)
+
+	root := t.TempDir()
+	oldPort := freePort(t)
+	newPort := freePort(t)
+	writeConfig := func(port int) {
+		t.Helper()
+		cfg := []byte(`project:
+  name: refresh-site
+services:
+  web:
+    runtime: docker
+    image: python:3.12-alpine
+    command: ` + pythonPath + ` -m http.server ` + strconv.Itoa(port) + ` --bind 127.0.0.1
+    port: ` + strconv.Itoa(port) + `
+    originHost: localhost
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 20s
+`)
+		if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeConfig(oldPort)
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(newPort)
+
+	preview, err := a.Up(UpRequest{Project: "refresh-site", ID: "refresh-pr", Wait: true, Timeout: 20 * time.Second})
+	defer a.Down("refresh-pr", "discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := preview.Services["web"]
+	wantOrigin := "http://localhost:" + strconv.Itoa(newPort)
+	if web.OriginURL != wantOrigin || web.URL != wantOrigin {
+		t.Fatalf("up should use refreshed config URL %s, got origin=%s url=%s", wantOrigin, web.OriginURL, web.URL)
+	}
+	if web.Port != newPort {
+		t.Fatalf("up should use refreshed config port %d, got %d", newPort, web.Port)
 	}
 }
 

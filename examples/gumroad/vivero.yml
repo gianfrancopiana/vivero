@@ -1,8 +1,10 @@
-# Gumroad container preview example.
+# Gumroad preview fixture.
 #
-# Vivero owns the app container and backing service containers. The web image is
-# built from Gumroad's base Dockerfile, then the selected source checkout is bind
-# mounted into /app so previews still reflect local source changes.
+# Vivero owns preview orchestration: isolated sources, dynamic ports, service
+# wiring, warm volumes, health checks, URLs, and QA metadata. Gumroad owns the
+# container runtime assets: Dockerfiles, compose files, env contracts, and setup
+# scripts. This example references those app-owned assets instead of copying
+# runtime internals into long-lived Vivero YAML.
 project:
   name: gumroad-main
 
@@ -76,72 +78,8 @@ services:
     runtime: docker
     build:
       context: .
+      dockerfile: docker/web/Dockerfile
       tag: vivero/gumroad-dev-runtime:3.4.3-node22
-      dockerfileInline: |
-        FROM ruby:3.4.3-slim-bullseye
-
-        ENV BUNDLE_PATH=/bundle_path \
-            APP_DIR=/app \
-            LANG=C.UTF-8
-
-        ARG DEBIAN_FRONTEND=noninteractive
-
-        RUN mkdir -p /usr/share/man/man1 \
-          && sed -i "s/bullseye main/bullseye main contrib non-free/" /etc/apt/sources.list \
-          && apt-get update -y -qq \
-          && apt-get install -yq --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            curl \
-            ffmpeg \
-            fonts-dejavu \
-            fonts-takao \
-            fonts-wqy-microhei \
-            fonts-wqy-zenhei \
-            git \
-            gnupg \
-            imagemagick \
-            jq \
-            less \
-            libcurl4-openssl-dev \
-            libgcrypt20 \
-            libjemalloc-dev \
-            libjemalloc2 \
-            liblzma-dev \
-            libssl-dev \
-            libtag1-dev \
-            libvips-dev \
-            libxml2-dev \
-            libxrender1 \
-            libyaml-dev \
-            default-libmysqlclient-dev \
-            percona-toolkit \
-            pdftk \
-            ruby-dev \
-            screen \
-            sudo \
-            ttf-wqy-microhei \
-            ttf-wqy-zenhei \
-            unzip \
-            wget \
-            zlib1g-dev \
-          && fc-cache -f -v \
-          && mkdir -p /etc/apt/keyrings \
-          && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-          && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
-          && apt-get update -y -qq \
-          && apt-get install -yq --no-install-recommends nodejs \
-          && corepack enable \
-          && gem install bundler:2.5.10 \
-          && mkdir -p /bundle_path /app/tmp /app/log \
-          && chmod -R 777 /bundle_path /app \
-          && ln -sf "$(ldconfig -p | awk '/libjemalloc\.so\.2/ { print $NF; exit }')" /usr/local/lib/libjemalloc.so.2 \
-          && apt-get clean autoclean \
-          && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-        ENV LD_PRELOAD=/usr/local/lib/libjemalloc.so.2
-
-        WORKDIR /app
     workingDir: .
     dependencyVolumes:
       - name: bundle_path

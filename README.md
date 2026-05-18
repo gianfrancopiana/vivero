@@ -6,8 +6,9 @@ For coding agents, Vivero is a nursery for app changes. It starts a preview from
 
 ## What Vivero handles
 
-- Reads project setup from `vivero.yml`.
+- Reads thin orchestration metadata from `vivero.yml`.
 - Selects optional profiles, so one config can run the default app or a coupled multi-app preview.
+- References app-owned runtime assets such as images, Dockerfiles, and setup commands instead of duplicating them when they already exist.
 - Starts app and support services through a Docker-compatible engine, such as Docker Desktop or OrbStack.
 - Keeps expensive dependency volumes warm without sharing branch writes back into the main baseline.
 - Waits for the app to be healthy before returning a preview URL.
@@ -35,6 +36,8 @@ vivero qa run webapp-local --scope public --json --no-input --quiet
 vivero down webapp-local --archive-patch --json --no-input --quiet
 ```
 
+`vivero projects sync` registers the project path. `vivero up` reloads that path's current `vivero.yml` before starting a preview, so app-owned config changes are not lost behind stale synced metadata.
+
 Use `--discard` only when preview changes do not need saving.
 
 For multi-service previews, put each app under `services`. Containers can reach each other by service name, and Vivero reports a URL for each app service. Use `profiles:` when a project should normally start a small default service set but sometimes needs a coupled preview:
@@ -47,7 +50,7 @@ See `examples/helper-host-products/vivero.yml`: its default profile runs Helper 
 
 ## `vivero.yml`
 
-Keep app-specific setup, routes, checks, and QA flows in project config.
+Keep Vivero-specific orchestration in project config: source selectors, profiles, service wiring, health checks, smoke tests, QA flows, public URL policy, and warm volume policy. Do not duplicate runtime facts that already live in the app. For real app previews, use app-owned assets: `prebuild` for app build commands, `image` for the resulting image, or `build.dockerfile` when the app repo already has a suitable Dockerfile. Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.
 
 ```yaml
 project:
@@ -66,16 +69,21 @@ warm:
       - package-lock.json
       - db/migrate
 
+prebuild:
+  app:
+    steps:
+      - docker build -t webapp-preview -f docker/dev/Dockerfile .
+
 services:
   web:
     source: app
-    image: node:22-alpine
+    image: webapp-preview
     workingDir: .
     dependencyVolumes:
       - name: node_modules
         target: /app/node_modules
         lifetime: smart
-    command: npm run dev -- --host 127.0.0.1 --port 3000
+    command: ./script/vivero-server --host 0.0.0.0 --port 3000
     port: 3000
     health:
       path: /
