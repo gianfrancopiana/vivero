@@ -1,34 +1,23 @@
 # Vivero
 
-Vivero is Spanish for “nursery”: a place where young plants are grown until they are ready to move.
+Vivero is Spanish for “nursery”: a place to grow app changes until they are ready.
 
-For coding agents, Vivero is a nursery for app changes. It starts a preview from `vivero.yml`, waits until it works, gives back a URL, and collects QA evidence.
+For coding agents, Vivero is a nursery for app changes. It starts an app from a thin `vivero.yml`, waits until the app is healthy, returns a URL, and saves QA evidence.
 
-Vivero is preview-first; production hosting is an RFC/readiness track, not current behavior. Use `vivero doctor production --project <path> --json --no-input` for a read-only readiness assessment, and see `docs/rfcs/production-hosting.md` before adding deploy semantics.
+Vivero is local-first. The boundary is simple: **the app owns how it runs; Vivero owns the preview.** Keep Dockerfiles, scripts, migrations, env contracts, and deploy logic in the app repo. Use `vivero.yml` to point at them and describe the preview.
 
-## What Vivero handles
+## What Vivero gives agents
 
-- Reads thin orchestration metadata from `vivero.yml`.
-- Selects optional profiles, so one config can run the default app or a coupled multi-app preview.
-- References app-owned runtime assets such as images, Dockerfiles, and setup commands instead of duplicating them when they already exist.
-- Starts app and support services through a Docker-compatible engine, such as Docker Desktop or OrbStack.
-- Keeps expensive dependency volumes warm without sharing branch writes back into the main baseline.
-- Waits for the app to be healthy before returning a preview URL.
-- Provides local preview URLs, with optional public URLs from `public:` config.
-- Gives agents JSON output, logs, screenshots, QA plans, recordings, and reports.
-- Tears previews down safely; remote API access stays off unless `VIVERO_ALLOW_REMOTE_CONTROL=1` is set.
+- Isolated previews for local repos, branches, or worktrees.
+- Unique ports, networks, and state per preview.
+- Warm dependency volumes, with baseline refs like `main` feeding branch-local copies.
+- Multi-service previews and profiles for coupled apps.
+- Health checks and smoke tests before a URL is returned.
+- JSON output, logs, screenshots, QA reports, and recordings.
+- Local URLs by default; public URLs only when `public:` is configured.
+- Local-only remote control unless `VIVERO_ALLOW_REMOTE_CONTROL=1`.
 
-## Bundled skill
-
-```sh
-vivero skill print
-vivero skill install --target ~/.agents/skills/vivero --json --no-input
-vivero skill doctor --json --no-input
-```
-
-The bundled skill stays generic. Project routes, selectors, QA flows, and restart commands belong in `vivero.yml`.
-
-## Basic use
+## Basic workflow
 
 ```sh
 vivero projects sync /path/to/project --json --no-input
@@ -38,21 +27,11 @@ vivero qa run webapp-local --scope public --json --no-input --quiet
 vivero down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-`vivero projects sync` registers the project path. `vivero up` reloads that path's current `vivero.yml` before starting a preview, so app-owned config changes are not lost behind stale synced metadata.
+`vivero up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving.
 
-Use `--discard` only when preview changes do not need saving.
+## `vivero.yml` at a glance
 
-For multi-service previews, put each app under `services`. Containers can reach each other by service name, and Vivero reports a URL for each app service. Use `profiles:` when a project should normally start a small default service set but sometimes needs a coupled preview:
-
-```sh
-vivero up helper-host-products --id helper-gumroad --profile gumroad --wait --json --no-input --quiet
-```
-
-See `examples/helper-host-products/vivero.yml`: its default profile runs Helper alone, while explicit `gumroad` and `flexile` profiles add one host product and use `serviceEnv` to point Helper at that service.
-
-## `vivero.yml`
-
-Keep Vivero-specific orchestration in project config: source selectors, profiles, service wiring, health checks, smoke tests, QA flows, public URL policy, and warm volume policy. Do not duplicate runtime facts that already live in the app. For real app previews, use app-owned assets: `prebuild` for app build commands, `image` for the resulting image, or `build.dockerfile` when the app repo already has a suitable Dockerfile. Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.
+Keep the file small. It should select sources, services, health checks, profiles, warm volume rules, smoke tests, QA flows, and optional public URL policy. It should reference app-owned runtime assets instead of copying them.
 
 ```yaml
 project:
@@ -64,137 +43,62 @@ sources:
     path: ~/src/webapp
     defaultRef: main
 
-warm:
-  baselineRefs: [main]
-  fingerprint:
-    paths:
-      - package-lock.json
-      - db/migrate
-
-prebuild:
-  app:
-    steps:
-      - docker build -t webapp-preview -f docker/dev/Dockerfile .
-
 services:
   web:
     source: app
-    image: webapp-preview
-    workingDir: .
-    dependencyVolumes:
-      - name: node_modules
-        target: /app/node_modules
-        lifetime: smart
-    command: ./script/vivero-server --host 0.0.0.0 --port 3000
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+    command: ./script/server --port 3000
     port: 3000
     health:
       path: /
       expectStatus: 200
-      timeout: 2m
-      interval: 2s
-
-setup:
-  afterSeeds:
-    - service: web
-      command: npm install
-      policy: once-per-fingerprint
-      fingerprint:
-        paths:
-          - package-lock.json
-    - service: web
-      command: npm run build
-      policy: per-preview
-
-resources:
-  maxConcurrentPreviews: 4
-  maxStartupConcurrency: 4
 
 agent:
   defaultPreviewService: web
-  commonPages:
-    home:
-      service: web
-      path: /
   smokeTests:
     - name: homepage
       service: web
       path: /
       expectStatus: 200
-  qa:
-    defaultScope: public
-    artifactRoot: .vivero/qa
-    auth:
-      sessions:
-        admin:
-          storageState: .vivero/auth/admin.storage.json
-          scopes: [authenticated]
-          note: Operator-provided Playwright storage state; Vivero never stores credentials.
-    scopes:
-      - name: public
-        pages: [home]
-        checks:
-          - name: smoke-tests-pass
-            category: health
-            severity: critical
-            method: vivero-smoke
-        flows:
-          - name: homepage-renders
-            start: home
-            steps:
-              - visit: home
-              - screenshot: homepage
-      - name: authenticated
-        authSession: admin
-        pages: [home]
-
-profiles:
-  default:
-    services: [web]
-    smokeTests: [homepage]
-  full:
-    services: [web]
-    smokeTests: [homepage]
-    serviceEnv:
-      web:
-        FEATURE_MODE: full
 ```
 
-Profiles are optional. If `profiles.default` exists, `vivero up` uses it when `--profile` is omitted. A profile may select app `services`, `backingServices`, and `smokeTests`, and may add or override per-service env with `serviceEnv`. Setup steps, sources, QA pages, and QA flows are filtered to the selected services.
+Add:
 
-Warm dependency volumes:
-- `preview` (default): removed by `vivero down --discard`.
-- `project`: one project-wide Docker volume, shared by all previews.
-- `smart`: baseline refs such as `main` update a canonical warm volume; branch previews start from a preview-local copy, so branch migrations or installs do not poison the baseline. `warm.fingerprint.paths` invalidates setup markers when lockfiles, migrations, schemas, or seeds change.
+- `profiles:` when one project has small and full preview modes.
+- `warm:` when expensive dependency volumes should be reused safely.
+- `agent.qa:` for pages, flows, auth state, screenshots, recordings, and reports.
+- `public:` only when a preview should expose a non-local URL.
 
-Setup policy:
-- `per-preview` (default): run every preview.
-- `once-per-project`: skip after the command succeeds once for the project/config step. Use only when the target service writes durable output to a `project` or `smart` dependency volume.
-- `once-per-fingerprint`: compute a stable hash from `setup.afterSeeds[].fingerprint.paths`, falling back to `warm.fingerprint.paths`; skip only when the same service/command/path fingerprint already succeeded. Runtime errors if neither paths nor a persistent dependency volume are present.
-- `vivero doctor config <path> --json --no-input` warns when fingerprint paths are missing or setup caching has no persistent volume.
+Routes, selectors, QA flows, and restart commands belong in project config, not in the generic skill or Vivero core.
 
-Startup bounds:
-- `resources.maxStartupConcurrency` bounds concurrent backing-service startup and, after setup completes, concurrent app-service startup.
-- `0` uses Vivero's conservative default (`4`), `1` preserves sequential startup, and larger values are capped by the number of services.
-- Setup steps remain sequential because their order may matter.
+## Bundled skill
 
-Authenticated QA:
-- Put reusable browser auth state in `agent.qa.auth.sessions.<name>.storageState` as a project-relative Playwright storage-state file.
-- Attach auth by listing session `scopes` or by setting `agent.qa.scopes[].authSession`.
-- `vivero qa plan` includes the resolved auth context and generated screenshot/recording commands with `--storage-state` when applicable.
-- `vivero doctor config <path> --json --no-input` warns when a storage-state file is missing and errors when the path escapes the project. Vivero does not store credentials or implement app-specific login flows.
+```sh
+vivero skill print
+vivero skill install --target ~/.agents/skills/vivero --json --no-input
+vivero skill doctor --json --no-input
+```
 
-## Development and release checks
+The bundled skill tells coding agents how to use Vivero. It stays generic; project-specific behavior belongs in `vivero.yml`.
 
-Before releasing CLI-facing changes, run:
+## Production and release
+
+Vivero is preview-first. Production hosting is still an RFC/readiness track, not current behavior. Use this read-only check before adding deploy semantics:
+
+```sh
+vivero doctor production --project <path> --json --no-input
+```
+
+Before release-facing changes, run:
 
 ```sh
 make verify
 make cover
 ```
 
-GitHub Actions runs the same checks on PRs, pushes to `main`, nightly, and manual dispatch. It also verifies Linux and macOS builds. Release artifacts are tag-driven: pushing a `v*` tag runs GoReleaser and publishes darwin/linux archives for amd64 and arm64 with checksums. Windows and Homebrew publishing are intentionally not part of the first release pipeline.
-
-The CLI contract is covered by tests for help text, command discovery, JSON error shape, schema output, doctor aliases, QA JSON, secrets, skill install, and README command examples. Raise any future coverage floor only after `make cover` shows the branch already exceeds it.
+CI runs quality gates plus Linux/macOS builds. Tag releases publish darwin/linux archives for amd64 and arm64. Windows and Homebrew are intentionally out of scope for now.
 
 ## License
 

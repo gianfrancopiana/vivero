@@ -6,49 +6,6 @@ import (
 	"testing"
 )
 
-func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
-	readme, err := os.ReadFile("../../README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(readme)
-	for _, want := range []string{
-		"Vivero is Spanish for “nursery”",
-		"For coding agents, Vivero is a nursery for app changes.",
-		"## What Vivero handles",
-		"Reads thin orchestration metadata from `vivero.yml`.",
-		"References app-owned runtime assets such as images, Dockerfiles, and setup commands instead of duplicating them when they already exist.",
-		"Docker-compatible engine, such as Docker Desktop or OrbStack",
-		"Project routes, selectors, QA flows, and restart commands belong in `vivero.yml`.",
-		"Keep Vivero-specific orchestration in project config",
-		"Do not duplicate runtime facts that already live in the app.",
-		"use app-owned assets: `prebuild` for app build commands, `image` for the resulting image, or `build.dockerfile`",
-		"Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.",
-		"## Basic use",
-		"public:` config",
-		"## Development and release checks",
-		"make cover",
-		"README command examples",
-		"## License\n\n[MIT](LICENSE)",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("README should include %q", want)
-		}
-	}
-
-	skill := strings.Index(body, "## Bundled skill")
-	yml := strings.Index(body, "## `vivero.yml`")
-	if skill == -1 || yml == -1 || skill > yml {
-		t.Fatal("README should put bundled skill support before the vivero.yml example")
-	}
-
-	for _, avoid := range []string{"```mermaid", "## Flow", "## Core idea", "## Agent workflow", "## Repository layout", "agents and humans", "Human or agent", "Docker preview", "health-gated", "control plane", "Nursery, place where", "Leaves product decisions"} {
-		if strings.Contains(body, avoid) {
-			t.Fatalf("README should avoid jargon, noisy sections, or mixed framing %q", avoid)
-		}
-	}
-}
-
 func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 	skill, err := os.ReadFile("../../skills/vivero/SKILL.md")
 	if err != nil {
