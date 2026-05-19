@@ -172,6 +172,25 @@ func TestRunQASubcommandsJSONContract(t *testing.T) {
 	if run["ok"] != true || run["plan"] == nil || run["report"] == nil || run["runPath"] == "" {
 		t.Fatalf("qa run missing stable contract fields: %#v", run)
 	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "qa", "final", "cli-pr", "--scope", "auth", "--no-screenshots", "--no-record", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("qa final exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var final map[string]any
+	if err := json.Unmarshal([]byte(stdout), &final); err != nil {
+		t.Fatalf("invalid qa final JSON: %v stdout=%s", err, stdout)
+	}
+	proof := final["proof"].(map[string]any)
+	if final["ok"] != true || final["plan"] == nil || final["run"] == nil || final["diagnosis"] == nil || final["finalPath"] == "" {
+		t.Fatalf("qa final missing stable contract fields: %#v", final)
+	}
+	if proof["url"] != "http://127.0.0.1:7777" || proof["reportPath"] == "" || proof["runPath"] == "" || proof["recordSkipped"] != true {
+		t.Fatalf("qa final proof should summarize handoff evidence: %#v", proof)
+	}
+	if _, err := os.Stat(final["finalPath"].(string)); err != nil {
+		t.Fatalf("qa final should write final proof JSON: %v", err)
+	}
 }
 
 func TestRunSecretsAndSkillJSONContracts(t *testing.T) {

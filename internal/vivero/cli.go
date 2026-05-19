@@ -428,7 +428,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	if len(args) < 2 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero qa <plan|context|run|record|report> <preview>"))
+		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero qa <plan|context|run|record|final|report> <preview>"))
 	}
 	action := args[0]
 	previewID := args[1]
@@ -498,6 +498,51 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, v, qaRecordHuman(v))
+		if v["ok"] != true {
+			return 1
+		}
+		return 0
+	case "final":
+		opts := QAFinalOptions{Scope: scope, Target: artifactTargetFromArgs(actionArgs), SkipScreenshots: hasArg(actionArgs, "--no-screenshots"), SkipRecord: hasArg(actionArgs, "--no-record")}
+		if width, ok, err := positiveIntFlag(actionArgs, "--width"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		} else if ok {
+			opts.Width = width
+		}
+		if height, ok, err := positiveIntFlag(actionArgs, "--height"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		} else if ok {
+			opts.Height = height
+		}
+		if dsf, ok, err := positiveFloatFlag(actionArgs, "--device-scale-factor"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		} else if ok {
+			opts.DeviceScaleFactor = dsf
+		}
+		if format, ok := flagValue(actionArgs, "--format"); ok {
+			opts.Format = format
+		}
+		if colorScheme, ok := flagValue(actionArgs, "--color-scheme"); ok {
+			opts.ColorScheme = colorScheme
+		}
+		if storageState, ok := flagValue(actionArgs, "--storage-state"); ok {
+			opts.StorageState = expandPath(storageState)
+		}
+		if ms, ok, err := nonNegativeIntFlag(actionArgs, "--slow-mo-ms"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		} else if ok {
+			opts.SlowMoMS = ms
+		}
+		if ms, ok, err := nonNegativeIntFlag(actionArgs, "--wait-ms"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		} else if ok {
+			opts.WaitMS = ms
+		}
+		v, err := a.QAFinal(previewID, opts)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, v, qaFinalHuman(v))
 		if v["ok"] != true {
 			return 1
 		}
