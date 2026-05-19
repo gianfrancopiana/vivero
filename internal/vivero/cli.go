@@ -351,6 +351,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "qa":
 		return a.runQA(rest, stdout, stderr, jsonOut)
+	case "diagnose":
+		return a.runDiagnose(rest, stdout, stderr, jsonOut)
 	case "prebuild":
 		pos := positionalArgs(rest)
 		if len(pos) < 1 {

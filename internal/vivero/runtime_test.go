@@ -25,6 +25,20 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
+func assertEventHasDuration(t *testing.T, events []Event, typ, service string) {
+	t.Helper()
+	for _, event := range events {
+		if event.Type != typ || event.Service != service {
+			continue
+		}
+		if _, ok := durationMsFromMetadata(event.Metadata); !ok {
+			t.Fatalf("event %s/%s missing duration metadata: %#v", typ, service, event.Metadata)
+		}
+		return
+	}
+	t.Fatalf("missing event %s/%s in %#v", typ, service, events)
+}
+
 func TestContainerPreviewLifecycle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)
@@ -131,6 +145,14 @@ agent:
 	if preview.Services["web"].URL == "" {
 		t.Fatal("expected URL")
 	}
+	events, err := a.events("test-static", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEventHasDuration(t, events, "source.ready", "app")
+	assertEventHasDuration(t, events, "setup.afterSeeds", "web")
+	assertEventHasDuration(t, events, "service.started", "web")
+	assertEventHasDuration(t, events, "service.healthy", "web")
 	if preview.Services["web"].Runtime != "docker" || preview.Services["web"].ContainerID == "" {
 		t.Fatalf("expected docker service with container id: %#v", preview.Services["web"])
 	}
