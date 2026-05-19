@@ -312,8 +312,9 @@ Never attempt to print secret values. `vivero secrets list` returns keys only.
 When a preview fails:
 
 1. Run `vivero inspect <preview-id> --json --no-input`.
-2. Run `vivero events <preview-id> --tail --json --no-input`.
-3. Check service logs with `vivero logs`.
-4. Confirm source paths and refs in the preview record.
-5. Confirm secrets are present by key, not by value.
-6. Re-run smoke or QA only after the underlying runtime issue is clear.
+2. Run `vivero diagnose startup <preview-id> --json --no-input` to identify slow startup phases and the first failure without exposing secret-looking metadata.
+3. Run `vivero events <preview-id> --tail --json --no-input` for the raw event stream.
+4. Check service logs with `vivero logs`.
+5. Confirm source paths and refs in the preview record.
+6. Confirm secrets are present by key, not by value.
+7. Re-run smoke or QA only after the underlying runtime issue is clear.

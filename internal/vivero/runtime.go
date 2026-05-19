@@ -77,9 +77,10 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		return p, err
 	}
 	for name, src := range runtimeConfig.Sources {
+		timer := startOperationTimer()
 		resolved, err := a.resolveSource(runtimeConfig.Project.Name, project.Path, req.ID, name, src, req.Sources)
 		if err != nil {
-			a.recordEvent(req.ID, "error", "source.failed", err.Error(), name, nil)
+			a.recordEvent(req.ID, "error", "source.failed", err.Error(), name, timer.metadata(nil))
 			_ = a.setPreviewStatus(req.ID, "unhealthy")
 			return p, err
 		}
@@ -87,7 +88,7 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		if err := a.saveSource(req.ID, resolved); err != nil {
 			return p, err
 		}
-		a.recordEvent(req.ID, "info", "source.ready", "source ready", name, map[string]string{"path": resolved.Path, "mode": resolved.Mode, "ref": resolved.Ref})
+		a.recordEvent(req.ID, "info", "source.ready", "source ready", name, timer.metadata(map[string]string{"path": resolved.Path, "mode": resolved.Mode, "ref": resolved.Ref}))
 	}
 	if err := a.validateNamedPublicRouteConflicts(req, runtimeConfig); err != nil {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
@@ -120,8 +121,9 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
+	setupTimer := startOperationTimer()
 	if err := a.runSetupSteps(req.ID, runtimeConfig.Setup.AfterSeeds, runtimeConfig, p.Sources, warmState); err != nil {
-		a.recordEvent(req.ID, "error", "setup.failed", err.Error(), "", nil)
+		a.recordEvent(req.ID, "error", "setup.failed", err.Error(), "", setupTimer.metadata(nil))
 		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
 			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 		}
@@ -257,13 +259,15 @@ func (a *App) buildServiceImages(project ProjectRecord, previewID string, source
 		if err != nil {
 			return err
 		}
+		timer := startOperationTimer()
 		a.recordEvent(previewID, "info", "image.building", "building service image", name, map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile})
 		if err := buildDockerImage(spec); err != nil {
+			a.recordEvent(previewID, "error", "image.build_failed", err.Error(), name, timer.metadata(map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile}))
 			return fmt.Errorf("build image for service %s: %w", name, err)
 		}
 		svc.Image = spec.Tag
 		services[name] = svc
-		a.recordEvent(previewID, "info", "image.built", "service image built", name, map[string]string{"tag": spec.Tag})
+		a.recordEvent(previewID, "info", "image.built", "service image built", name, timer.metadata(map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile}))
 	}
 	cfg.Services = services
 	return nil
@@ -465,6 +469,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			return err
 		}
 		_ = workdir
+		timer := startOperationTimer()
 		var out []byte
 		if step.Service != "" {
 			svc := cfg.Services[step.Service]
@@ -477,6 +482,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			metadata["service"] = step.Service
 		}
 		if err != nil {
+			a.recordEvent(previewID, "error", "setup.afterSeeds.failed", err.Error(), step.Service, timer.metadata(metadata))
 			return fmt.Errorf("setup.afterSeeds[%d] failed: %w: %s", i, err, string(out))
 		}
 		if markerPath != "" {
@@ -488,7 +494,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			}
 			metadata["marker"] = markerPath
 		}
-		a.recordEvent(previewID, "info", "setup.afterSeeds", "setup command completed", step.Service, metadata)
+		a.recordEvent(previewID, "info", "setup.afterSeeds", "setup command completed", step.Service, timer.metadata(metadata))
 	}
 	return nil
 }
@@ -635,6 +641,7 @@ func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewSe
 
 func (a *App) startService(req UpRequest, name string, svc ServiceConfig, sources map[string]PreviewSource, cfg ProjectConfig, forcePublic bool, includeSecrets bool) (PreviewService, error) {
 	previewID := req.ID
+	serviceTimer := startOperationTimer()
 	runtime := serviceRuntime(svc)
 	ports, err := servicePortPlan(svc)
 	if err != nil {
@@ -700,15 +707,17 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		}
 	}
 	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via docker\n"), 0o644)
-	a.recordEvent(previewID, "info", "service.started", "container started", name, map[string]string{"container": containerID, "image": svc.Image, "command": svc.Command})
+	a.recordEvent(previewID, "info", "service.started", "container started", name, serviceTimer.metadata(map[string]string{"container": containerID, "image": svc.Image, "command": svc.Command}))
 	if workdir != "" {
 		a.recordEvent(previewID, "info", "service.workdir", "container source mounted", name, map[string]string{"hostPath": workdir})
 	}
 	if strings.TrimSpace(svc.Health.Command) != "" {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
+		healthTimer := startOperationTimer()
 		if err := waitDockerHealthCommand(containerID, svc.Health, timeout); err != nil {
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
+			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"container": containerID}))
 			if cleanupErr := cleanupStarted(); cleanupErr != nil {
 				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 			}
@@ -717,13 +726,15 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		}
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"
-		a.recordEvent(previewID, "info", "service.healthy", "health command passed", name, map[string]string{"container": containerID})
+		a.recordEvent(previewID, "info", "service.healthy", "health command passed", name, healthTimer.metadata(map[string]string{"container": containerID}))
 	}
 	if originURL != "" {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
+		healthTimer := startOperationTimer()
 		if err := waitHTTP(originURL, svc.Health, timeout); err != nil {
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
+			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"url": originURL}))
 			if cleanupErr := cleanupStarted(); cleanupErr != nil {
 				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 			}
@@ -732,7 +743,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		}
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"
-		a.recordEvent(previewID, "info", "service.healthy", "health check passed", name, map[string]string{"url": originURL})
+		a.recordEvent(previewID, "info", "service.healthy", "health check passed", name, healthTimer.metadata(map[string]string{"url": originURL}))
 	}
 	if originURL != "" {
 		var tunnelOriginURL string
@@ -760,9 +771,11 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 					}
 					return ps, err
 				}
+				tunnelTimer := startOperationTimer()
 				if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
 					ps.Status = "unhealthy"
 					ps.LastHealth = err.Error()
+					a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 					err = fmt.Errorf("public named tunnel health failed for %s: %w", name, err)
 					if cleanupErr := cleanupStarted(); cleanupErr != nil {
 						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
@@ -770,11 +783,13 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 					_ = a.saveService(previewID, ps)
 					return ps, err
 				}
-				a.recordEvent(previewID, "info", "tunnel.ready", "stable public URL health check passed", name, map[string]string{"url": url, "origin": tunnelOriginURL})
+				a.recordEvent(previewID, "info", "tunnel.ready", "stable public URL health check passed", name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 				return ps, nil
 			}
+			tunnelTimer := startOperationTimer()
 			url, pid, tlog, err := a.startQuickTunnel(previewID, name, tunnelOriginURL, "")
 			if err != nil {
+				a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"origin": tunnelOriginURL}))
 				if cleanupErr := cleanupStarted(); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 				}
@@ -787,6 +802,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
 				ps.Status = "unhealthy"
 				ps.LastHealth = err.Error()
+				a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 				err = fmt.Errorf("public tunnel health failed for %s: %w", name, err)
 				if cleanupErr := cleanupStarted(); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
@@ -794,7 +810,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 				_ = a.saveService(previewID, ps)
 				return ps, err
 			}
-			a.recordEvent(previewID, "info", "tunnel.ready", "public URL health check passed", name, map[string]string{"url": url})
+			a.recordEvent(previewID, "info", "tunnel.ready", "public URL health check passed", name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 		}
 	}
 	if ps.Status == "starting" {
