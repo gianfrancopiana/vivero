@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -395,4 +396,111 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (a *App) Screenshot(previewID, service, path string) (map[string]any, error) {
+	return a.ScreenshotWithOptions(previewID, service, ScreenshotOptions{Path: path})
+}
+
+func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOptions) (map[string]any, error) {
+	opts = normalizeScreenshotOptions(opts)
+	if err := validateColorScheme(opts.ColorScheme); err != nil {
+		return nil, err
+	}
+	p, err := a.getPreview(previewID)
+	if err != nil {
+		return nil, err
+	}
+	svc, ok := p.Services[service]
+	if !ok {
+		return nil, fmt.Errorf("service not found: %s", service)
+	}
+	projectBreakpoints := []ScreenshotBreakpoint{}
+	if opts.UseProjectBreakpoints {
+		if rec, err := a.getProject(p.Project); err == nil {
+			projectBreakpoints = rec.Config.Agent.ScreenshotBreakpoints
+		}
+	}
+	breakpoints := screenshotBreakpoints(opts, projectBreakpoints)
+	if len(breakpoints) == 0 {
+		breakpoints = []ScreenshotBreakpoint{{Width: opts.Width, Height: opts.Height}}
+	}
+	if _, err := exec.LookPath("npx"); err != nil {
+		return nil, fmt.Errorf("npx/playwright not available for screenshots: %w", err)
+	}
+	baseURL := serviceBaseURLForTarget(svc, opts.Target)
+	if baseURL == "" {
+		return nil, fmt.Errorf("service %s has no %s URL", service, opts.Target)
+	}
+	url := strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(opts.Path, "/")
+	screenshots := []map[string]any{}
+	for _, bp := range breakpoints {
+		if bp.Width <= 0 || bp.Height <= 0 {
+			return nil, fmt.Errorf("invalid screenshot breakpoint %q: %dx%d", bp.Name, bp.Width, bp.Height)
+		}
+		out := screenshotOutputPath(a.Home, opts.OutputDir, previewID, service, opts.Path, bp, len(breakpoints) > 1, opts.ColorScheme)
+		if err := ensureDir(filepath.Dir(out)); err != nil {
+			return nil, err
+		}
+		args := []string{"--yes", "playwright", "screenshot", "--viewport-size", fmt.Sprintf("%d,%d", bp.Width, bp.Height)}
+		args = append(args, "--channel", "chrome")
+		if opts.FullPage {
+			args = append(args, "--full-page")
+		}
+		if opts.WaitForSelector != "" {
+			args = append(args, "--wait-for-selector", opts.WaitForSelector)
+		}
+		if opts.WaitForTimeout != "" {
+			args = append(args, "--wait-for-timeout", opts.WaitForTimeout)
+		}
+		if opts.ColorScheme != "" {
+			args = append(args, "--color-scheme", opts.ColorScheme)
+		}
+		args = append(args, url, out)
+		cmd := exec.Command("npx", args...)
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("playwright screenshot failed: %w: %s", err, string(b))
+		}
+		width, height, err := screenshotDimensions(out)
+		if err != nil {
+			return nil, fmt.Errorf("read screenshot dimensions: %w", err)
+		}
+		cropped := false
+		originalWidth, originalHeight := width, height
+		if opts.Crop {
+			crop, err := cropScreenshotOuterWhitespace(out)
+			if err != nil {
+				return nil, fmt.Errorf("crop screenshot whitespace: %w", err)
+			}
+			cropped = crop.Cropped
+			width = crop.Width
+			height = crop.Height
+			originalWidth = crop.OriginalWidth
+			originalHeight = crop.OriginalHeight
+		}
+		screenshots = append(screenshots, map[string]any{
+			"preview":        previewID,
+			"service":        service,
+			"target":         opts.Target,
+			"colorScheme":    opts.ColorScheme,
+			"url":            url,
+			"path":           out,
+			"breakpoint":     bp.Name,
+			"viewportWidth":  bp.Width,
+			"viewportHeight": bp.Height,
+			"cropped":        cropped,
+			"width":          width,
+			"height":         height,
+			"originalWidth":  originalWidth,
+			"originalHeight": originalHeight,
+		})
+	}
+	result := map[string]any{"preview": previewID, "service": service, "target": opts.Target, "url": url, "screenshots": screenshots}
+	if len(screenshots) == 1 {
+		for k, v := range screenshots[0] {
+			result[k] = v
+		}
+	}
+	return result, nil
 }
