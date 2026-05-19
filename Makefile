@@ -2,7 +2,7 @@ BINARY := vivero
 VERSION ?= dev
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION)"
 
-.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke clean
+.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke example-e2e clean
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
@@ -51,6 +51,9 @@ snapshot:
 
 release-smoke:
 	scripts/release-smoke.sh
+
+example-e2e:
+	scripts/example-e2e.sh
 
 clean:
 	rm -rf bin dist

@@ -19,6 +19,16 @@ Vivero is local-first. The boundary is simple: **the app owns how it runs; Viver
 
 ## Basic workflow
 
+Try the self-contained fixture first:
+
+```sh
+make example-e2e
+```
+
+It syncs `examples/agent-demo`, starts a Dockerized local preview, runs `vivero qa final` in lightweight mode, verifies artifact paths, diagnoses startup, tears the preview down, and checks that the example app files stayed clean. To opt into browser screenshots/video for that fixture, run `VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e`.
+
+A normal project flow looks like this:
+
 ```sh
 vivero projects sync /path/to/project --json --no-input
 vivero up webapp --id webapp-local --source app.path=/path/to/webapp --wait --timeout 5m --json --no-input --quiet

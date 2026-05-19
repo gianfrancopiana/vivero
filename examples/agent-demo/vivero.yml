@@ -1,0 +1,138 @@
+project:
+  name: agent-demo
+
+sources:
+  app:
+    mode: external
+    path: .
+
+services:
+  web:
+    source: app
+    runtime: docker
+    image: node:22-alpine
+    workingDir: .
+    command: node server.js
+    ports:
+      http:
+        container: 3000
+    primaryPort: http
+    health:
+      path: /health
+      expectStatus: 200
+      timeout: 1m
+      interval: 1s
+
+agent:
+  defaultPreviewService: web
+  screenshotBreakpoints:
+    - name: desktop
+      width: 1280
+      height: 800
+    - name: mobile
+      width: 390
+      height: 844
+  commonPages:
+    home:
+      service: web
+      path: /
+    products:
+      service: web
+      path: /products
+    settings:
+      service: web
+      path: /settings
+    status-json:
+      service: web
+      path: /api/status
+  smokeTests:
+    - name: health
+      service: web
+      path: /health
+      expectStatus: 200
+    - name: home
+      service: web
+      path: /
+      expectStatus: 200
+    - name: products
+      service: web
+      path: /products
+      expectStatus: 200
+  qa:
+    defaultScope: smoke
+    artifactRoot: ~/.cache/vivero/agent-demo
+    driver:
+      preferred: playwright
+      evidence: playwright
+      exploratory: browser
+      allowed:
+        - playwright
+        - browser
+      notes: >-
+        Use Vivero for deterministic smoke, screenshots, recordings, reports, and
+        final proof artifacts. Use an external browser only for exploratory follow-up.
+    auth:
+      sessions:
+        demo-user:
+          storageState: qa-auth/demo-user.storage-state.json
+          scopes:
+            - authenticated
+          note: >-
+            Non-secret fixture state for this demo only. Real projects should keep
+            storage-state files outside git and never store credentials in Vivero.
+    evidence:
+      screenshots:
+        colorSchemes:
+          - light
+          - dark
+      recordings:
+        colorSchemes:
+          - light
+    scopes:
+      - name: smoke
+        description: Public pages and API checks that should pass on every preview.
+        pages:
+          - home
+          - products
+          - status-json
+        flows:
+          - name: public-browse
+            start: home
+            steps:
+              - visit: home
+                expectText: Agent-ready local preview
+                screenshot: home
+              - visit: products
+                expectText: Demo product catalog loaded.
+                screenshot: products
+              - visit: status-json
+                expectText: agent-demo
+        checks:
+          - name: smoke-tests-pass
+            category: runtime
+            severity: critical
+            method: vivero-smoke
+            description: Run configured HTTP smoke tests before browser evidence.
+          - name: final-proof-written
+            category: artifacts
+            severity: high
+            method: vivero-qa-final
+            description: Produce a machine-readable final.json with URLs and artifact paths.
+      - name: authenticated
+        description: Authenticated fixture flow using a committed non-secret storage state.
+        authSession: demo-user
+        pages:
+          - settings
+        flows:
+          - name: settings-authenticated
+            start: settings
+            steps:
+              - visit: settings
+                expectText: demo-agent@example.test
+                screenshot: settings-authenticated
+        checks:
+          - name: storage-state-present
+            category: auth
+            severity: high
+            method: playwright-storage-state
+            description: Doctor must verify the configured storage-state file exists.
