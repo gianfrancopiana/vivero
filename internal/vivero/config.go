@@ -126,6 +126,9 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if _, err := normalizeSetupPolicy(step.Policy); err != nil {
 			return fmt.Errorf("%s setup.afterSeeds[%d]: %w", configPath, i, err)
 		}
+		if err := validateFingerprintPaths(configPath, fmt.Sprintf("setup.afterSeeds[%d].fingerprint.paths", i), step.Fingerprint.Paths); err != nil {
+			return err
+		}
 		if strings.TrimSpace(step.Command) == "" {
 			continue
 		}
@@ -182,14 +185,7 @@ func validateWarmConfig(configPath string, warm WarmConfig) error {
 			return fmt.Errorf("%s warm.baselineRefs[%d] contains unsupported newline or NUL", configPath, i)
 		}
 	}
-	for i, path := range warm.Fingerprint.Paths {
-		raw := strings.TrimSpace(path)
-		cleaned := filepath.Clean(raw)
-		if raw == "" || cleaned == "." || filepath.IsAbs(raw) || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || strings.ContainsAny(raw, "\x00\n\r") {
-			return fmt.Errorf("%s warm.fingerprint.paths[%d] must be a safe project-relative path", configPath, i)
-		}
-	}
-	return nil
+	return validateFingerprintPaths(configPath, "warm.fingerprint.paths", warm.Fingerprint.Paths)
 }
 
 func imageBuildConfigured(build ImageBuildConfig) bool {
@@ -235,7 +231,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker"},
-		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "bundled-skill", "cli-manifest", "clig-compatible-help"},
+		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bundled-skill", "cli-manifest", "clig-compatible-help"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

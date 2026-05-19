@@ -93,6 +93,18 @@ services:
       timeout: 2m
       interval: 2s
 
+setup:
+  afterSeeds:
+    - service: web
+      command: npm install
+      policy: once-per-fingerprint
+      fingerprint:
+        paths:
+          - package-lock.json
+    - service: web
+      command: npm run build
+      policy: per-preview
+
 agent:
   defaultPreviewService: web
   commonPages:
@@ -140,6 +152,12 @@ Warm dependency volumes:
 - `preview` (default): removed by `vivero down --discard`.
 - `project`: one project-wide Docker volume, shared by all previews.
 - `smart`: baseline refs such as `main` update a canonical warm volume; branch previews start from a preview-local copy, so branch migrations or installs do not poison the baseline. `warm.fingerprint.paths` invalidates setup markers when lockfiles, migrations, schemas, or seeds change.
+
+Setup policy:
+- `per-preview` (default): run every preview.
+- `once-per-project`: skip after the command succeeds once for the project/config step. Use only when the target service writes durable output to a `project` or `smart` dependency volume.
+- `once-per-fingerprint`: compute a stable hash from `setup.afterSeeds[].fingerprint.paths`, falling back to `warm.fingerprint.paths`; skip only when the same service/command/path fingerprint already succeeded. Runtime errors if neither paths nor a persistent dependency volume are present.
+- `vivero doctor config <path> --json --no-input` warns when fingerprint paths are missing or setup caching has no persistent volume.
 
 ## License
 
