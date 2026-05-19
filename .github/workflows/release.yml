@@ -26,6 +26,11 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
+          args: release --snapshot --clean
+      - run: scripts/release-smoke.sh --skip-snapshot --dist dist
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

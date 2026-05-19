@@ -39,3 +39,19 @@ jobs:
           go-version-file: go.mod
       - run: make test-short
       - run: make build
+
+  release-snapshot:
+    name: Release snapshot smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+      - run: scripts/release-smoke.sh --skip-snapshot --dist dist
