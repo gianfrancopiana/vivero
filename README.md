@@ -96,9 +96,12 @@ Before release-facing changes, run:
 ```sh
 make verify
 make cover
+make release-smoke
 ```
 
-CI runs quality gates plus Linux/macOS builds. Tag releases publish darwin/linux archives for amd64 and arm64. Windows and Homebrew are intentionally out of scope for now.
+`make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
+
+CI runs quality gates, Linux/macOS builds, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
 
 ## License
 
