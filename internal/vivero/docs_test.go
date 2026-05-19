@@ -26,6 +26,9 @@ func TestREADMEIsConciseAndAgentFocused(t *testing.T) {
 		"Inline Dockerfiles and copied compose/env contracts do not belong in `vivero.yml`.",
 		"## Basic use",
 		"public:` config",
+		"## Development and release checks",
+		"make cover",
+		"README command examples",
 		"## License\n\n[MIT](LICENSE)",
 	} {
 		if !strings.Contains(body, want) {

@@ -183,6 +183,17 @@ Authenticated QA:
 - `vivero qa plan` includes the resolved auth context and generated screenshot/recording commands with `--storage-state` when applicable.
 - `vivero doctor config <path> --json --no-input` warns when a storage-state file is missing and errors when the path escapes the project. Vivero does not store credentials or implement app-specific login flows.
 
+## Development and release checks
+
+Before releasing CLI-facing changes, run:
+
+```sh
+make verify
+make cover
+```
+
+The CLI contract is covered by tests for help text, command discovery, JSON error shape, schema output, doctor aliases, QA JSON, secrets, skill install, and README command examples. Raise any future coverage floor only after `make cover` shows the branch already exceeds it.
+
 ## License
 
 [MIT](LICENSE)
