@@ -69,7 +69,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 	a := &App{Home: t.TempDir()}
 	caps := a.capabilities()
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "clig-compatible-help", "config-doctor", "production-readiness-doctor", "bounded-parallel-startup", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "clig-compatible-help", "config-doctor", "production-readiness-doctor", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}

@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -95,7 +96,7 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 		},
 	}
 
-	evidence, err := qaEvidencePlan("preview", "core", p, agent, agent.QA.Scopes, "", "/tmp/qa")
+	evidence, err := qaEvidencePlan("preview", "core", p, agent, agent.QA.Scopes, nil, "", "/tmp/qa")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestQAEvidencePlanRecordCommandsIgnorePublicPlanTarget(t *testing.T) {
 		},
 	}
 
-	evidence, err := qaEvidencePlan("preview", "public", p, agent, agent.QA.Scopes, "public", "/tmp/qa")
+	evidence, err := qaEvidencePlan("preview", "public", p, agent, agent.QA.Scopes, nil, "public", "/tmp/qa")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	if strings.Contains(usage, "--color-scheme") {
 		t.Fatalf("qa schema should keep color schemes in agent.qa.evidence, not as a broad qa flag: %s", usage)
 	}
-	if qa["config"] != "agent.qa and agent.qa.evidence in vivero.yml" {
+	if qa["config"] != "agent.qa, agent.qa.auth, and agent.qa.evidence in vivero.yml" {
 		t.Fatalf("qa schema config = %v", qa["config"])
 	}
 	recordOptions := qa["recordOptions"].(map[string]any)
@@ -215,6 +216,9 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	}
 	if !strings.Contains(recordOptions["colorScheme"].(string), "generated evidence.recordings.commands") {
 		t.Fatalf("qa schema should document record color scheme as generated evidence primitive: %v", recordOptions)
+	}
+	if !strings.Contains(recordOptions["storageState"].(string), "agent.qa.auth.sessions") {
+		t.Fatalf("qa schema should document storage-state auth primitive: %v", recordOptions)
 	}
 
 	shot := schemaFor("screenshot")["schema"].(map[string]any)
@@ -225,5 +229,8 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	shotUsage := shot["usage"].(string)
 	if !strings.Contains(shotUsage, "--color-scheme") {
 		t.Fatalf("screenshot schema usage should advertise color scheme evidence: %s", shotUsage)
+	}
+	if !strings.Contains(fmt.Sprint(shot["flags"]), "--storage-state") {
+		t.Fatalf("screenshot schema should advertise authenticated evidence storage state: %v", shot["flags"])
 	}
 }

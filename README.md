@@ -123,6 +123,12 @@ agent:
   qa:
     defaultScope: public
     artifactRoot: .vivero/qa
+    auth:
+      sessions:
+        admin:
+          storageState: .vivero/auth/admin.storage.json
+          scopes: [authenticated]
+          note: Operator-provided Playwright storage state; Vivero never stores credentials.
     scopes:
       - name: public
         pages: [home]
@@ -137,6 +143,9 @@ agent:
             steps:
               - visit: home
               - screenshot: homepage
+      - name: authenticated
+        authSession: admin
+        pages: [home]
 
 profiles:
   default:
@@ -167,6 +176,12 @@ Startup bounds:
 - `resources.maxStartupConcurrency` bounds concurrent backing-service startup and, after setup completes, concurrent app-service startup.
 - `0` uses Vivero's conservative default (`4`), `1` preserves sequential startup, and larger values are capped by the number of services.
 - Setup steps remain sequential because their order may matter.
+
+Authenticated QA:
+- Put reusable browser auth state in `agent.qa.auth.sessions.<name>.storageState` as a project-relative Playwright storage-state file.
+- Attach auth by listing session `scopes` or by setting `agent.qa.scopes[].authSession`.
+- `vivero qa plan` includes the resolved auth context and generated screenshot/recording commands with `--storage-state` when applicable.
+- `vivero doctor config <path> --json --no-input` warns when a storage-state file is missing and errors when the path escapes the project. Vivero does not store credentials or implement app-specific login flows.
 
 ## License
 
