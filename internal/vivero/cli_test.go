@@ -1,0 +1,370 @@
+package vivero
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
+	home := t.TempDir()
+	code, stdout, stderr := runCLITestCommand(t, home, "--help")
+	if code != 0 || stderr != "" {
+		t.Fatalf("help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, want := range []string{"Examples:", "vivero diagnose startup", "vivero commands --json --no-input"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("root help missing %q:\n%s", want, stdout)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "help", "qa", "run")
+	if code != 0 || stderr != "" {
+		t.Fatalf("qa run help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	examples := strings.Index(stdout, "Examples:")
+	flags := strings.Index(stdout, "Flags:")
+	if examples == -1 || flags == -1 || examples > flags {
+		t.Fatalf("subcommand help should be examples-first:\n%s", stdout)
+	}
+	for _, want := range []string{"Usage:", "vivero qa run", "JSON stability: stable"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("qa run help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunUnknownCommandReturnsJSONErrorShape(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "prevue", "--json", "--no-input")
+	if code == 0 {
+		t.Fatalf("unknown command should fail stdout=%s stderr=%s", stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("JSON errors should write to stderr only, got stdout=%s", stdout)
+	}
+	var payload struct {
+		OK    bool     `json:"ok"`
+		Error cliError `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
+	}
+	if payload.OK || payload.Error.Code != "unknown_command" || !strings.Contains(payload.Error.Message, "prevue") || payload.Error.Hint == "" {
+		t.Fatalf("unexpected error payload: %#v", payload)
+	}
+}
+
+func TestRunSchemaDiagnoseReturnsCommandSchema(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "schema", "diagnose", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("schema diagnose exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		Command string `json:"command"`
+		Schema  struct {
+			Usage         string `json:"usage"`
+			JSONStability string `json:"jsonStability"`
+			AgentSafe     bool   `json:"agentSafe"`
+		} `json:"schema"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid schema JSON: %v stdout=%s", err, stdout)
+	}
+	if payload.Command != "diagnose startup" || payload.Schema.JSONStability != "experimental" || !payload.Schema.AgentSafe || !strings.Contains(payload.Schema.Usage, "diagnose startup") {
+		t.Fatalf("unexpected diagnose schema: %#v", payload)
+	}
+}
+
+func TestRunCommandsJSONCoversREADMEInvocations(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "commands", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("commands exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		Commands []CommandManifest `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid commands JSON: %v stdout=%s", err, stdout)
+	}
+	if len(payload.Commands) == 0 {
+		t.Fatal("commands JSON should include command manifests")
+	}
+	readmeBytes, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invocation := range readmeViveroInvocations(string(readmeBytes)) {
+		if !manifestMatchesInvocation(payload.Commands, invocation) {
+			t.Fatalf("README invocation %q is not covered by command manifest", invocation)
+		}
+	}
+}
+
+func TestRunDoctorJSONContracts(t *testing.T) {
+	home := t.TempDir()
+	code, stdout, stderr := runCLITestCommand(t, home, "doctor", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("doctor exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var doctor struct {
+		OK      bool           `json:"ok"`
+		Version string         `json:"version"`
+		Checks  map[string]any `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &doctor); err != nil {
+		t.Fatalf("invalid doctor JSON: %v stdout=%s", err, stdout)
+	}
+	if !doctor.OK || doctor.Version == "" || doctor.Checks["database"] == "" {
+		t.Fatalf("unexpected doctor payload: %#v", doctor)
+	}
+
+	badConfigDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(badConfigDir, "vivero.yml"), []byte("project:\n  name: [unterminated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = runCLITestCommand(t, home, "doctor", "--project", badConfigDir, "--json", "--no-input")
+	if code == 0 || stderr != "" {
+		t.Fatalf("doctor --project bad config should fail via JSON stdout, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var configPayload struct {
+		ConfigDoctor ConfigDoctorReport `json:"configDoctor"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &configPayload); err != nil {
+		t.Fatalf("invalid config doctor JSON: %v stdout=%s", err, stdout)
+	}
+	if configPayload.ConfigDoctor.OK || configPayload.ConfigDoctor.Errors == 0 || len(configPayload.ConfigDoctor.Findings) == 0 || configPayload.ConfigDoctor.Findings[0].Code != "config-load" {
+		t.Fatalf("unexpected config doctor payload: %#v", configPayload.ConfigDoctor)
+	}
+}
+
+func TestRunQASubcommandsJSONContract(t *testing.T) {
+	home := t.TempDir()
+	setupCLIQAPreview(t, home)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "qa", "plan", "cli-pr", "--scope", "auth", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("qa plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
+		t.Fatalf("invalid qa plan JSON: %v stdout=%s", err, stdout)
+	}
+	if plan["version"].(float64) != 1 || plan["target"] != "local" || plan["driver"] == nil || plan["auth"] == nil || plan["evidence"] == nil {
+		t.Fatalf("qa plan missing stable contract fields: %#v", plan)
+	}
+	if !strings.Contains(stdout, "--storage-state") {
+		t.Fatalf("authenticated qa plan should include generated storage-state commands: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "qa", "run", "cli-pr", "--scope", "auth", "--no-screenshots", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("qa run exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var run map[string]any
+	if err := json.Unmarshal([]byte(stdout), &run); err != nil {
+		t.Fatalf("invalid qa run JSON: %v stdout=%s", err, stdout)
+	}
+	if run["ok"] != true || run["plan"] == nil || run["report"] == nil || run["runPath"] == "" {
+		t.Fatalf("qa run missing stable contract fields: %#v", run)
+	}
+}
+
+func TestRunSecretsAndSkillJSONContracts(t *testing.T) {
+	home := t.TempDir()
+	code, stdout, stderr := runCLITestCommand(t, home, "secrets", "set", "demo", "TOKEN=secret-value", "OTHER=1", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("secrets set exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "secret-value") {
+		t.Fatalf("secrets JSON must not echo values: %s", stdout)
+	}
+	var secrets struct {
+		Project string   `json:"project"`
+		Keys    []string `json:"keys"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &secrets); err != nil {
+		t.Fatalf("invalid secrets JSON: %v stdout=%s", err, stdout)
+	}
+	if secrets.Project != "demo" || strings.Join(secrets.Keys, ",") != "OTHER,TOKEN" {
+		t.Fatalf("unexpected secrets payload: %#v", secrets)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "secrets", "unset", "demo", "TOKEN", "--json", "--no-input")
+	if code != 0 || stderr != "" || strings.Contains(stdout, "TOKEN") {
+		t.Fatalf("secrets unset should remove TOKEN exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	target := filepath.Join(t.TempDir(), "vivero-skill")
+	code, stdout, stderr = runCLITestCommand(t, home, "skill", "install", "--target", target, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("skill install exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var install struct {
+		Version string `json:"version"`
+		SHA256  string `json:"sha256"`
+		Targets []struct {
+			Path      string `json:"path"`
+			Installed bool   `json:"installed"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &install); err != nil {
+		t.Fatalf("invalid skill install JSON: %v stdout=%s", err, stdout)
+	}
+	if install.Version == "" || install.SHA256 == "" || len(install.Targets) != 1 || !install.Targets[0].Installed {
+		t.Fatalf("unexpected skill install payload: %#v", install)
+	}
+	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err != nil {
+		t.Fatalf("skill install should write SKILL.md: %v", err)
+	}
+}
+
+func TestFlagParsingErrorsStayJSON(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "qa", "record", "missing-preview", "--width", "0", "--json", "--no-input")
+	if code == 0 || stdout != "" {
+		t.Fatalf("invalid width should fail on stderr only, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
+	}
+	if payload.OK || payload.Error.Code != "error" || !strings.Contains(payload.Error.Message, "--width must be a positive integer") {
+		t.Fatalf("unexpected flag error payload: %#v", payload)
+	}
+}
+
+func TestCLIHumanFormatHelpers(t *testing.T) {
+	projectText := projectsHuman([]ProjectRecord{{Name: "demo", Path: "/tmp/demo"}})
+	if !strings.Contains(projectText, "demo\t/tmp/demo") {
+		t.Fatalf("projectsHuman output = %q", projectText)
+	}
+	preview := PreviewRecord{ID: "cli-pr", Status: "running", Profile: "full", Services: map[string]PreviewService{"web": {Name: "web", Status: "healthy", URL: "https://example.test"}}}
+	previewText := previewHuman(preview)
+	if !strings.Contains(previewText, "cli-pr running profile=full") || !strings.Contains(previewText, "web\thealthy\thttps://example.test") {
+		t.Fatalf("previewHuman output = %q", previewText)
+	}
+	if got := screenshotsHuman(map[string]any{"screenshots": []map[string]any{{"path": "/tmp/a.png"}, {"path": "/tmp/b.png"}}}); got != "/tmp/a.png\n/tmp/b.png" {
+		t.Fatalf("screenshotsHuman output = %q", got)
+	}
+	if got := eventsHuman([]Event{{Seq: 1, Level: "info", Type: "service.ready", Message: "ready"}}); !strings.Contains(got, "1 info service.ready ready") {
+		t.Fatalf("eventsHuman output = %q", got)
+	}
+	if got := qaRunHuman(map[string]any{"ok": true, "report": map[string]any{"path": "/tmp/report.md"}}); got != "qa run ok\nreport: /tmp/report.md" {
+		t.Fatalf("qaRunHuman output = %q", got)
+	}
+}
+
+func runCLITestCommand(t *testing.T, home string, args ...string) (int, string, string) {
+	t.Helper()
+	t.Setenv("VIVERO_HOME", home)
+	var stdout, stderr bytes.Buffer
+	code := Run(args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
+}
+
+func setupCLIQAPreview(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("VIVERO_HOME", home)
+	projectDir := t.TempDir()
+	storageState := filepath.Join(projectDir, ".vivero", "auth", "admin.storage.json")
+	if err := os.MkdirAll(filepath.Dir(storageState), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storageState, []byte(`{"cookies":[],"origins":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	cfg := ProjectConfig{
+		Project:  ProjectMeta{Name: "demo"},
+		Sources:  map[string]SourceConfig{"app": {Mode: "external", Path: projectDir}},
+		Services: map[string]ServiceConfig{"web": {Source: "app", Port: 3000}},
+		Agent: AgentConfig{
+			DefaultPreviewService: "web",
+			CommonPages: map[string]AgentPage{
+				"home": {Service: "web", Path: "/"},
+			},
+			QA: QAConfig{
+				DefaultScope: "auth",
+				ArtifactRoot: ".vivero/qa",
+				Auth: QAAuthConfig{Sessions: map[string]QAAuthSession{
+					"admin": {StorageState: ".vivero/auth/admin.storage.json", Scopes: []string{"auth"}},
+				}},
+				Evidence: QAEvidenceConfig{
+					Screenshots: QAScreenshotEvidenceConfig{ColorSchemes: []string{"light", "dark"}},
+					Recordings:  QARecordingEvidenceConfig{ColorSchemes: []string{"dark"}},
+				},
+				Scopes: []QAScope{{
+					Name:        "auth",
+					AuthSession: "admin",
+					Pages:       []string{"home"},
+					Flows:       []QAFlow{{Name: "home", Start: "home", Steps: []QAStep{{Visit: "home"}, {Screenshot: "home"}}}},
+					Checks:      []QACheck{{Name: "review-authenticated-home", Category: "ui", Severity: "normal", Method: "manual"}},
+				}},
+			},
+		},
+	}
+	if _, err := a.saveProject(projectDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	created := nowUTC().Add(-time.Minute)
+	if err := a.upsertPreview(PreviewRecord{ID: "cli-pr", Project: "demo", Status: "running", CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("cli-pr", PreviewService{Name: "web", Source: "app", Status: "healthy", OriginURL: "http://127.0.0.1:3000", ProxyURL: "http://127.0.0.1:7777"}); err != nil {
+		t.Fatal(err)
+	}
+	insertStartupEvent(t, a, "cli-pr", created.Add(time.Second), "info", "service.healthy", "health check passed", "web", map[string]string{"durationMs": "1200"})
+}
+
+func readmeViveroInvocations(readme string) []string {
+	re := regexp.MustCompile(`vivero(?:\s+[a-z][a-z0-9_-]*)+`)
+	seen := map[string]bool{}
+	out := []string{}
+	for _, match := range re.FindAllString(readme, -1) {
+		fields := strings.Fields(match)
+		if len(fields) < 2 || seen[match] {
+			continue
+		}
+		seen[match] = true
+		out = append(out, match)
+	}
+	return out
+}
+
+func manifestMatchesInvocation(commands []CommandManifest, invocation string) bool {
+	words := strings.Fields(invocation)
+	if len(words) < 2 || words[0] != "vivero" {
+		return false
+	}
+	invocationPath := words[1:]
+	for _, command := range commands {
+		if len(command.Path) > len(invocationPath) {
+			continue
+		}
+		matched := true
+		for i, part := range command.Path {
+			if invocationPath[i] != part {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}

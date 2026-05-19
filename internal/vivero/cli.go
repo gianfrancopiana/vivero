@@ -113,6 +113,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
+		if path, ok := flagValue(rest, "--project"); ok {
+			report, err := a.ConfigDoctor(path)
+			if err != nil {
+				return errOut(stderr, jsonOut, err)
+			}
+			output(stdout, jsonOut, map[string]any{"configDoctor": report}, configDoctorHuman(report))
+			if !report.OK {
+				return 1
+			}
+			return 0
+		}
 		v, err := a.Doctor()
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
