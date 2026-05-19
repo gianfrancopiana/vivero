@@ -4,6 +4,8 @@ Vivero is Spanish for “nursery”: a place where young plants are grown until 
 
 For coding agents, Vivero is a nursery for app changes. It starts a preview from `vivero.yml`, waits until it works, gives back a URL, and collects QA evidence.
 
+Vivero is preview-first; production hosting is an RFC/readiness track, not current behavior. Use `vivero doctor production --project <path> --json --no-input` for a read-only readiness assessment, and see `docs/rfcs/production-hosting.md` before adding deploy semantics.
+
 ## What Vivero handles
 
 - Reads thin orchestration metadata from `vivero.yml`.
