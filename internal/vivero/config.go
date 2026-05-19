@@ -235,57 +235,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker"},
-		"features":              []string{"projects", "worktrees", "health-gated-up", "events", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "bundled-skill"},
-		"invariants":            []string{"json-first", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
+		"features":              []string{"projects", "worktrees", "health-gated-up", "events", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "bundled-skill", "cli-manifest", "clig-compatible-help"},
+		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
-}
-
-func commandCatalog() []map[string]any {
-	return []map[string]any{
-		{"name": "serve", "agentSafe": false, "description": "start local HTTP control plane"},
-		{"name": "capabilities", "agentSafe": true},
-		{"name": "commands", "agentSafe": true},
-		{"name": "schema", "agentSafe": true},
-		{"name": "doctor", "agentSafe": true},
-		{"name": "projects sync", "agentSafe": true},
-		{"name": "projects", "agentSafe": true},
-		{"name": "project inspect", "agentSafe": true},
-		{"name": "up", "agentSafe": true, "requires": []string{"--id", "--profile when selecting a non-default profile", "--source when overriding refs/paths"}},
-		{"name": "wait", "agentSafe": true},
-		{"name": "down", "agentSafe": true},
-		{"name": "list", "agentSafe": true},
-		{"name": "inspect", "agentSafe": true},
-		{"name": "events", "agentSafe": true},
-		{"name": "sync", "agentSafe": true},
-		{"name": "rm", "agentSafe": true},
-		{"name": "diff", "agentSafe": true},
-		{"name": "exec", "agentSafe": true},
-		{"name": "logs", "agentSafe": true},
-		{"name": "screenshot", "agentSafe": true, "defaultTarget": "local", "publicTargetFlag": "--public", "colorSchemeFlag": "--color-scheme"},
-		{"name": "smoke", "agentSafe": true},
-		{"name": "qa plan/context/run/record/report", "agentSafe": true, "defaultTarget": "local", "publicTargetFlag": "--public for plan/run/report only", "evidenceConfig": "agent.qa.evidence"},
-		{"name": "prebuild", "agentSafe": true},
-		{"name": "secrets set/list/unset", "agentSafe": true, "secretValuesWriteOnly": true},
-		{"name": "skill install/print/path/doctor", "agentSafe": true},
-	}
-}
-
-func schemaFor(command string) map[string]any {
-	schemas := map[string]any{
-		"up":         map[string]any{"usage": "vivero up <project> --id <preview-id> [--profile <name>] --source name.path=/repo --wait --timeout 5m --json --no-input", "returns": "preview with health-gated services and URLs", "profile": "selects a config profile from project.profiles; if omitted, profile 'default' is used when present"},
-		"down":       map[string]any{"usage": "vivero down <preview-id> [--discard|--archive-patch|--keep-worktree] --json --no-input"},
-		"sync":       map[string]any{"usage": "vivero sync <preview-id> <source> <relative-path> --from <local-path> --json --no-input"},
-		"exec":       map[string]any{"usage": "vivero exec <preview-id> <service> --json --no-input -- <command...>"},
-		"qa":         map[string]any{"usage": "vivero qa <plan|context|run|report> <preview-id> [--scope <name|all>] [--public|--target local|public|origin] --json --no-input; vivero qa record <preview-id> [--scope <name|all>] --json --no-input", "defaults": map[string]any{"target": "local", "recordFormat": "mp4", "width": 1280, "height": 800}, "planReturns": "driver-agnostic QA context with local-by-default services, pages, flows, checks, artifact paths, and concrete evidence commands derived from agent.qa.evidence", "run": "runs deterministic smoke checks, captures declared page screenshots from the YAML-backed evidence matrix unless --no-screenshots is passed, and writes a report scaffold", "record": "records declared QA flows through the local/proxy preview URL; use the qa plan evidence.recordings commands for configured color schemes", "recordOptions": map[string]any{"colorScheme": "optional light|dark primitive used by generated evidence.recordings.commands"}, "config": "agent.qa and agent.qa.evidence in vivero.yml"},
-		"screenshot": map[string]any{"usage": "vivero screenshot <preview-id> <service> [path] [--public|--target local|public|origin] [--color-scheme light|dark] --width 1280 --height 800 --breakpoint desktop=1440x900 --breakpoint mobile=390x844 --output-dir <dir> --json --no-input", "defaults": map[string]any{"width": 1280, "height": 800, "target": "local", "crop": false}, "projectBreakpoints": "agent.screenshotBreakpoints plus --breakpoints"},
-		"secrets":    map[string]any{"usage": "vivero secrets set <project> KEY=value --json --no-input", "listReturns": "keys only"},
-		"project":    map[string]any{"configFile": "vivero.yml", "required": "project.name", "profiles": "optional profiles.<name> may select services, backingServices, smokeTests, and serviceEnv; omitted --profile uses default when present", "dependencyVolumeLifetimes": []string{"preview", "project", "smart"}, "setupPolicies": []string{"per-preview", "once-per-project"}, "warm": map[string]any{"baselineRefs": "refs that update canonical smart warm volumes; defaults to main/master", "fingerprint.paths": "project-relative paths that invalidate smart warm baselines"}},
-	}
-	if command != "" {
-		if s, ok := schemas[command]; ok {
-			return map[string]any{"command": command, "schema": s}
-		}
-		return map[string]any{"command": command, "schema": map[string]any{"usage": "see vivero commands --json"}}
-	}
-	return map[string]any{"version": 1, "commands": schemas}
 }

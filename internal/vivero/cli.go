@@ -12,9 +12,21 @@ import (
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	jsonOut := hasArg(args, "--json")
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(stdout, usage())
+	if len(args) == 0 {
+		fmt.Fprint(stdout, usage())
 		return 0
+	}
+	if args[0] == "help" || hasArg(args, "--help") || hasArg(args, "-h") {
+		path := helpPathFromArgs(args)
+		if len(path) == 0 {
+			fmt.Fprint(stdout, usage())
+			return 0
+		}
+		if help, ok := commandHelp(path); ok {
+			fmt.Fprint(stdout, help)
+			return 0
+		}
+		return errOut(stderr, jsonOut, unknownCommandError(strings.Join(path, " ")))
 	}
 	if args[0] == "_proxy" {
 		listen, _ := flagValue(args[1:], "--listen")
@@ -57,7 +69,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		pos := positionalArgs(rest)
 		command := ""
 		if len(pos) > 0 {
-			command = pos[0]
+			command = strings.Join(pos, " ")
 		}
 		output(stdout, jsonOut, schemaFor(command), "schema: "+command)
 		return 0
@@ -355,7 +367,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "skill":
 		return a.runSkill(rest, stdout, stderr, jsonOut)
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown command: %s", cmd))
+		return errOut(stderr, jsonOut, unknownCommandError(cmd))
 	}
 }
 
@@ -604,29 +616,6 @@ func keysOf(m map[string]string) []string {
 	return sortedMapKeys(m)
 }
 
-func usage() string {
-	return `vivero - local-first preview runtime
-
-Common commands:
-  vivero capabilities --json
-  vivero projects sync <path> --json
-  vivero up <project> --id <preview-id> --profile <name> --source app.path=/repo --wait --json --no-input
-  vivero inspect <preview-id> --json
-  vivero smoke <preview-id> --json
-  vivero qa plan <preview-id> --json --no-input
-  vivero qa run <preview-id> --scope <scope> --json --no-input
-  vivero down <preview-id> --discard --json --no-input
-`
-}
-
-func commandsHuman() string {
-	var b strings.Builder
-	for _, c := range commandCatalog() {
-		b.WriteString(c["name"].(string))
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
 func projectsHuman(ps []ProjectRecord) string {
 	var b strings.Builder
 	for _, p := range ps {
