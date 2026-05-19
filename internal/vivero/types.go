@@ -183,6 +183,21 @@ type QARecordOptions struct {
 	WaitMS            int     `json:"waitMs,omitempty"`
 }
 
+type QAFinalOptions struct {
+	Scope             string  `json:"scope,omitempty"`
+	Target            string  `json:"target,omitempty"`
+	SkipScreenshots   bool    `json:"skipScreenshots,omitempty"`
+	SkipRecord        bool    `json:"skipRecord,omitempty"`
+	ColorScheme       string  `json:"colorScheme,omitempty"`
+	StorageState      string  `json:"storageState,omitempty"`
+	Width             int     `json:"width,omitempty"`
+	Height            int     `json:"height,omitempty"`
+	DeviceScaleFactor float64 `json:"deviceScaleFactor,omitempty"`
+	Format            string  `json:"format,omitempty"`
+	SlowMoMS          int     `json:"slowMoMs,omitempty"`
+	WaitMS            int     `json:"waitMs,omitempty"`
+}
+
 type AgentPage struct {
 	Service string `yaml:"service" json:"service"`
 	Path    string `yaml:"path" json:"path"`

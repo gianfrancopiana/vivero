@@ -85,6 +85,7 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 			"dir":        artifactDir,
 			"runPath":    filepath.Join(artifactDir, "run.json"),
 			"recordPath": filepath.Join(artifactDir, "record.json"),
+			"finalPath":  filepath.Join(artifactDir, "final.json"),
 			"videoDir":   filepath.Join(artifactDir, "videos"),
 			"reportPath": filepath.Join(artifactDir, "report.md"),
 		},
@@ -197,6 +198,250 @@ func (a *App) QARunWithTarget(previewID, scopeName, target string, screenshots b
 		result["runPath"] = runPath
 	}
 	return result, nil
+}
+
+func (a *App) QAFinal(previewID string, opts QAFinalOptions) (map[string]any, error) {
+	target := normalizeArtifactTarget(opts.Target)
+	plan, err := a.QAPlanWithTarget(previewID, opts.Scope, target)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, _ := plan["artifacts"].(map[string]any)
+	result := map[string]any{
+		"ok":        true,
+		"preview":   previewID,
+		"scope":     scopeNameFromPlan(plan),
+		"target":    stringValue(plan["target"]),
+		"plan":      plan,
+		"artifacts": artifacts,
+	}
+
+	run, err := a.QARunWithTarget(previewID, opts.Scope, target, !opts.SkipScreenshots)
+	if err != nil {
+		result["ok"] = false
+		result["runError"] = err.Error()
+	} else {
+		result["run"] = run
+		if run["ok"] != true {
+			result["ok"] = false
+		}
+	}
+
+	if opts.SkipRecord {
+		result["recordSkipped"] = true
+	} else {
+		record, err := a.QARecord(previewID, qaFinalRecordOptionsFromPlan(plan, opts))
+		if err != nil {
+			result["ok"] = false
+			result["recordError"] = err.Error()
+		} else {
+			result["record"] = record
+			if record["ok"] != true {
+				result["ok"] = false
+			}
+		}
+	}
+
+	if diag, err := a.DiagnoseStartup(previewID); err != nil {
+		result["diagnosisError"] = err.Error()
+	} else {
+		result["diagnosis"] = diag
+	}
+
+	if finalPath, err := writeQAFinalResult(artifacts); err != nil {
+		result["ok"] = false
+		result["finalArtifactError"] = err.Error()
+	} else if finalPath != "" {
+		result["finalPath"] = finalPath
+		result["proof"] = qaFinalProof(result)
+		if err := writeIndentedJSONFile(finalPath, result, 0o644); err != nil {
+			result["ok"] = false
+			result["finalArtifactError"] = err.Error()
+			delete(result, "finalPath")
+		}
+	}
+	result["proof"] = qaFinalProof(result)
+	return result, nil
+}
+
+func qaFinalRecordOptionsFromPlan(plan map[string]any, opts QAFinalOptions) QARecordOptions {
+	rec := QARecordOptions{
+		Scope:             opts.Scope,
+		ColorScheme:       opts.ColorScheme,
+		StorageState:      opts.StorageState,
+		Width:             opts.Width,
+		Height:            opts.Height,
+		DeviceScaleFactor: opts.DeviceScaleFactor,
+		Format:            opts.Format,
+		SlowMoMS:          opts.SlowMoMS,
+		WaitMS:            opts.WaitMS,
+	}
+	if rec.Scope == "" {
+		rec.Scope = scopeNameFromPlan(plan)
+	}
+	if command := firstQARecordingCommand(plan); command != nil {
+		if rec.ColorScheme == "" {
+			rec.ColorScheme = stringValue(command["colorScheme"])
+		}
+		if rec.StorageState == "" {
+			rec.StorageState = stringValue(command["storageState"])
+		}
+	}
+	return rec
+}
+
+func firstQARecordingCommand(plan map[string]any) map[string]any {
+	evidence, _ := plan["evidence"].(map[string]any)
+	recordings, _ := evidence["recordings"].(map[string]any)
+	if commands, ok := recordings["commands"].([]map[string]any); ok && len(commands) > 0 {
+		return commands[0]
+	}
+	if commands, ok := recordings["commands"].([]any); ok && len(commands) > 0 {
+		if command, ok := commands[0].(map[string]any); ok {
+			return command
+		}
+	}
+	return nil
+}
+
+func qaFinalProof(result map[string]any) map[string]any {
+	plan, _ := result["plan"].(map[string]any)
+	artifacts, _ := result["artifacts"].(map[string]any)
+	run, _ := result["run"].(map[string]any)
+	record, _ := result["record"].(map[string]any)
+	proof := map[string]any{
+		"preview":       stringValue(result["preview"]),
+		"scope":         stringValue(result["scope"]),
+		"target":        stringValue(result["target"]),
+		"url":           qaFinalPrimaryURL(plan),
+		"reportPath":    qaFinalReportPath(run, artifacts),
+		"runPath":       stringValue(run["runPath"]),
+		"recordPath":    qaFinalRecordPath(record, artifacts),
+		"finalPath":     stringValue(result["finalPath"]),
+		"videoDir":      stringValue(artifacts["videoDir"]),
+		"screenshots":   qaFinalScreenshotPaths(run["screenshots"]),
+		"videos":        qaFinalVideoPaths(record["videos"]),
+		"recordSkipped": result["recordSkipped"] == true,
+		"ok":            result["ok"] == true,
+	}
+	if smoke, ok := run["smoke"].(map[string]any); ok {
+		proof["smoke"] = smoke["ok"]
+	} else if skipped, ok := run["smokeSkipped"].(bool); ok {
+		proof["smokeSkipped"] = skipped
+	}
+	return proof
+}
+
+func qaFinalPrimaryURL(plan map[string]any) string {
+	defaultService := stringValue(plan["defaultPreviewService"])
+	services, _ := plan["services"].(map[string]any)
+	if svc, ok := services[defaultService].(map[string]any); ok {
+		return stringValue(svc["url"])
+	}
+	for _, name := range sortedMapKeysAny(services) {
+		if svc, ok := services[name].(map[string]any); ok {
+			if url := stringValue(svc["url"]); url != "" {
+				return url
+			}
+		}
+	}
+	return ""
+}
+
+func sortedMapKeysAny(in map[string]any) []string {
+	keys := make([]string, 0, len(in))
+	for k := range in {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func qaFinalReportPath(run, artifacts map[string]any) string {
+	if report, ok := run["report"].(map[string]any); ok {
+		if path := stringValue(report["path"]); path != "" {
+			return path
+		}
+	}
+	return stringValue(artifacts["reportPath"])
+}
+
+func qaFinalRecordPath(record, artifacts map[string]any) string {
+	if path := stringValue(record["recordPath"]); path != "" {
+		return path
+	}
+	return stringValue(artifacts["recordPath"])
+}
+
+func qaFinalScreenshotPaths(raw any) []string {
+	paths := []string{}
+	switch screenshots := raw.(type) {
+	case []map[string]any:
+		for _, screenshot := range screenshots {
+			if path := stringValue(screenshot["path"]); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	case []any:
+		for _, item := range screenshots {
+			if screenshot, ok := item.(map[string]any); ok {
+				if path := stringValue(screenshot["path"]); path != "" {
+					paths = append(paths, path)
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func qaFinalVideoPaths(raw any) []string {
+	paths := []string{}
+	if videos, ok := raw.([]any); ok {
+		for _, item := range videos {
+			if video, ok := item.(map[string]any); ok {
+				if path := stringValue(video["path"]); path != "" {
+					paths = append(paths, path)
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func writeQAFinalResult(artifacts map[string]any) (string, error) {
+	finalPath := stringValue(artifacts["finalPath"])
+	if finalPath == "" {
+		return "", nil
+	}
+	finalPath = expandPath(finalPath)
+	if !filepath.IsAbs(finalPath) {
+		if dir := stringValue(artifacts["dir"]); dir != "" {
+			finalPath = filepath.Join(dir, finalPath)
+		}
+	}
+	if err := ensureDir(filepath.Dir(finalPath)); err != nil {
+		return "", err
+	}
+	return finalPath, nil
+}
+
+func qaFinalHuman(v map[string]any) string {
+	status := "failed"
+	if v["ok"] == true {
+		status = "ok"
+	}
+	proof, _ := v["proof"].(map[string]any)
+	parts := []string{"qa final " + status}
+	if url := stringValue(proof["url"]); url != "" {
+		parts = append(parts, "url: "+url)
+	}
+	if reportPath := stringValue(proof["reportPath"]); reportPath != "" {
+		parts = append(parts, "report: "+reportPath)
+	}
+	if finalPath := stringValue(v["finalPath"]); finalPath != "" {
+		parts = append(parts, "final: "+finalPath)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (a *App) captureQAPageScreenshots(previewID string, plan map[string]any) ([]map[string]any, error) {

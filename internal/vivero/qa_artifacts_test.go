@@ -191,6 +191,46 @@ func TestDefaultPreviewServiceSkipsURLLessBackingServices(t *testing.T) {
 	}
 }
 
+func TestQAFinalUsesRecordingPlanForDefaultProof(t *testing.T) {
+	plan := map[string]any{
+		"scopes":                []map[string]any{{"name": "auth"}},
+		"defaultPreviewService": "web",
+		"services": map[string]any{
+			"web": map[string]any{"url": "http://127.0.0.1:4444"},
+		},
+		"evidence": map[string]any{
+			"recordings": map[string]any{
+				"commands": []map[string]any{{"colorScheme": "dark", "storageState": "/tmp/state.json"}},
+			},
+		},
+		"artifacts": map[string]any{"reportPath": "/tmp/report.md", "recordPath": "/tmp/record.json", "videoDir": "/tmp/videos"},
+	}
+
+	recordOpts := qaFinalRecordOptionsFromPlan(plan, QAFinalOptions{})
+	if recordOpts.Scope != "auth" || recordOpts.ColorScheme != "dark" || recordOpts.StorageState != "/tmp/state.json" {
+		t.Fatalf("qa final default record opts should come from evidence plan: %#v", recordOpts)
+	}
+
+	proof := qaFinalProof(map[string]any{
+		"ok":        true,
+		"preview":   "preview",
+		"scope":     "auth",
+		"target":    "local",
+		"plan":      plan,
+		"artifacts": plan["artifacts"],
+		"run":       map[string]any{"runPath": "/tmp/run.json", "smoke": map[string]any{"ok": true}},
+		"record":    map[string]any{"recordPath": "/tmp/record.json", "videos": []any{map[string]any{"path": "/tmp/videos/auth/home.mp4"}}},
+		"finalPath": "/tmp/final.json",
+	})
+	if proof["url"] != "http://127.0.0.1:4444" || proof["recordPath"] != "/tmp/record.json" || proof["finalPath"] != "/tmp/final.json" || proof["smoke"] != true {
+		t.Fatalf("qa final proof should summarize recorded evidence: %#v", proof)
+	}
+	videos := proof["videos"].([]string)
+	if len(videos) != 1 || videos[0] != "/tmp/videos/auth/home.mp4" {
+		t.Fatalf("qa final proof videos = %#v", videos)
+	}
+}
+
 func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	qa := schemaFor("qa")["schema"].(map[string]any)
 	usage := qa["usage"].(string)
