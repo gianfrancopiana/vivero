@@ -2,7 +2,7 @@ package vivero
 
 import "time"
 
-const Version = "0.1.0"
+var Version = "0.1.0"
 
 type ProjectConfig struct {
 	Project         ProjectMeta               `yaml:"project" json:"project"`

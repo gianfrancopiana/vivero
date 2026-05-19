@@ -192,6 +192,8 @@ make verify
 make cover
 ```
 
+GitHub Actions runs the same checks on PRs, pushes to `main`, nightly, and manual dispatch. It also verifies Linux and macOS builds. Release artifacts are tag-driven: pushing a `v*` tag runs GoReleaser and publishes darwin/linux archives for amd64 and arm64 with checksums. Windows and Homebrew publishing are intentionally not part of the first release pipeline.
+
 The CLI contract is covered by tests for help text, command discovery, JSON error shape, schema output, doctor aliases, QA JSON, secrets, skill install, and README command examples. Raise any future coverage floor only after `make cover` shows the branch already exceeds it.
 
 ## License
