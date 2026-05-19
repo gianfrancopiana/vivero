@@ -132,9 +132,10 @@ type SetupConfig struct {
 }
 
 type SetupStep struct {
-	Service string `yaml:"service" json:"service"`
-	Command string `yaml:"command" json:"command"`
-	Policy  string `yaml:"policy" json:"policy,omitempty"`
+	Service     string                `yaml:"service" json:"service"`
+	Command     string                `yaml:"command" json:"command"`
+	Policy      string                `yaml:"policy" json:"policy,omitempty"`
+	Fingerprint WarmFingerprintConfig `yaml:"fingerprint" json:"fingerprint,omitempty"`
 }
 
 type AgentConfig struct {

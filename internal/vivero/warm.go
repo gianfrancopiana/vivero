@@ -279,12 +279,11 @@ func computeSmartWarmFingerprint(projectPath string, cfg ProjectConfig, sources 
 	}
 	roots := warmFingerprintRoots(projectPath, sources)
 	for i, root := range roots {
-		writeHashString(h, fmt.Sprintf("root\x00%d\n", i))
-		for _, rel := range normalizedWarmFingerprintPaths(paths) {
-			if err := hashWarmFingerprintPath(h, root, rel); err != nil {
-				return "", err
-			}
+		fingerprint, err := fingerprintForPaths(root, paths)
+		if err != nil {
+			return "", err
 		}
+		writeHashString(h, fmt.Sprintf("root\x00%d\x00%s\n", i, fingerprint))
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	return sum[:16], nil
@@ -317,25 +316,65 @@ func warmFingerprintRoots(projectPath string, sources map[string]PreviewSource) 
 	return roots
 }
 
-func normalizedWarmFingerprintPaths(paths []string) []string {
+func fingerprintForPaths(root string, paths []string) (string, error) {
+	normalized, err := normalizedFingerprintPaths(paths)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	writeHashString(h, "vivero-fingerprint-paths-v1\n")
+	for _, rel := range normalized {
+		if err := hashFingerprintPath(h, root, rel); err != nil {
+			return "", err
+		}
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	return sum[:16], nil
+}
+
+func validateFingerprintPaths(configPath, yamlPath string, paths []string) error {
+	for i, path := range paths {
+		if _, err := normalizeFingerprintPath(path); err != nil {
+			return fmt.Errorf("%s %s[%d] must be a safe project-relative path: %w", configPath, yamlPath, i, err)
+		}
+	}
+	return nil
+}
+
+func normalizedFingerprintPaths(paths []string) ([]string, error) {
 	seen := map[string]struct{}{}
 	for _, path := range paths {
-		path = filepath.Clean(strings.TrimSpace(path))
-		if path == "." || path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "..") {
-			continue
+		normalized, err := normalizeFingerprintPath(path)
+		if err != nil {
+			return nil, err
 		}
-		seen[path] = struct{}{}
+		seen[normalized] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
 	for path := range seen {
 		out = append(out, path)
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
-func hashWarmFingerprintPath(h interface{ Write([]byte) (int, error) }, root, rel string) error {
-	full, err := resolveProjectPath(root, rel)
+func normalizeFingerprintPath(path string) (string, error) {
+	raw := strings.TrimSpace(path)
+	if raw == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if strings.ContainsAny(raw, "\x00\n\r") {
+		return "", fmt.Errorf("path contains unsupported newline or NUL")
+	}
+	cleaned := filepath.Clean(raw)
+	if filepath.IsAbs(raw) || filepath.IsAbs(cleaned) || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes the project root", path)
+	}
+	return filepath.ToSlash(cleaned), nil
+}
+
+func hashFingerprintPath(h interface{ Write([]byte) (int, error) }, root, rel string) error {
+	full, err := resolveProjectPath(root, filepath.FromSlash(rel))
 	if err != nil {
 		return err
 	}
@@ -348,7 +387,7 @@ func hashWarmFingerprintPath(h interface{ Write([]byte) (int, error) }, root, re
 		return err
 	}
 	if !info.IsDir() {
-		return hashWarmFingerprintFile(h, root, full)
+		return hashFingerprintFile(h, root, full)
 	}
 	var files []string
 	if err := filepath.WalkDir(full, func(path string, d fs.DirEntry, err error) error {
@@ -374,14 +413,14 @@ func hashWarmFingerprintPath(h interface{ Write([]byte) (int, error) }, root, re
 	}
 	sort.Strings(files)
 	for _, file := range files {
-		if err := hashWarmFingerprintFile(h, root, file); err != nil {
+		if err := hashFingerprintFile(h, root, file); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func hashWarmFingerprintFile(h interface{ Write([]byte) (int, error) }, root, path string) error {
+func hashFingerprintFile(h interface{ Write([]byte) (int, error) }, root, path string) error {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return err

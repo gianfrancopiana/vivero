@@ -2,6 +2,7 @@ package vivero
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +42,7 @@ func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 		report.Path = abs
 	}
 	configDoctorCheckSources(&report, cfg)
+	configDoctorCheckSetup(&report, root, cfg)
 	configDoctorCheckAgent(&report, cfg)
 	report.finish()
 	return report, nil
@@ -90,6 +92,61 @@ func configDoctorCheckSources(report *ConfigDoctorReport, cfg ProjectConfig) {
 		}
 		if _, ok := cfg.Sources[source]; !ok {
 			report.addFinding("error", "unknown-source", "services."+name+".source", fmt.Sprintf("service %s references unknown source %s", name, source))
+		}
+	}
+}
+
+func configDoctorCheckSetup(report *ConfigDoctorReport, root string, cfg ProjectConfig) {
+	for i, step := range cfg.Setup.AfterSeeds {
+		policy, err := normalizeSetupPolicy(step.Policy)
+		if err != nil {
+			report.addFinding("error", "setup-policy-invalid", fmt.Sprintf("setup.afterSeeds[%d].policy", i), err.Error())
+			continue
+		}
+		if policy != "once-per-project" && policy != "once-per-fingerprint" {
+			continue
+		}
+		base := fmt.Sprintf("setup.afterSeeds[%d]", i)
+		svc, ok := cfg.Services[step.Service]
+		if !ok || strings.TrimSpace(step.Service) == "" {
+			continue
+		}
+		if !serviceHasPersistentDependencyVolume(svc) {
+			report.addFinding("warning", "setup-persistent-volume-missing", base+".service", fmt.Sprintf("setup step for service %s uses %s but the service has no dependencyVolume with lifetime project or smart", step.Service, policy))
+		}
+		if policy != "once-per-fingerprint" {
+			continue
+		}
+		paths := step.Fingerprint.Paths
+		pathSource := base + ".fingerprint.paths"
+		if len(paths) == 0 {
+			paths = cfg.Warm.Fingerprint.Paths
+			pathSource = "warm.fingerprint.paths"
+		}
+		if len(paths) == 0 {
+			report.addFinding("warning", "setup-fingerprint-paths-missing", base+".fingerprint.paths", "once-per-fingerprint setup needs setup.afterSeeds[].fingerprint.paths or warm.fingerprint.paths")
+			continue
+		}
+		fingerprintRoot := root
+		if strings.TrimSpace(svc.Source) != "" {
+			if src, ok := cfg.Sources[svc.Source]; ok && strings.TrimSpace(src.Path) != "" {
+				if resolved, err := resolveSourcePath(root, src.Path); err == nil {
+					fingerprintRoot = resolved
+				}
+			}
+		}
+		for pathIndex, raw := range paths {
+			rel, err := normalizeFingerprintPath(raw)
+			if err != nil {
+				continue
+			}
+			full, err := resolveProjectPath(fingerprintRoot, filepath.FromSlash(rel))
+			if err != nil {
+				continue
+			}
+			if _, err := os.Stat(full); os.IsNotExist(err) {
+				report.addFinding("warning", "setup-fingerprint-path-missing", fmt.Sprintf("%s[%d]", pathSource, pathIndex), fmt.Sprintf("fingerprint path %s does not exist yet", rel))
+			}
 		}
 	}
 }

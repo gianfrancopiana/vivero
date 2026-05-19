@@ -145,7 +145,12 @@ services:
 setup:
   afterSeeds:
     - service: web
+      policy: once-per-fingerprint
       command: bundle install && npm install
+      fingerprint:
+        paths:
+          - Gemfile.lock
+          - package-lock.json
     - service: web
       policy: once-per-project
       command: bundle exec rails db:seed
@@ -154,8 +159,9 @@ setup:
 - `lifetime: preview` is the default and is removed by `vivero down --discard`.
 - `lifetime: project` survives preview teardown and is shared by all previews of the project.
 - `lifetime: smart` lets baseline refs update a canonical warm volume while branch previews receive copied preview-local volumes. Use this for branch-sensitive DB/index/cache state.
-- `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers.
+- `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers and can also be reused by `once-per-fingerprint` setup steps.
 - `policy: once-per-project` skips a setup command after it has succeeded once for the matching project/config step. With smart volumes, markers are fingerprint-aware so changed migrations or lockfiles rerun setup on the affected warm volume.
+- `policy: once-per-fingerprint` skips only when the same service, command, selected fingerprint paths, and selected path contents already succeeded. Put explicit paths under `setup.afterSeeds[].fingerprint.paths`, or let it fall back to `warm.fingerprint.paths`. Use it only when the target service writes durable setup output to a `project` or `smart` dependency volume; runtime rejects it otherwise.
 - Avoid running two baseline previews for the same project at once; they use the same canonical smart volumes. For throwaway checks against a local path while a baseline preview is already running, pass a non-baseline `--metadata ref=<check-name>` or a branch `--source <source>.ref=...` so Vivero creates preview-local derived volumes.
 
 ## Project-local configs from examples
