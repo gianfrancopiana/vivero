@@ -235,7 +235,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker"},
-		"features":              []string{"projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "bundled-skill", "cli-manifest", "clig-compatible-help"},
+		"features":              []string{"projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "bundled-skill", "cli-manifest", "clig-compatible-help"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

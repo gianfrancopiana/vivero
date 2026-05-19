@@ -27,7 +27,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing public manifest for %s", name)
 		}
@@ -69,7 +69,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 	a := &App{Home: t.TempDir()}
 	caps := a.capabilities()
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "clig-compatible-help"} {
+	for _, want := range []string{"cli-manifest", "clig-compatible-help", "config-doctor"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}

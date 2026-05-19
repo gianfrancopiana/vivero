@@ -35,6 +35,7 @@ Before operating on an unfamiliar install or project, inspect the live contract:
 ```sh
 vivero capabilities --json --no-input
 vivero commands --json --no-input
+vivero doctor config <project-path> --json --no-input
 vivero project inspect <project> --json --no-input
 vivero skill doctor --json --no-input
 ```

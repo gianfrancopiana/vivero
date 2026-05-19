@@ -74,6 +74,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		output(stdout, jsonOut, schemaFor(command), "schema: "+command)
 		return 0
 	case "doctor":
+		if len(rest) > 0 && rest[0] == "config" {
+			pos := positionalArgs(rest[1:])
+			if len(pos) == 0 {
+				return errOut(stderr, jsonOut, fmt.Errorf("doctor config requires <path>"))
+			}
+			report, err := a.ConfigDoctor(pos[0])
+			if err != nil {
+				return errOut(stderr, jsonOut, err)
+			}
+			output(stdout, jsonOut, map[string]any{"configDoctor": report}, configDoctorHuman(report))
+			if !report.OK {
+				return 1
+			}
+			return 0
+		}
 		v, err := a.Doctor()
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
