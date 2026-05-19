@@ -89,6 +89,30 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
+		if len(rest) > 0 && rest[0] == "production" {
+			path := doctorProjectPath(rest[1:])
+			report, err := a.ProductionDoctor(path)
+			if err != nil {
+				return errOut(stderr, jsonOut, err)
+			}
+			output(stdout, jsonOut, map[string]any{"productionDoctor": report}, productionDoctorHuman(report))
+			if !report.OK {
+				return 1
+			}
+			return 0
+		}
+		if hasArg(rest, "--production") {
+			path := doctorProjectPath(rest)
+			report, err := a.ProductionDoctor(path)
+			if err != nil {
+				return errOut(stderr, jsonOut, err)
+			}
+			output(stdout, jsonOut, map[string]any{"productionDoctor": report}, productionDoctorHuman(report))
+			if !report.OK {
+				return 1
+			}
+			return 0
+		}
 		v, err := a.Doctor()
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
