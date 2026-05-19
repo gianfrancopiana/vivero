@@ -40,6 +40,16 @@ jobs:
       - run: make test-short
       - run: make build
 
+  example-e2e:
+    name: Canonical example E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make example-e2e
+
   release-snapshot:
     name: Release snapshot smoke
     runs-on: ubuntu-latest
