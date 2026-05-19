@@ -86,6 +86,12 @@ func rejectConfigKey(configPath string, node *yaml.Node, key string) error {
 }
 
 func validateProjectConfig(configPath string, cfg ProjectConfig) error {
+	if cfg.Resources.MaxConcurrentPreviews < 0 {
+		return fmt.Errorf("%s resources.maxConcurrentPreviews must be >= 0", configPath)
+	}
+	if cfg.Resources.MaxStartupConcurrency < 0 {
+		return fmt.Errorf("%s resources.maxStartupConcurrency must be >= 0", configPath)
+	}
 	for name, svc := range cfg.Services {
 		if _, err := servicePortPlan(svc); err != nil {
 			return fmt.Errorf("%s service %s has invalid port configuration: %w", configPath, name, err)
@@ -231,7 +237,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker"},
-		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bundled-skill", "cli-manifest", "clig-compatible-help"},
+		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "clig-compatible-help"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

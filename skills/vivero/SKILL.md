@@ -154,6 +154,8 @@ setup:
     - service: web
       policy: once-per-project
       command: bundle exec rails db:seed
+resources:
+  maxStartupConcurrency: 4
 ```
 
 - `lifetime: preview` is the default and is removed by `vivero down --discard`.
@@ -162,6 +164,7 @@ setup:
 - `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers and can also be reused by `once-per-fingerprint` setup steps.
 - `policy: once-per-project` skips a setup command after it has succeeded once for the matching project/config step. With smart volumes, markers are fingerprint-aware so changed migrations or lockfiles rerun setup on the affected warm volume.
 - `policy: once-per-fingerprint` skips only when the same service, command, selected fingerprint paths, and selected path contents already succeeded. Put explicit paths under `setup.afterSeeds[].fingerprint.paths`, or let it fall back to `warm.fingerprint.paths`. Use it only when the target service writes durable setup output to a `project` or `smart` dependency volume; runtime rejects it otherwise.
+- Set `resources.maxStartupConcurrency` to bound service startup parallelism. `0` means Vivero's conservative default (`4`), `1` keeps sequential startup, and larger values are capped by service count. Vivero starts backing services in a bounded batch, runs setup sequentially, then starts app services in a bounded batch.
 - Avoid running two baseline previews for the same project at once; they use the same canonical smart volumes. For throwaway checks against a local path while a baseline preview is already running, pass a non-baseline `--metadata ref=<check-name>` or a branch `--source <source>.ref=...` so Vivero creates preview-local derived volumes.
 
 ## Project-local configs from examples

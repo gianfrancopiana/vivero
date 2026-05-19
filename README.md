@@ -105,6 +105,10 @@ setup:
       command: npm run build
       policy: per-preview
 
+resources:
+  maxConcurrentPreviews: 4
+  maxStartupConcurrency: 4
+
 agent:
   defaultPreviewService: web
   commonPages:
@@ -158,6 +162,11 @@ Setup policy:
 - `once-per-project`: skip after the command succeeds once for the project/config step. Use only when the target service writes durable output to a `project` or `smart` dependency volume.
 - `once-per-fingerprint`: compute a stable hash from `setup.afterSeeds[].fingerprint.paths`, falling back to `warm.fingerprint.paths`; skip only when the same service/command/path fingerprint already succeeded. Runtime errors if neither paths nor a persistent dependency volume are present.
 - `vivero doctor config <path> --json --no-input` warns when fingerprint paths are missing or setup caching has no persistent volume.
+
+Startup bounds:
+- `resources.maxStartupConcurrency` bounds concurrent backing-service startup and, after setup completes, concurrent app-service startup.
+- `0` uses Vivero's conservative default (`4`), `1` preserves sequential startup, and larger values are capped by the number of services.
+- Setup steps remain sequential because their order may matter.
 
 ## License
 
