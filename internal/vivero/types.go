@@ -157,6 +157,7 @@ type ScreenshotOptions struct {
 	Path                  string                 `json:"path,omitempty"`
 	Target                string                 `json:"target,omitempty"`
 	ColorScheme           string                 `json:"colorScheme,omitempty"`
+	StorageState          string                 `json:"storageState,omitempty"`
 	Width                 int                    `json:"width,omitempty"`
 	Height                int                    `json:"height,omitempty"`
 	DeviceScaleFactor     float64                `json:"deviceScaleFactor,omitempty"`
@@ -172,6 +173,7 @@ type ScreenshotOptions struct {
 type QARecordOptions struct {
 	Scope             string  `json:"scope,omitempty"`
 	ColorScheme       string  `json:"colorScheme,omitempty"`
+	StorageState      string  `json:"storageState,omitempty"`
 	Width             int     `json:"width,omitempty"`
 	Height            int     `json:"height,omitempty"`
 	DeviceScaleFactor float64 `json:"deviceScaleFactor,omitempty"`
@@ -190,8 +192,19 @@ type QAConfig struct {
 	DefaultScope string           `yaml:"defaultScope" json:"defaultScope,omitempty"`
 	ArtifactRoot string           `yaml:"artifactRoot" json:"artifactRoot,omitempty"`
 	Driver       QADriverConfig   `yaml:"driver" json:"driver,omitempty"`
+	Auth         QAAuthConfig     `yaml:"auth" json:"auth,omitempty"`
 	Evidence     QAEvidenceConfig `yaml:"evidence" json:"evidence,omitempty"`
 	Scopes       []QAScope        `yaml:"scopes" json:"scopes,omitempty"`
+}
+
+type QAAuthConfig struct {
+	Sessions map[string]QAAuthSession `yaml:"sessions" json:"sessions,omitempty"`
+}
+
+type QAAuthSession struct {
+	StorageState string   `yaml:"storageState" json:"storageState,omitempty"`
+	Scopes       []string `yaml:"scopes" json:"scopes,omitempty"`
+	Note         string   `yaml:"note" json:"note,omitempty"`
 }
 
 type QADriverConfig struct {
@@ -218,6 +231,7 @@ type QARecordingEvidenceConfig struct {
 type QAScope struct {
 	Name        string    `yaml:"name" json:"name"`
 	Description string    `yaml:"description" json:"description,omitempty"`
+	AuthSession string    `yaml:"authSession" json:"authSession,omitempty"`
 	Pages       []string  `yaml:"pages" json:"pages,omitempty"`
 	Flows       []QAFlow  `yaml:"flows" json:"flows,omitempty"`
 	Checks      []QACheck `yaml:"checks" json:"checks,omitempty"`

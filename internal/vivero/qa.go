@@ -33,6 +33,10 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 	}
 	artifactDir := qaArtifactDir(a.Home, project.Path, previewID, selectedScope, agent.QA.ArtifactRoot)
 	driver := qaDriver(agent.QA.Driver)
+	authPlan, authSessions, err := qaAuthPlan(project.Path, agent.QA.Auth)
+	if err != nil {
+		return nil, err
+	}
 
 	scopePlans := []map[string]any{}
 	for _, scope := range scopes {
@@ -44,15 +48,21 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 		if err != nil {
 			return nil, err
 		}
-		scopePlans = append(scopePlans, map[string]any{
+		scopePlan := map[string]any{
 			"name":        qaScopeName(scope),
 			"description": scope.Description,
 			"pages":       pages,
 			"flows":       flows,
 			"checks":      qaChecksForScope(agent, scope),
-		})
+		}
+		if session, ok := qaAuthSessionForScope(scope, authSessions); ok {
+			scopePlan["authSession"] = session.Name
+			scopePlan["storageState"] = session.StorageState
+			scopePlan["storageStateExists"] = session.Exists
+		}
+		scopePlans = append(scopePlans, scopePlan)
 	}
-	evidence, err := qaEvidencePlan(p.ID, selectedScope, p, agent, scopes, target, artifactDir)
+	evidence, err := qaEvidencePlan(p.ID, selectedScope, p, agent, scopes, authSessions, target, artifactDir)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +80,7 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 		"preview": previewInfo,
 		"target":  target,
 		"driver":  driver,
+		"auth":    authPlan,
 		"artifacts": map[string]any{
 			"dir":        artifactDir,
 			"runPath":    filepath.Join(artifactDir, "run.json"),
@@ -213,13 +224,13 @@ func (a *App) captureQAPageScreenshots(previewID string, plan map[string]any) ([
 			if service == "" || path == "" {
 				continue
 			}
-			key := service + "\x00" + path
+			key := service + "\x00" + path + "\x00" + stringValue(page["storageState"])
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 			for _, colorScheme := range colorSchemes {
-				shot, err := a.ScreenshotWithOptions(previewID, service, ScreenshotOptions{Path: path, Target: target, ColorScheme: colorScheme, UseProjectBreakpoints: useProjectBreakpoints, OutputDir: outputDir})
+				shot, err := a.ScreenshotWithOptions(previewID, service, ScreenshotOptions{Path: path, Target: target, ColorScheme: colorScheme, StorageState: stringValue(page["storageState"]), UseProjectBreakpoints: useProjectBreakpoints, OutputDir: outputDir})
 				if err != nil {
 					return out, err
 				}
@@ -368,7 +379,7 @@ func qaArtifactDir(home, projectPath, previewID, scope, root string) string {
 	return dir
 }
 
-func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentConfig, scopes []QAScope, target, artifactDir string) (map[string]any, error) {
+func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentConfig, scopes []QAScope, authSessions map[string]resolvedQAAuthSession, target, artifactDir string) (map[string]any, error) {
 	screenshotColorSchemes := normalizeColorSchemes(agent.QA.Evidence.Screenshots.ColorSchemes)
 	if err := validateColorSchemes(screenshotColorSchemes); err != nil {
 		return nil, err
@@ -385,10 +396,17 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		if err != nil {
 			return nil, err
 		}
+		if session, ok := qaAuthSessionForScope(scope, authSessions); ok {
+			for _, page := range resolved {
+				page["authSession"] = session.Name
+				page["storageState"] = session.StorageState
+				page["storageStateExists"] = session.Exists
+			}
+		}
 		for _, page := range resolved {
 			service := stringValue(page["service"])
 			path := stringValue(page["path"])
-			key := service + "\x00" + path
+			key := service + "\x00" + path + "\x00" + stringValue(page["authSession"])
 			if seenPages[key] {
 				continue
 			}
@@ -404,6 +422,10 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		for _, colorScheme := range screenshotColorSchemes {
 			argv := []string{"vivero", "screenshot", previewID, service, path, "--breakpoints", "--json", "--no-input", "--quiet"}
 			argv = appendArtifactTargetArgs(argv, target)
+			storageState := stringValue(page["storageState"])
+			if storageState != "" {
+				argv = append(argv, "--storage-state", storageState)
+			}
 			if colorScheme != "" {
 				argv = append(argv, "--color-scheme", colorScheme)
 			}
@@ -415,6 +437,11 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 				"argv":        argv,
 				"command":     shellJoin(argv),
 			}
+			if authSession := stringValue(page["authSession"]); authSession != "" {
+				entry["authSession"] = authSession
+				entry["storageState"] = stringValue(page["storageState"])
+				entry["storageStateExists"] = page["storageStateExists"]
+			}
 			if colorScheme != "" {
 				entry["colorScheme"] = colorScheme
 			}
@@ -423,12 +450,25 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 	}
 
 	recordingCommands := []map[string]any{}
+	recordingSession := resolvedQAAuthSession{}
+	hasRecordingAuth := false
+	if len(scopes) == 1 {
+		recordingSession, hasRecordingAuth = qaAuthSessionForScope(scopes[0], authSessions)
+	}
 	for _, colorScheme := range recordingColorSchemes {
 		argv := []string{"vivero", "qa", "record", previewID, "--scope", scopeName, "--json", "--no-input", "--quiet"}
+		if hasRecordingAuth && recordingSession.StorageState != "" {
+			argv = append(argv, "--storage-state", recordingSession.StorageState)
+		}
 		if colorScheme != "" {
 			argv = append(argv, "--color-scheme", colorScheme)
 		}
 		entry := map[string]any{"scope": scopeName, "argv": argv, "command": shellJoin(argv)}
+		if hasRecordingAuth {
+			entry["authSession"] = recordingSession.Name
+			entry["storageState"] = recordingSession.StorageState
+			entry["storageStateExists"] = recordingSession.Exists
+		}
 		if colorScheme != "" {
 			entry["colorScheme"] = colorScheme
 		}

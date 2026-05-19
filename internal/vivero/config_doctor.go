@@ -43,7 +43,7 @@ func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 	}
 	configDoctorCheckSources(&report, cfg)
 	configDoctorCheckSetup(&report, root, cfg)
-	configDoctorCheckAgent(&report, cfg)
+	configDoctorCheckAgent(&report, root, cfg)
 	report.finish()
 	return report, nil
 }
@@ -151,7 +151,7 @@ func configDoctorCheckSetup(report *ConfigDoctorReport, root string, cfg Project
 	}
 }
 
-func configDoctorCheckAgent(report *ConfigDoctorReport, cfg ProjectConfig) {
+func configDoctorCheckAgent(report *ConfigDoctorReport, root string, cfg ProjectConfig) {
 	if cfg.Agent.DefaultPreviewService != "" {
 		if _, ok := cfg.Services[cfg.Agent.DefaultPreviewService]; !ok {
 			report.addFinding("error", "unknown-service", "agent.defaultPreviewService", fmt.Sprintf("agent.defaultPreviewService references unknown service %s", cfg.Agent.DefaultPreviewService))
@@ -186,7 +186,40 @@ func configDoctorCheckAgent(report *ConfigDoctorReport, cfg ProjectConfig) {
 			report.addFinding("warning", "smoke-path-relative", base+".path", fmt.Sprintf("smoke test %s path should start with /", smoke.Name))
 		}
 	}
+	configDoctorCheckQAAuth(report, root, cfg)
 	configDoctorCheckQAScopes(report, cfg)
+}
+
+func configDoctorCheckQAAuth(report *ConfigDoctorReport, root string, cfg ProjectConfig) {
+	scopeNames := map[string]bool{}
+	for _, scope := range cfg.Agent.QA.Scopes {
+		scopeNames[qaScopeName(scope)] = true
+	}
+	for _, name := range sortedMapKeys(cfg.Agent.QA.Auth.Sessions) {
+		session := cfg.Agent.QA.Auth.Sessions[name]
+		base := "agent.qa.auth.sessions." + name
+		if strings.TrimSpace(name) == "" {
+			report.addFinding("error", "qa-auth-session-name-missing", base, "QA auth session name is required")
+		}
+		if strings.TrimSpace(session.StorageState) == "" {
+			report.addFinding("warning", "qa-auth-storage-state-missing", base+".storageState", fmt.Sprintf("QA auth session %s has no Playwright storage state path", name))
+		} else if full, err := resolveProjectPath(root, session.StorageState); err != nil {
+			report.addFinding("error", "qa-auth-storage-state-invalid", base+".storageState", err.Error())
+		} else if _, err := os.Stat(full); os.IsNotExist(err) {
+			report.addFinding("warning", "qa-auth-storage-state-missing", base+".storageState", fmt.Sprintf("storage state %s does not exist yet", session.StorageState))
+		} else if err != nil {
+			report.addFinding("error", "qa-auth-storage-state-invalid", base+".storageState", err.Error())
+		}
+		for i, scope := range session.Scopes {
+			scope = strings.TrimSpace(scope)
+			if scope == "" || scope == "all" || scope == "*" {
+				continue
+			}
+			if len(scopeNames) > 0 && !scopeNames[scope] {
+				report.addFinding("error", "unknown-qa-scope", fmt.Sprintf("%s.scopes[%d]", base, i), fmt.Sprintf("QA auth session %s references unknown scope %s", name, scope))
+			}
+		}
+	}
 }
 
 func configDoctorCheckQAScopes(report *ConfigDoctorReport, cfg ProjectConfig) {
@@ -195,11 +228,18 @@ func configDoctorCheckQAScopes(report *ConfigDoctorReport, cfg ProjectConfig) {
 		return
 	}
 	scopeNames := map[string]bool{}
+	sessionNames := map[string]bool{}
+	for name := range cfg.Agent.QA.Auth.Sessions {
+		sessionNames[strings.TrimSpace(name)] = true
+	}
 	for i, scope := range scopes {
 		name := qaScopeName(scope)
 		base := fmt.Sprintf("agent.qa.scopes[%d]", i)
 		if scopeNames[name] {
 			report.addFinding("error", "qa-scope-duplicate", base+".name", fmt.Sprintf("duplicate QA scope %s", name))
+		}
+		if authSession := strings.TrimSpace(scope.AuthSession); authSession != "" && !sessionNames[authSession] {
+			report.addFinding("error", "unknown-qa-auth-session", base+".authSession", fmt.Sprintf("QA scope %s references unknown auth session %s", name, authSession))
 		}
 		scopeNames[name] = true
 		for _, page := range scope.Pages {

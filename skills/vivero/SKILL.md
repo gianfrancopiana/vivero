@@ -265,7 +265,8 @@ Treat the plan JSON as the source of truth for:
 - checks and severities;
 - browser driver preference;
 - artifact paths;
-- screenshot and recording commands derived from `agent.qa.evidence`.
+- screenshot and recording commands derived from `agent.qa.evidence`;
+- optional authenticated QA context from `agent.qa.auth.sessions`, including generated `--storage-state` flags for scoped evidence commands.
 
 Run deterministic Vivero-owned QA:
 
@@ -282,6 +283,8 @@ vivero qa record webapp-local --scope public --json --no-input --quiet
 ```
 
 For reproducible evidence, use the Playwright-backed commands and driver metadata from `vivero qa plan`; use `evidence.recordings.commands` for recordings. Use Chrome MCP or another live browser driver only for exploratory debugging. Do not hardcode project-specific routes, selectors, breakpoints, color schemes, or flows in this generic skill.
+
+For authenticated QA, the app/operator provides a project-relative Playwright storage-state file under `agent.qa.auth.sessions.<name>.storageState` and attaches it to scopes with either `scopes: [...]` on the session or `authSession: <name>` on the QA scope. Vivero includes the resolved storage state in `qa plan` and generated screenshot/recording commands, but it does not store credentials or run app-specific login flows unless the app declares those commands in its own `vivero.yml`.
 
 After QA, generate or refresh the report scaffold:
 

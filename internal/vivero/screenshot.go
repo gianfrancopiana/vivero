@@ -40,6 +40,9 @@ func normalizeScreenshotOptions(opts ScreenshotOptions) ScreenshotOptions {
 	}
 	opts.Target = normalizeArtifactTarget(opts.Target)
 	opts.ColorScheme = normalizeColorScheme(opts.ColorScheme)
+	if opts.StorageState != "" {
+		opts.StorageState = expandPath(opts.StorageState)
+	}
 	if opts.Width == 0 {
 		opts.Width = defaultScreenshotWidth
 	}
@@ -54,6 +57,9 @@ func normalizeScreenshotOptions(opts ScreenshotOptions) ScreenshotOptions {
 
 func normalizeQARecordOptions(opts QARecordOptions) QARecordOptions {
 	opts.ColorScheme = normalizeColorScheme(opts.ColorScheme)
+	if opts.StorageState != "" {
+		opts.StorageState = expandPath(opts.StorageState)
+	}
 	if opts.Width == 0 {
 		opts.Width = defaultScreenshotWidth
 	}
@@ -456,6 +462,9 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 		if opts.ColorScheme != "" {
 			args = append(args, "--color-scheme", opts.ColorScheme)
 		}
+		if opts.StorageState != "" {
+			args = append(args, "--load-storage", opts.StorageState)
+		}
 		args = append(args, url, out)
 		cmd := exec.Command("npx", args...)
 		b, err := cmd.CombinedOutput()
@@ -479,7 +488,7 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 			originalWidth = crop.OriginalWidth
 			originalHeight = crop.OriginalHeight
 		}
-		screenshots = append(screenshots, map[string]any{
+		screenshot := map[string]any{
 			"preview":        previewID,
 			"service":        service,
 			"target":         opts.Target,
@@ -494,7 +503,11 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 			"height":         height,
 			"originalWidth":  originalWidth,
 			"originalHeight": originalHeight,
-		})
+		}
+		if opts.StorageState != "" {
+			screenshot["storageState"] = opts.StorageState
+		}
+		screenshots = append(screenshots, screenshot)
 	}
 	result := map[string]any{"preview": previewID, "service": service, "target": opts.Target, "url": url, "screenshots": screenshots}
 	if len(screenshots) == 1 {

@@ -375,6 +375,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if colorScheme, ok := flagValue(rest, "--color-scheme"); ok {
 			opts.ColorScheme = colorScheme
 		}
+		if storageState, ok := flagValue(rest, "--storage-state"); ok {
+			opts.StorageState = expandPath(storageState)
+		}
 		for _, spec := range flagValues(rest, "--breakpoint") {
 			bp, err := parseScreenshotBreakpoint(spec)
 			if err != nil {
@@ -465,6 +468,9 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		}
 		if colorScheme, ok := flagValue(actionArgs, "--color-scheme"); ok {
 			opts.ColorScheme = colorScheme
+		}
+		if storageState, ok := flagValue(actionArgs, "--storage-state"); ok {
+			opts.StorageState = expandPath(storageState)
 		}
 		if ms, ok, err := nonNegativeIntFlag(actionArgs, "--slow-mo-ms"); err != nil {
 			return errOut(stderr, jsonOut, err)

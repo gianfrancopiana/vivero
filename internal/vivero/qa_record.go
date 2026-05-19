@@ -72,6 +72,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	result["preview"] = previewID
 	result["scope"] = scopeNameFromPlan(plan)
 	result["colorScheme"] = opts.ColorScheme
+	result["storageState"] = opts.StorageState
 	result["format"] = opts.Format
 	result["outputDir"] = outputDir
 	result["plan"] = plan
@@ -175,13 +176,16 @@ async function run() {
         const scopeName = safeName(scope.name || 'scope');
         const flowDir = path.join(outputDir, scopeName, flowName);
         fs.mkdirSync(flowDir, { recursive: true });
-        const context = await browser.newContext({
+        const contextOptions = {
           viewport: { width: opts.width || 1280, height: opts.height || 800 },
           deviceScaleFactor: opts.deviceScaleFactor || 1,
           colorScheme: opts.colorScheme || undefined,
           ignoreHTTPSErrors: true,
           recordVideo: { dir: flowDir, size: { width: opts.width || 1280, height: opts.height || 800 } }
-        });
+        };
+        const storageState = opts.storageState || scope.storageState || '';
+        if (storageState) contextOptions.storageState = storageState;
+        const context = await browser.newContext(contextOptions);
         const page = await context.newPage();
         const steps = [];
         const errors = [];
@@ -240,6 +244,8 @@ async function run() {
           name: flow.name || '',
           ok: errors.length === 0,
           colorScheme: opts.colorScheme || '',
+          authSession: scope.authSession || '',
+          storageState,
           url: firstURL,
           path: videoPath,
           format: 'webm',
