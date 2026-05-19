@@ -1,19 +1,53 @@
-.PHONY: build test cover verify install
+BINARY := vivero
+VERSION ?= dev
+LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION)"
+
+.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot clean
 
 build:
-	go build -o bin/vivero ./cmd/vivero
+	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
 
 test:
 	go test ./...
+
+test-short:
+	go test -short ./...
+
+test-race:
+	go test -race ./...
+
+vet:
+	go vet ./...
+
+fmt-check:
+	@files="$$(gofmt -l cmd internal skills)"; \
+	if [ -n "$$files" ]; then \
+		echo "gofmt needed:"; \
+		echo "$$files"; \
+		exit 1; \
+	fi
 
 cover:
 	go test -coverprofile=/tmp/vivero-cover.out ./...
 	go tool cover -func=/tmp/vivero-cover.out
 
-verify:
-	gofmt -w cmd internal skills
-	go test ./...
-	go build -o bin/vivero ./cmd/vivero
+verify: fmt-check vet test build
+
+cross-build:
+	@set -e; \
+	for goos in linux darwin; do \
+		for goarch in amd64 arm64; do \
+			out="/tmp/vivero-$$goos-$$goarch"; \
+			echo "building $$goos/$$goarch"; \
+			CGO_ENABLED=0 GOOS="$$goos" GOARCH="$$goarch" go build $(LDFLAGS) -o "$$out" ./cmd/vivero; \
+		done; \
+	done
 
 install:
-	go install ./cmd/vivero
+	go install $(LDFLAGS) ./cmd/vivero
+
+snapshot:
+	goreleaser release --snapshot --clean
+
+clean:
+	rm -rf bin dist

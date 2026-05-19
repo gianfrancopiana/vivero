@@ -18,6 +18,9 @@ func installFakeDocker(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake docker helper uses POSIX shell")
 	}
+	if testing.Short() {
+		t.Skip("fake docker integration test")
+	}
 	binDir := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "docker-state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {

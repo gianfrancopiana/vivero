@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -379,16 +380,29 @@ func dockerExecWithTimeout(containerID string, cmdArgs []string, timeout time.Du
 	if timeout <= 0 {
 		return "", "", 0, context.DeadlineExceeded
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 	args := append([]string{"exec", containerID}, cmdArgs...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.Command("docker", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
-	runErr := cmd.Run()
-	if ctx.Err() != nil {
-		return out.String(), errBuf.String(), 0, ctx.Err()
+	if err := cmd.Start(); err != nil {
+		return out.String(), errBuf.String(), 0, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var runErr error
+	select {
+	case runErr = <-done:
+	case <-timer.C:
+		if cmd.Process != nil {
+			_ = killProcessGroup(cmd.Process.Pid)
+			_ = cmd.Process.Kill()
+		}
+		<-done
+		return out.String(), errBuf.String(), 0, context.DeadlineExceeded
 	}
 	if runErr != nil {
 		if ee, ok := runErr.(*exec.ExitError); ok {

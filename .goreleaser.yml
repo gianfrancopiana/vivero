@@ -1,0 +1,27 @@
+version: 2
+
+project_name: vivero
+
+builds:
+  - main: ./cmd/vivero
+    binary: vivero
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
