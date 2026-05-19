@@ -266,6 +266,7 @@ type SmokeTest struct {
 
 type ResourceConfig struct {
 	MaxConcurrentPreviews int `yaml:"maxConcurrentPreviews" json:"maxConcurrentPreviews,omitempty"`
+	MaxStartupConcurrency int `yaml:"maxStartupConcurrency" json:"maxStartupConcurrency,omitempty"`
 }
 
 type ProfileConfig struct {

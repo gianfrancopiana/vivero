@@ -144,25 +144,12 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		}
 		return p, err
 	}
-	for name, svc := range runtimeConfig.Services {
-		ps, err := a.startService(req, name, svc, p.Sources, runtimeConfig, req.Public, true)
-		if err != nil {
-			p.Services[name] = ps
-			a.recordEvent(req.ID, "error", "service.failed", err.Error(), name, nil)
-			if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-			}
-			_ = a.setPreviewStatus(req.ID, "unhealthy")
-			return p, err
+	if err := a.startAppServices(req, runtimeConfig, p.Sources, p.Services); err != nil {
+		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
+			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 		}
-		p.Services[name] = ps
-		if err := a.saveService(req.ID, ps); err != nil {
-			if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-			}
-			_ = a.setPreviewStatus(req.ID, "unhealthy")
-			return p, err
-		}
+		_ = a.setPreviewStatus(req.ID, "unhealthy")
+		return p, err
 	}
 	if req.Wait {
 		if err := a.Wait(req.ID, req.Timeout); err != nil {
@@ -352,25 +339,6 @@ func pathWithinRoot(root, path string) bool {
 func defaultServiceImageTag(projectName, previewID, service string) string {
 	name := sanitizeDockerName(projectName + "-" + service)
 	return "vivero/" + name + ":" + shortStableID(previewID+":"+service)
-}
-
-func (a *App) startBackingServices(req UpRequest, cfg ProjectConfig, sources map[string]PreviewSource, services map[string]PreviewService) error {
-	if len(cfg.BackingServices) == 0 {
-		return nil
-	}
-	for _, name := range sortedMapKeys(cfg.BackingServices) {
-		svc := serviceConfigForBacking(cfg.BackingServices[name])
-		ps, err := a.startService(req, name, svc, sources, cfg, false, false)
-		if err != nil {
-			services[name] = ps
-			return fmt.Errorf("start backing service %s: %w", name, err)
-		}
-		services[name] = ps
-		if err := a.saveService(req.ID, ps); err != nil {
-			return fmt.Errorf("save backing service %s: %w", name, err)
-		}
-	}
-	return nil
 }
 
 func serviceConfigForBacking(backing BackingConfig) ServiceConfig {
