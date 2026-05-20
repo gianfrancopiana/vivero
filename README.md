@@ -142,12 +142,13 @@ make verify
 make cover
 make example-e2e
 make integration-fixtures
+make deploy-fixtures
 make release-smoke
 ```
 
-`make example-e2e` is the fast canonical preview proof. `make integration-fixtures` is the Docker lifecycle proof. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
+`make example-e2e` is the fast canonical preview proof. `make integration-fixtures` is the Docker lifecycle proof. `make deploy-fixtures` proves the plan/apply/status/rollback production command surface against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
 
-CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
+CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, deploy/release fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
 
 ## License
 
