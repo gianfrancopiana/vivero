@@ -59,8 +59,8 @@ func commandManifests() []CommandManifest {
 		{Name: "--version", Description: "print Vivero version", Global: true},
 	}
 	return []CommandManifest{
-		manifest([]string{"capabilities"}, "print runtime capabilities", "vivero capabilities --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, home, features, and invariants"}),
-		manifest([]string{"version"}, "print Vivero version", "vivero version --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version string"}),
+		manifest([]string{"capabilities"}, "print runtime capabilities", "vivero capabilities --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, build provenance, home, features, and invariants"}),
+		manifest([]string{"version"}, "print Vivero version", "vivero version --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, commit, and build date"}),
 		manifest([]string{"help"}, "show examples-first help", "vivero help <command>", true, "stable", []CommandFlag{{Name: "<command>", Description: "optional command or command group"}}, nil, map[string]any{"returns": "human-readable help on stdout"}),
 		manifest([]string{"commands"}, "list public commands", "vivero commands --json --no-input", true, "stable", global, nil, map[string]any{"returns": "typed command manifest for public commands"}),
 		manifest([]string{"schema"}, "print command schema", "vivero schema up --json --no-input", true, "stable", append(global, CommandFlag{Name: "<command>", Description: "optional command name"}), nil, map[string]any{"returns": "schema for one command or all commands"}),

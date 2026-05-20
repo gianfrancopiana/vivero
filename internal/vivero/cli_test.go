@@ -26,11 +26,13 @@ func TestRunVersionEntrypoints(t *testing.T) {
 		}
 		var payload struct {
 			Version string `json:"version"`
+			Commit  string `json:"commit"`
+			Date    string `json:"date"`
 		}
 		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 			t.Fatalf("invalid version JSON for %v: %v stdout=%s", args, err, stdout)
 		}
-		if payload.Version != Version {
+		if payload.Version != Version || payload.Commit == "" || payload.Date == "" {
 			t.Fatalf("version payload for %v = %#v", args, payload)
 		}
 	}

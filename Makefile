@@ -1,8 +1,10 @@
 BINARY := vivero
 VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COVERPROFILE ?= /tmp/vivero-cover.out
 COVER_MIN ?= 72.0
-LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION)"
+LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION) -X github.com/gianfrancopiana/vivero/internal/vivero.Commit=$(COMMIT) -X github.com/gianfrancopiana/vivero/internal/vivero.BuildDate=$(DATE)"
 
 .PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures dogfood-configs clean
 

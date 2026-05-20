@@ -17,7 +17,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if hasArg(args, "--version") {
-		output(stdout, jsonOut, map[string]any{"version": Version}, Version)
+		output(stdout, jsonOut, buildVersionInfo(), Version)
 		return 0
 	}
 	if args[0] == "help" || hasArg(args, "--help") || hasArg(args, "-h") {
@@ -93,7 +93,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		output(stdout, jsonOut, a.capabilities(), "vivero "+Version)
 		return 0
 	case "version":
-		output(stdout, jsonOut, map[string]any{"version": Version}, "vivero "+Version)
+		output(stdout, jsonOut, buildVersionInfo(), "vivero "+Version)
 		return 0
 	case "doctor":
 		if len(rest) > 0 && rest[0] == "config" {

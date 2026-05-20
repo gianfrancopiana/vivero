@@ -2,7 +2,21 @@ package vivero
 
 import "time"
 
-var Version = "0.1.0"
+var (
+	Version   = "0.1.0"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
+type VersionInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+}
+
+func buildVersionInfo() VersionInfo {
+	return VersionInfo{Version: Version, Commit: Commit, Date: BuildDate}
+}
 
 type ProjectConfig struct {
 	Project         ProjectMeta               `yaml:"project" json:"project"`

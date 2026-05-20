@@ -37,6 +37,7 @@ func rootHelp() string {
 	b.WriteString("  --version    print the Vivero version\n")
 	b.WriteString("\nMore help:\n")
 	b.WriteString("  vivero help <command>\n")
+	b.WriteString("  vivero version --json --no-input\n")
 	b.WriteString("  vivero commands --json --no-input\n")
 	b.WriteString("  vivero schema <command> --json --no-input\n")
 	b.WriteString("  docs: https://github.com/gianfrancopiana/vivero\n")

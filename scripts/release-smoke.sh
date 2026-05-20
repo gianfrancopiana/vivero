@@ -50,6 +50,32 @@ if [ "${#archives[@]}" -eq 0 ]; then
   exit 1
 fi
 
+checksum_file="$dist_dir/checksums.txt"
+if [ ! -f "$checksum_file" ]; then
+  echo "missing release checksum file: $checksum_file" >&2
+  exit 1
+fi
+python3 - "$checksum_file" "${archives[@]}" <<'PY'
+import hashlib
+import pathlib
+import sys
+checksum_file = pathlib.Path(sys.argv[1])
+archives = [pathlib.Path(p) for p in sys.argv[2:]]
+expected = {}
+for line in checksum_file.read_text().splitlines():
+    parts = line.split()
+    if len(parts) != 2:
+        raise SystemExit(f"invalid checksum line: {line!r}")
+    expected[parts[1]] = parts[0]
+for archive in archives:
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    want = expected.get(archive.name)
+    if not want:
+        raise SystemExit(f"archive missing from checksums.txt: {archive.name}")
+    if digest != want:
+        raise SystemExit(f"checksum mismatch for {archive.name}: got {digest}, want {want}")
+PY
+
 case "$(uname -s)" in
   Linux) host_goos="linux" ;;
   Darwin) host_goos="darwin" ;;
@@ -83,6 +109,7 @@ for archive in "${archives[@]}"; do
   if [ -n "$host_goos" ] && [ -n "$host_goarch" ] && [[ "$name" == *"_${host_goos}_${host_goarch}.tar.gz" ]]; then
     chmod +x "$tmp/vivero"
     export VIVERO_HOME="$tmp/home"
+    "$tmp/vivero" version --json --no-input > "$tmp/version.json"
     "$tmp/vivero" capabilities --json --no-input > "$tmp/capabilities.json"
     "$tmp/vivero" doctor --json --no-input > "$tmp/doctor.json"
     "$tmp/vivero" commands --json --no-input > "$tmp/commands.json"
@@ -94,20 +121,31 @@ import json
 import pathlib
 import sys
 root = pathlib.Path(sys.argv[1])
+version = json.loads((root / "version.json").read_text())
 capabilities = json.loads((root / "capabilities.json").read_text())
 doctor = json.loads((root / "doctor.json").read_text())
 commands = json.loads((root / "commands.json").read_text())
 schema = json.loads((root / "schema-qa.json").read_text())
 gumroad = json.loads((root / "gumroad-config.json").read_text())
 helper = json.loads((root / "helper-config.json").read_text())
-assert capabilities.get("version"), capabilities
-assert doctor.get("ok") is True, doctor
+
+def require(condition, message, payload):
+    if not condition:
+        raise SystemExit(f"{message}: {payload}")
+
+require(version.get("version"), "version missing", version)
+require(version.get("commit") and version.get("commit") != "unknown", "commit provenance missing", version)
+require(version.get("date") and version.get("date") != "unknown", "build date provenance missing", version)
+require(capabilities.get("version") == version.get("version"), "capability version mismatch", capabilities)
+require(capabilities.get("build", {}).get("commit") == version.get("commit"), "capability commit mismatch", capabilities)
+require("release-checksums" in capabilities.get("features", []), "release checksum capability missing", capabilities)
+require(doctor.get("ok") is True, "doctor failed", doctor)
 names = {cmd.get("name") for cmd in commands.get("commands", [])}
-assert "qa final" in names, sorted(names)
-assert schema.get("schema", {}).get("jsonStability") == "stable", schema
+require("qa final" in names, "qa final command missing", sorted(names))
+require(schema.get("schema", {}).get("jsonStability") == "stable", "qa schema is not stable", schema)
 for payload in (gumroad, helper):
     report = payload.get("configDoctor", {})
-    assert report.get("ok") is True, report
+    require(report.get("ok") is True, "example config doctor failed", report)
 PY
     smoked=1
   fi
