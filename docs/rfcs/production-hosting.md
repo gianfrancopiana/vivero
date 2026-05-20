@@ -4,7 +4,7 @@
 
 Vivero stays preview-first. Production behavior must remain in a separate, explicit `deploy`/`release` namespace and must not be smuggled into preview commands.
 
-The current production posture is: **app-owned deploy command surface, not a general production host**. Vivero can plan/apply/status/rollback by running commands supplied by the app repo after `doctor production` passes, but it does not provide a production control plane, ingress manager, secret backend, backup system, or orchestrator by itself.
+The current production posture is: **app-owned deploy command surface with a first-class blue/green strategy, not a general production host**. Vivero can plan/apply/status/rollback by running commands supplied by the app repo after `doctor production` passes. For `strategy: blue-green`, it models slots, prepares the inactive slot, requires a smoke gate, promotes traffic, records the active/previous slot, and rolls back to the previous slot. It still does not provide a production control plane, ingress manager, secret backend, backup system, or general orchestrator by itself.
 
 ## Why
 
@@ -84,4 +84,4 @@ The first checks are intentionally conservative:
 - Warning on persistent volumes without backup/restore policy.
 - Warning on likely inline secret values.
 
-Capabilities may advertise `preview-runtime`, `production-readiness-doctor`, and `app-owned-deploy-surface`, but must not advertise `production-hosting` until the production-only requirements are implemented and tested.
+Capabilities may advertise `preview-runtime`, `production-readiness-doctor`, `app-owned-deploy-surface`, and `blue-green-deploy`, but must not advertise `production-hosting` until the production-only requirements are implemented and tested.

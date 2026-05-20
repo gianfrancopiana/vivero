@@ -206,9 +206,14 @@ func validateDeployConfig(configPath string, deploy DeployConfig) error {
 			return fmt.Errorf("%s deploy.environments has an empty environment name", configPath)
 		}
 		env := deploy.Environments[name]
-		for field, value := range map[string]string{"applyCommand": env.ApplyCommand, "statusCommand": env.StatusCommand, "rollbackCommand": env.RollbackCommand} {
+		for field, value := range map[string]string{"strategy": env.Strategy, "applyCommand": env.ApplyCommand, "statusCommand": env.StatusCommand, "rollbackCommand": env.RollbackCommand} {
 			if strings.ContainsAny(value, "\x00") {
 				return fmt.Errorf("%s deploy.environments.%s.%s contains unsupported NUL", configPath, name, field)
+			}
+		}
+		for field, value := range map[string]string{"activeSlotCommand": env.BlueGreen.ActiveSlotCommand, "prepareCommand": env.BlueGreen.PrepareCommand, "smokeCommand": env.BlueGreen.SmokeCommand, "promoteCommand": env.BlueGreen.PromoteCommand, "statusCommand": env.BlueGreen.StatusCommand, "rollbackCommand": env.BlueGreen.RollbackCommand} {
+			if strings.ContainsAny(value, "\x00") {
+				return fmt.Errorf("%s deploy.environments.%s.blueGreen.%s contains unsupported NUL", configPath, name, field)
 			}
 		}
 	}
@@ -258,7 +263,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker"},
-		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-rollback", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "clig-compatible-help", "cli-coverage-ratchet"},
+		"features":              []string{"preview-runtime", "projects", "worktrees", "health-gated-up", "events", "startup-diagnostics", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "blue-green-deploy", "release-status", "release-rollback", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "clig-compatible-help", "cli-coverage-ratchet"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

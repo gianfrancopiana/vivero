@@ -88,6 +88,134 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	}
 }
 
+func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeBlueGreenDeployFixture(t, false)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	plan := decodeJSONMap(t, stdout)["plan"].(map[string]any)
+	if plan["strategy"] != "blue-green" || plan["ok"] != true || plan["verdict"] != "ready" {
+		t.Fatalf("unexpected blue/green plan summary: %#v", plan)
+	}
+	blueGreen := plan["blueGreen"].(map[string]any)
+	if blueGreen["activeSlot"] != "blue" || blueGreen["targetSlot"] != "green" {
+		t.Fatalf("blue/green plan should target inactive slot: %#v", blueGreen)
+	}
+	phases := blueGreen["phases"].([]any)
+	if got := phaseNames(phases); strings.Join(got, ",") != "prepare,smoke,promote" {
+		t.Fatalf("blue/green plan should expose phase order, got %v", got)
+	}
+
+	planID := plan["id"].(string)
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	applyRelease := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	if applyRelease["status"] != "promoted" || applyRelease["strategy"] != "blue-green" || applyRelease["activeSlot"] != "green" || applyRelease["previousSlot"] != "blue" {
+		t.Fatalf("unexpected blue/green release after apply: %#v", applyRelease)
+	}
+	if got := phaseRecordNames(applyRelease["phases"].([]any)); strings.Join(got, ",") != "prepare:succeeded,smoke:succeeded,promote:succeeded" {
+		t.Fatalf("unexpected blue/green apply phase records: %v", got)
+	}
+	logBytes, err := os.ReadFile(filepath.Join(projectDir, "blue-green.log"))
+	if err != nil {
+		t.Fatalf("blue/green phases should write proof log: %v", err)
+	}
+	log := string(logBytes)
+	for _, want := range []string{"prepare:blue:green", "smoke:blue:green", "promote:blue:green"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("blue/green proof log missing %q:\n%s", want, log)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "status", "demo-bg", "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green release status exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	statusPayload := decodeJSONMap(t, stdout)
+	statusRelease := statusPayload["release"].(map[string]any)
+	if statusPayload["status"] != "live-green" || statusRelease["activeSlot"] != "green" {
+		t.Fatalf("unexpected blue/green release status: %#v", statusPayload)
+	}
+	statusBytes, err := os.ReadFile(filepath.Join(projectDir, "blue-green-status.txt"))
+	if err != nil || !strings.Contains(string(statusBytes), "status:green") {
+		t.Fatalf("blue/green status command should receive active slot, err=%v proof=%s", err, statusBytes)
+	}
+
+	releaseID := applyRelease["id"].(string)
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo-bg", releaseID, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	rollbackRelease := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	if rollbackRelease["status"] != "rolled_back" || rollbackRelease["rollbackOf"] != releaseID || rollbackRelease["activeSlot"] != "blue" || rollbackRelease["previousSlot"] != "green" {
+		t.Fatalf("unexpected blue/green rollback release: %#v", rollbackRelease)
+	}
+	rollbackBytes, err := os.ReadFile(filepath.Join(projectDir, "blue-green-rollback.txt"))
+	if err != nil || !strings.Contains(string(rollbackBytes), "rollback:green:blue") {
+		t.Fatalf("blue/green rollback should switch back to previous slot, err=%v proof=%s", err, rollbackBytes)
+	}
+}
+
+func TestRunDeployBlueGreenPlanRequiresPromotionGate(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeBlueGreenDeployFixture(t, true)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code == 0 || stderr != "" {
+		t.Fatalf("blue/green plan without smoke gate should fail with JSON stdout, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	plan := decodeJSONMap(t, stdout)["plan"].(map[string]any)
+	if plan["ok"] != false || plan["verdict"] != "blocked" {
+		t.Fatalf("blue/green plan missing smoke gate should be blocked: %#v", plan)
+	}
+	codes := map[string]bool{}
+	for _, raw := range plan["diagnostics"].([]any) {
+		diag := raw.(map[string]any)
+		codes[diag["code"].(string)] = true
+	}
+	if !codes["blue-green-smoke-missing"] {
+		t.Fatalf("blue/green blocked plan should explain missing smoke gate, got %#v", plan["diagnostics"])
+	}
+}
+
+func TestRunDeployBlueGreenApplyStopsBeforePromoteWhenSmokeFails(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeBlueGreenDeployFixture(t, false)
+	configPath := filepath.Join(projectDir, "vivero.yml")
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := strings.Replace(string(configBytes), "printf ''smoke:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log", "printf ''smoke:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log; exit 7", 1)
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code == 0 || stdout != "" || !strings.Contains(stderr, "smoke_failed") {
+		t.Fatalf("blue/green apply with failing smoke should fail on stderr before promote, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	logBytes, err := os.ReadFile(filepath.Join(projectDir, "blue-green.log"))
+	if err != nil {
+		t.Fatalf("blue/green failing smoke should still write proof log: %v", err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "prepare:blue:green") || !strings.Contains(log, "smoke:blue:green") || strings.Contains(log, "promote:blue:green") {
+		t.Fatalf("blue/green failing smoke should stop before promote:\n%s", log)
+	}
+}
+
 func TestRunDeployPlanBlocksMutablePreviewConfig(t *testing.T) {
 	home := t.TempDir()
 	projectDir := writeDeployFixture(t, false)
@@ -121,6 +249,14 @@ func TestDeployAndReleaseCommandsAreDiscoverable(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "plan a production deploy") || !strings.Contains(stdout, "vivero deploy plan") || !strings.Contains(stdout, "--environment NAME") {
 		t.Fatalf("deploy plan help is not discoverable/actionable:\n%s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, t.TempDir(), "schema", "deploy", "plan", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan schema exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "blue-green") || !strings.Contains(stdout, "blueGreen") {
+		t.Fatalf("deploy plan schema should disclose blue/green strategy support:\n%s", stdout)
 	}
 
 	code, stdout, stderr = runCLITestCommand(t, t.TempDir(), "schema", "release", "status", "--json", "--no-input")
@@ -264,4 +400,68 @@ func writeDeployFixture(t *testing.T, immutable bool) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func writeBlueGreenDeployFixture(t *testing.T, omitSmoke bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	smoke := "        smokeCommand: 'printf ''smoke:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log'\n"
+	if omitSmoke {
+		smoke = ""
+	}
+	config := "project:\n" +
+		"  name: demo-bg\n" +
+		"services:\n" +
+		"  web:\n" +
+		"    image: registry.example.com/demo-bg@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" +
+		"    port: 3000\n" +
+		"    health:\n" +
+		"      path: /\n" +
+		"      timeout: 30s\n" +
+		"    resources:\n" +
+		"      cpus: '1'\n" +
+		"      memory: 512m\n" +
+		"deploy:\n" +
+		"  environments:\n" +
+		"    production:\n" +
+		"      strategy: blue-green\n" +
+		"      blueGreen:\n" +
+		"        slots: [blue, green]\n" +
+		"        activeSlotCommand: 'test \"$VIVERO_BLUE_GREEN_SLOTS\" = \"blue,green\" && printf blue'\n" +
+		"        prepareCommand: 'printf ''prepare:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log'\n" +
+		smoke +
+		"        promoteCommand: 'printf ''promote:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log'\n" +
+		"        statusCommand: 'printf ''status:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" > blue-green-status.txt; printf live-green'\n" +
+		"        rollbackCommand: 'printf ''rollback:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" > blue-green-rollback.txt'\n"
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func decodeJSONMap(t *testing.T, payload string) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal([]byte(payload), &out); err != nil {
+		t.Fatalf("invalid JSON: %v payload=%s", err, payload)
+	}
+	return out
+}
+
+func phaseNames(phases []any) []string {
+	names := make([]string, 0, len(phases))
+	for _, raw := range phases {
+		phase := raw.(map[string]any)
+		names = append(names, phase["name"].(string))
+	}
+	return names
+}
+
+func phaseRecordNames(phases []any) []string {
+	names := make([]string, 0, len(phases))
+	for _, raw := range phases {
+		phase := raw.(map[string]any)
+		names = append(names, phase["name"].(string)+":"+phase["status"].(string))
+	}
+	return names
 }

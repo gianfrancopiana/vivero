@@ -16,6 +16,7 @@ type DeployPlan struct {
 	Project         string                       `json:"project"`
 	Path            string                       `json:"path"`
 	Environment     string                       `json:"environment"`
+	Strategy        string                       `json:"strategy,omitempty"`
 	OK              bool                         `json:"ok"`
 	Verdict         string                       `json:"verdict"`
 	Diagnostics     []ProductionDoctorDiagnostic `json:"diagnostics"`
@@ -23,7 +24,21 @@ type DeployPlan struct {
 	ApplyCommand    string                       `json:"applyCommand,omitempty"`
 	StatusCommand   string                       `json:"statusCommand,omitempty"`
 	RollbackCommand string                       `json:"rollbackCommand,omitempty"`
+	BlueGreen       *BlueGreenDeployPlan         `json:"blueGreen,omitempty"`
 	CreatedAt       time.Time                    `json:"createdAt"`
+}
+
+type BlueGreenDeployPlan struct {
+	Slots        []string          `json:"slots"`
+	ActiveSlot   string            `json:"activeSlot,omitempty"`
+	TargetSlot   string            `json:"targetSlot"`
+	PreviousSlot string            `json:"previousSlot,omitempty"`
+	Phases       []DeployPhasePlan `json:"phases"`
+}
+
+type DeployPhasePlan struct {
+	Name    string `json:"name"`
+	Command string `json:"command,omitempty"`
 }
 
 type DeployServiceArtifact struct {
@@ -32,15 +47,26 @@ type DeployServiceArtifact struct {
 }
 
 type ReleaseRecord struct {
-	ID          string    `json:"id"`
-	PlanID      string    `json:"planId"`
-	Project     string    `json:"project"`
-	Environment string    `json:"environment"`
-	Status      string    `json:"status"`
-	RollbackOf  string    `json:"rollbackOf,omitempty"`
-	Output      string    `json:"output,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID           string              `json:"id"`
+	PlanID       string              `json:"planId"`
+	Project      string              `json:"project"`
+	Environment  string              `json:"environment"`
+	Strategy     string              `json:"strategy,omitempty"`
+	Status       string              `json:"status"`
+	RollbackOf   string              `json:"rollbackOf,omitempty"`
+	ActiveSlot   string              `json:"activeSlot,omitempty"`
+	PreviousSlot string              `json:"previousSlot,omitempty"`
+	TargetSlot   string              `json:"targetSlot,omitempty"`
+	Phases       []DeployPhaseRecord `json:"phases,omitempty"`
+	Output       string              `json:"output,omitempty"`
+	CreatedAt    time.Time           `json:"createdAt"`
+	UpdatedAt    time.Time           `json:"updatedAt"`
+}
+
+type DeployPhaseRecord struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Output string `json:"output,omitempty"`
 }
 
 func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
@@ -80,14 +106,23 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 	if !ok {
 		plan.addDiagnostic("error", "deploy-environment-missing", "deploy.environments."+environment, fmt.Sprintf("deploy environment %s is not configured", environment), "Add deploy.environments.<name> with app-owned apply/status/rollback commands.")
 	} else {
-		plan.ApplyCommand = strings.TrimSpace(deployEnv.ApplyCommand)
-		plan.StatusCommand = strings.TrimSpace(deployEnv.StatusCommand)
-		plan.RollbackCommand = strings.TrimSpace(deployEnv.RollbackCommand)
-		if plan.ApplyCommand == "" {
-			plan.addDiagnostic("error", "deploy-apply-missing", "deploy.environments."+environment+".applyCommand", "deploy apply command is not configured", "Set an app-owned applyCommand for this environment.")
-		}
-		if plan.RollbackCommand == "" {
-			plan.addDiagnostic("error", "deploy-rollback-missing", "deploy.environments."+environment+".rollbackCommand", "deploy rollback command is not configured", "Set an app-owned rollbackCommand for this environment.")
+		strategy := normalizeDeployStrategy(deployEnv.Strategy)
+		plan.Strategy = strategy
+		switch strategy {
+		case "command":
+			plan.ApplyCommand = strings.TrimSpace(deployEnv.ApplyCommand)
+			plan.StatusCommand = strings.TrimSpace(deployEnv.StatusCommand)
+			plan.RollbackCommand = strings.TrimSpace(deployEnv.RollbackCommand)
+			if plan.ApplyCommand == "" {
+				plan.addDiagnostic("error", "deploy-apply-missing", "deploy.environments."+environment+".applyCommand", "deploy apply command is not configured", "Set an app-owned applyCommand for this environment.")
+			}
+			if plan.RollbackCommand == "" {
+				plan.addDiagnostic("error", "deploy-rollback-missing", "deploy.environments."+environment+".rollbackCommand", "deploy rollback command is not configured", "Set an app-owned rollbackCommand for this environment.")
+			}
+		case "blue-green":
+			plan.configureBlueGreenDeploy(environment, deployEnv.BlueGreen)
+		default:
+			plan.addDiagnostic("error", "deploy-strategy-unsupported", "deploy.environments."+environment+".strategy", fmt.Sprintf("deploy strategy %q is not supported", deployEnv.Strategy), "Use strategy: blue-green or omit strategy for app-owned command deploys.")
 		}
 	}
 	plan.finish()
@@ -123,6 +158,103 @@ func (p *DeployPlan) finish() {
 	}
 }
 
+func normalizeDeployStrategy(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "command", "app-owned", "app-owned-command":
+		return "command"
+	case "blue-green", "bluegreen":
+		return "blue-green"
+	default:
+		return strings.TrimSpace(raw)
+	}
+}
+
+func (p *DeployPlan) configureBlueGreenDeploy(environment string, cfg BlueGreenDeployConfig) {
+	base := "deploy.environments." + environment + ".blueGreen"
+	slots := normalizeBlueGreenSlots(cfg.Slots)
+	if len(slots) != 2 {
+		p.addDiagnostic("error", "blue-green-slots-invalid", base+".slots", "blue/green deploys require exactly two distinct slots", "Set blueGreen.slots to two names, for example [blue, green].")
+	}
+	activeSlotCommand := strings.TrimSpace(cfg.ActiveSlotCommand)
+	prepareCommand := strings.TrimSpace(cfg.PrepareCommand)
+	smokeCommand := strings.TrimSpace(cfg.SmokeCommand)
+	promoteCommand := strings.TrimSpace(cfg.PromoteCommand)
+	p.StatusCommand = strings.TrimSpace(cfg.StatusCommand)
+	p.RollbackCommand = strings.TrimSpace(cfg.RollbackCommand)
+
+	if activeSlotCommand == "" {
+		p.addDiagnostic("error", "blue-green-active-slot-missing", base+".activeSlotCommand", "blue/green deploy needs a read-only active slot command", "Set activeSlotCommand so Vivero can plan the inactive target slot before promotion.")
+	}
+	if prepareCommand == "" {
+		p.addDiagnostic("error", "blue-green-prepare-missing", base+".prepareCommand", "blue/green deploy needs a prepare command", "Set prepareCommand to deploy the release to the inactive slot without switching traffic.")
+	}
+	if smokeCommand == "" {
+		p.addDiagnostic("error", "blue-green-smoke-missing", base+".smokeCommand", "blue/green deploy needs a smoke gate before promotion", "Set smokeCommand to verify the inactive slot before promoteCommand switches traffic.")
+	}
+	if promoteCommand == "" {
+		p.addDiagnostic("error", "blue-green-promote-missing", base+".promoteCommand", "blue/green deploy needs a promote command", "Set promoteCommand to switch production traffic to the verified target slot.")
+	}
+	if p.RollbackCommand == "" {
+		p.addDiagnostic("error", "blue-green-rollback-missing", base+".rollbackCommand", "blue/green deploy needs a rollback command", "Set rollbackCommand to switch traffic back to the previous slot.")
+	}
+
+	activeSlot := ""
+	if activeSlotCommand != "" {
+		out, err := runCmd(p.Path, map[string]string{
+			"VIVERO_DEPLOY_PLAN_ID":   p.ID,
+			"VIVERO_PROJECT":          p.Project,
+			"VIVERO_ENVIRONMENT":      p.Environment,
+			"VIVERO_BLUE_GREEN_SLOTS": strings.Join(slots, ","),
+			"VIVERO_RELEASE_ACTION":   "blue_green_active_slot",
+		}, "/bin/sh", "-lc", activeSlotCommand)
+		activeSlot = strings.TrimSpace(string(out))
+		if err != nil {
+			p.addDiagnostic("error", "blue-green-active-slot-failed", base+".activeSlotCommand", fmt.Sprintf("active slot command failed: %s", strings.TrimSpace(string(out))), "Fix activeSlotCommand so it prints the current live slot and exits zero.")
+		}
+	}
+	targetSlot := ""
+	if len(slots) == 2 {
+		if activeSlot == "" {
+			// Keep the plan inspectable even when another diagnostic already blocks it.
+			targetSlot = slots[0]
+		} else if activeSlot == slots[0] {
+			targetSlot = slots[1]
+		} else if activeSlot == slots[1] {
+			targetSlot = slots[0]
+		} else {
+			p.addDiagnostic("error", "blue-green-active-slot-invalid", base+".activeSlotCommand", fmt.Sprintf("active slot %q is not one of %s", activeSlot, strings.Join(slots, ", ")), "Make activeSlotCommand print exactly one configured slot name.")
+		}
+	}
+	p.BlueGreen = &BlueGreenDeployPlan{
+		Slots:        slots,
+		ActiveSlot:   activeSlot,
+		TargetSlot:   targetSlot,
+		PreviousSlot: activeSlot,
+		Phases: []DeployPhasePlan{
+			{Name: "prepare", Command: prepareCommand},
+			{Name: "smoke", Command: smokeCommand},
+			{Name: "promote", Command: promoteCommand},
+		},
+	}
+}
+
+func normalizeBlueGreenSlots(raw []string) []string {
+	if len(raw) == 0 {
+		raw = []string{"blue", "green"}
+	}
+	slots := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	for _, slot := range raw {
+		slot = strings.TrimSpace(slot)
+		if slot == "" || seen[slot] {
+			continue
+		}
+		seen[slot] = true
+		slots = append(slots, slot)
+	}
+	return slots
+}
+
 func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 	plan, err := a.loadDeployPlan(planID)
 	if err != nil {
@@ -130,6 +262,9 @@ func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 	}
 	if !plan.OK {
 		return ReleaseRecord{}, fmt.Errorf("deploy plan %s is blocked", planID)
+	}
+	if plan.Strategy == "blue-green" {
+		return a.applyBlueGreenDeployPlan(plan)
 	}
 	if strings.TrimSpace(plan.ApplyCommand) == "" {
 		return ReleaseRecord{}, fmt.Errorf("deploy plan %s has no apply command", planID)
@@ -143,6 +278,47 @@ func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 		_ = a.saveRelease(release)
 		return release, fmt.Errorf("deploy apply failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	if err := a.saveRelease(release); err != nil {
+		return ReleaseRecord{}, err
+	}
+	return release, nil
+}
+
+func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
+	if plan.BlueGreen == nil {
+		return ReleaseRecord{}, fmt.Errorf("deploy plan %s has no blue/green plan", plan.ID)
+	}
+	release := newReleaseRecord(plan, "promoting", "")
+	release.PreviousSlot = plan.BlueGreen.ActiveSlot
+	release.TargetSlot = plan.BlueGreen.TargetSlot
+	release.ActiveSlot = plan.BlueGreen.ActiveSlot
+	var outputs []string
+	for _, phase := range plan.BlueGreen.Phases {
+		if strings.TrimSpace(phase.Command) == "" {
+			continue
+		}
+		out, err := runDeployShell(plan, release, phase.Command, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_" + phase.Name})
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			outputs = append(outputs, phase.Name+": "+trimmed)
+		}
+		record := DeployPhaseRecord{Name: phase.Name, Status: "succeeded", Output: trimmed}
+		if err != nil {
+			record.Status = "failed"
+			release.Phases = append(release.Phases, record)
+			release.Status = phase.Name + "_failed"
+			release.Output = strings.Join(outputs, "\n")
+			release.UpdatedAt = nowUTC()
+			_ = a.saveReleaseHistory(release)
+			return release, fmt.Errorf("blue/green deploy %s_failed: %w: %s", phase.Name, err, trimmed)
+		}
+		release.Phases = append(release.Phases, record)
+	}
+	release.Status = "promoted"
+	release.ActiveSlot = plan.BlueGreen.TargetSlot
+	release.PreviousSlot = plan.BlueGreen.ActiveSlot
+	release.Output = strings.Join(outputs, "\n")
+	release.UpdatedAt = nowUTC()
 	if err := a.saveRelease(release); err != nil {
 		return ReleaseRecord{}, err
 	}
@@ -199,6 +375,9 @@ func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRe
 	if strings.TrimSpace(plan.RollbackCommand) == "" {
 		return ReleaseRecord{}, fmt.Errorf("release %s has no rollback command", releaseID)
 	}
+	if plan.Strategy == "blue-green" {
+		return a.rollbackBlueGreenRelease(plan, release)
+	}
 	rollback := newReleaseRecord(plan, "rolled_back", releaseID)
 	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "rollback", "VIVERO_ROLLBACK_RELEASE_ID": releaseID})
 	rollback.Output = strings.TrimSpace(string(out))
@@ -214,9 +393,34 @@ func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRe
 	return rollback, nil
 }
 
+func (a *App) rollbackBlueGreenRelease(plan DeployPlan, release ReleaseRecord) (ReleaseRecord, error) {
+	rollback := newReleaseRecord(plan, "rolled_back", release.ID)
+	rollback.ActiveSlot = release.ActiveSlot
+	rollback.PreviousSlot = release.ActiveSlot
+	rollback.TargetSlot = release.PreviousSlot
+	if rollback.TargetSlot == "" && plan.BlueGreen != nil {
+		rollback.TargetSlot = plan.BlueGreen.ActiveSlot
+	}
+	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_rollback", "VIVERO_ROLLBACK_RELEASE_ID": release.ID})
+	rollback.Output = strings.TrimSpace(string(out))
+	if err != nil {
+		rollback.Status = "rollback_failed"
+		rollback.UpdatedAt = nowUTC()
+		_ = a.saveReleaseHistory(rollback)
+		return rollback, fmt.Errorf("release rollback failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	rollback.ActiveSlot = rollback.TargetSlot
+	rollback.PreviousSlot = release.ActiveSlot
+	rollback.UpdatedAt = nowUTC()
+	if err := a.saveRelease(rollback); err != nil {
+		return ReleaseRecord{}, err
+	}
+	return rollback, nil
+}
+
 func newReleaseRecord(plan DeployPlan, status, rollbackOf string) ReleaseRecord {
 	now := nowUTC()
-	return ReleaseRecord{ID: newDeployID("rel"), PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Status: status, RollbackOf: rollbackOf, CreatedAt: now, UpdatedAt: now}
+	return ReleaseRecord{ID: newDeployID("rel"), PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Strategy: plan.Strategy, Status: status, RollbackOf: rollbackOf, CreatedAt: now, UpdatedAt: now}
 }
 
 func runDeployShell(plan DeployPlan, release ReleaseRecord, command string, extra map[string]string) ([]byte, error) {
@@ -225,6 +429,18 @@ func runDeployShell(plan DeployPlan, release ReleaseRecord, command string, extr
 		"VIVERO_RELEASE_ID":     release.ID,
 		"VIVERO_PROJECT":        plan.Project,
 		"VIVERO_ENVIRONMENT":    plan.Environment,
+	}
+	if release.ActiveSlot != "" {
+		env["VIVERO_BLUE_GREEN_ACTIVE_SLOT"] = release.ActiveSlot
+	}
+	if release.TargetSlot != "" {
+		env["VIVERO_BLUE_GREEN_TARGET_SLOT"] = release.TargetSlot
+	}
+	if release.PreviousSlot != "" {
+		env["VIVERO_BLUE_GREEN_PREVIOUS_SLOT"] = release.PreviousSlot
+	}
+	if plan.BlueGreen != nil {
+		env["VIVERO_BLUE_GREEN_SLOTS"] = strings.Join(plan.BlueGreen.Slots, ",")
 	}
 	for k, v := range extra {
 		env[k] = v
@@ -258,13 +474,17 @@ func (a *App) loadDeployPlan(id string) (DeployPlan, error) {
 }
 
 func (a *App) saveRelease(release ReleaseRecord) error {
-	if err := ensureDir(a.releaseDir()); err != nil {
-		return err
-	}
-	if err := writeIndentedJSONFile(filepath.Join(a.releaseDir(), statePathComponent(release.ID)+".json"), release, 0o644); err != nil {
+	if err := a.saveReleaseHistory(release); err != nil {
 		return err
 	}
 	return writeIndentedJSONFile(a.currentReleasePath(release.Project, release.Environment), release, 0o644)
+}
+
+func (a *App) saveReleaseHistory(release ReleaseRecord) error {
+	if err := ensureDir(a.releaseDir()); err != nil {
+		return err
+	}
+	return writeIndentedJSONFile(filepath.Join(a.releaseDir(), statePathComponent(release.ID)+".json"), release, 0o644)
 }
 
 func (a *App) loadRelease(id string) (ReleaseRecord, error) {
@@ -381,7 +601,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
-		if release.Status != "applied" {
+		if release.Status != "applied" && release.Status != "promoted" {
 			return 1
 		}
 		return 0
@@ -429,7 +649,14 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 
 func deployPlanHuman(plan DeployPlan) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("deploy plan %s %s/%s %s\n", plan.ID, plan.Project, plan.Environment, plan.Verdict))
+	strategy := plan.Strategy
+	if strategy == "" {
+		strategy = "command"
+	}
+	b.WriteString(fmt.Sprintf("deploy plan %s %s/%s %s strategy=%s\n", plan.ID, plan.Project, plan.Environment, plan.Verdict, strategy))
+	if plan.BlueGreen != nil {
+		b.WriteString(fmt.Sprintf("blue-green active=%s target=%s\n", plan.BlueGreen.ActiveSlot, plan.BlueGreen.TargetSlot))
+	}
 	for _, diag := range plan.Diagnostics {
 		if diag.Level == "info" {
 			continue
@@ -440,6 +667,12 @@ func deployPlanHuman(plan DeployPlan) string {
 }
 
 func releaseHuman(release ReleaseRecord) string {
+	if release.Strategy == "blue-green" && release.ActiveSlot != "" {
+		if release.RollbackOf != "" {
+			return fmt.Sprintf("release %s %s rollbackOf=%s active=%s previous=%s", release.ID, release.Status, release.RollbackOf, release.ActiveSlot, release.PreviousSlot)
+		}
+		return fmt.Sprintf("release %s %s active=%s previous=%s", release.ID, release.Status, release.ActiveSlot, release.PreviousSlot)
+	}
 	if release.RollbackOf != "" {
 		return fmt.Sprintf("release %s %s rollbackOf=%s", release.ID, release.Status, release.RollbackOf)
 	}
