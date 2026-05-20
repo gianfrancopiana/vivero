@@ -19,9 +19,10 @@ trap cleanup EXIT
 
 home="$workdir/home"
 ready_project="$workdir/ready-project"
+blue_green_project="$workdir/blue-green-project"
 blocked_project="$workdir/blocked-project"
 out="$workdir/out"
-mkdir -p "$home" "$ready_project" "$blocked_project" "$out"
+mkdir -p "$home" "$ready_project" "$blue_green_project" "$blocked_project" "$out"
 
 run_json() {
   local name="$1"
@@ -57,6 +58,33 @@ deploy:
       applyCommand: 'printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt'
       statusCommand: 'printf "live-status:%s\n" "$VIVERO_RELEASE_ID" > deploy-status.txt; printf live-status'
       rollbackCommand: 'printf "rollback:%s\n" "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt'
+YAML
+
+cat > "$blue_green_project/vivero.yml" <<'YAML'
+project:
+  name: deploy-blue-green
+services:
+  web:
+    image: registry.example.com/deploy-blue-green@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+deploy:
+  environments:
+    production:
+      strategy: blue-green
+      blueGreen:
+        slots: [blue, green]
+        activeSlotCommand: 'test "$VIVERO_BLUE_GREEN_SLOTS" = "blue,green" && printf blue'
+        prepareCommand: 'printf "prepare:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
+        smokeCommand: 'printf "smoke:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
+        promoteCommand: 'printf "promote:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
+        statusCommand: 'printf "status:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" > blue-green-status.txt; printf live-$VIVERO_BLUE_GREEN_ACTIVE_SLOT'
+        rollbackCommand: 'printf "rollback:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" > blue-green-rollback.txt'
 YAML
 
 cat > "$blocked_project/vivero.yml" <<'YAML'
@@ -155,6 +183,74 @@ proof = pathlib.Path(sys.argv[2]).read_text()
 assert release.get("status") == "rolled_back", release
 assert release.get("rollbackOf") == sys.argv[3], release
 assert sys.argv[3] in proof, proof
+PY
+
+run_json plan-blue-green bin/vivero deploy plan "$blue_green_project" --environment production --json --no-input
+blue_green_plan_id="$(python3 - "$out/plan-blue-green.json" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+plan = payload.get("plan") or {}
+assert plan.get("ok") is True, plan
+assert plan.get("verdict") == "ready", plan
+assert plan.get("strategy") == "blue-green", plan
+blue_green = plan.get("blueGreen") or {}
+assert blue_green.get("activeSlot") == "blue", blue_green
+assert blue_green.get("targetSlot") == "green", blue_green
+phases = [phase.get("name") for phase in blue_green.get("phases", [])]
+assert phases == ["prepare", "smoke", "promote"], phases
+print(plan["id"])
+PY
+)"
+
+run_json apply-blue-green bin/vivero deploy apply "$blue_green_plan_id" --json --no-input
+blue_green_release_id="$(python3 - "$out/apply-blue-green.json" "$blue_green_project/blue-green.log" "$blue_green_plan_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+proof = pathlib.Path(sys.argv[2]).read_text()
+plan_id = sys.argv[3]
+assert release.get("planId") == plan_id, release
+assert release.get("status") == "promoted", release
+assert release.get("strategy") == "blue-green", release
+assert release.get("activeSlot") == "green", release
+assert release.get("previousSlot") == "blue", release
+for expected in ["prepare:blue:green", "smoke:blue:green", "promote:blue:green"]:
+    assert expected in proof, (expected, proof)
+print(release["id"])
+PY
+)"
+
+run_json status-blue-green bin/vivero release status deploy-blue-green --environment production --json --no-input
+python3 - "$out/status-blue-green.json" "$blue_green_project/blue-green-status.txt" "$blue_green_release_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+proof = pathlib.Path(sys.argv[2]).read_text()
+assert release.get("id") == sys.argv[3], release
+assert payload.get("status") == "live-green", payload
+assert release.get("activeSlot") == "green", release
+assert "status:green" in proof, proof
+PY
+
+run_json rollback-blue-green bin/vivero release rollback deploy-blue-green "$blue_green_release_id" --environment production --json --no-input
+python3 - "$out/rollback-blue-green.json" "$blue_green_project/blue-green-rollback.txt" "$blue_green_release_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+proof = pathlib.Path(sys.argv[2]).read_text()
+assert release.get("status") == "rolled_back", release
+assert release.get("rollbackOf") == sys.argv[3], release
+assert release.get("activeSlot") == "blue", release
+assert release.get("previousSlot") == "green", release
+assert "rollback:green:blue" in proof, proof
 PY
 
 set +e

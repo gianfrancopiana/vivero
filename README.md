@@ -114,7 +114,7 @@ The bundled skill tells coding agents how to use Vivero. It stays generic; proje
 
 Vivero stays preview-first, but it now has an explicit production/release command surface for app-owned deploy logic. `vivero doctor production` is the read-only gate: it blocks mutable preview inputs, quick tunnels, and other risky config before a deploy plan can be applied.
 
-Configure deploy commands in `vivero.yml` and keep the implementation in the app repo:
+Configure deploy commands in `vivero.yml` and keep the implementation in the app repo. The default `command` strategy delegates the deploy to one apply command:
 
 ```yaml
 deploy:
@@ -124,6 +124,25 @@ deploy:
       statusCommand: ./script/deploy-status production
       rollbackCommand: ./script/deploy-rollback production
 ```
+
+For first-class blue/green deploys, Vivero plans the active and target slots, applies the release to the inactive slot, runs a smoke gate, then promotes traffic. `smokeCommand` is required; Vivero stops before `promoteCommand` if smoke fails.
+
+```yaml
+deploy:
+  environments:
+    production:
+      strategy: blue-green
+      blueGreen:
+        slots: [blue, green]
+        activeSlotCommand: ./script/bg active-slot production
+        prepareCommand: ./script/bg prepare production
+        smokeCommand: ./script/bg smoke production
+        promoteCommand: ./script/bg promote production
+        statusCommand: ./script/bg status production
+        rollbackCommand: ./script/bg rollback production
+```
+
+Blue/green commands receive these environment variables: `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
 
 Run the flow explicitly:
 
@@ -146,7 +165,7 @@ make deploy-fixtures
 make release-smoke
 ```
 
-`make example-e2e` is the fast canonical preview proof. `make integration-fixtures` is the Docker lifecycle proof. `make deploy-fixtures` proves the plan/apply/status/rollback production command surface against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
+`make example-e2e` is the fast canonical preview proof. `make integration-fixtures` is the Docker lifecycle proof. `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
 
 CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, deploy/release fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
 

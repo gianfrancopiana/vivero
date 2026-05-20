@@ -28,7 +28,7 @@ Vivero:
 
 Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are intentionally unsupported.
 
-Vivero is preview-first. Production operations must use the separate deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production.
+Vivero is preview-first. Production operations must use the separate deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production. For `strategy: blue-green`, Vivero models slots and enforces prepare → smoke → promote before recording the new live slot.
 
 ## First checks
 
@@ -45,6 +45,14 @@ vivero skill doctor --json --no-input
 ```
 
 Use project inspection to learn the available sources, services, profiles, health checks, smoke tests, useful routes, QA scopes, screenshot breakpoints, artifact paths, restart commands, dependency volume lifetimes, and setup-step policies.
+
+## Production deploy strategy notes
+
+- Omitted `strategy` means the default app-owned command strategy: Vivero runs `applyCommand`, optional `statusCommand`, and `rollbackCommand` from `deploy.environments.<env>`.
+- `strategy: blue-green` expects `deploy.environments.<env>.blueGreen` with exactly two slots, `activeSlotCommand`, `prepareCommand`, required `smokeCommand`, `promoteCommand`, optional `statusCommand`, and `rollbackCommand`.
+- Blue/green apply runs `prepareCommand`, then `smokeCommand`, then `promoteCommand`. If smoke fails, Vivero exits before promote and records only release history, not a new current release.
+- Blue/green commands receive `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
+- Use `release status` after apply and `release rollback <project> <release-id>` for slot-aware rollback; do not manually edit Vivero release state.
 
 ## Agent invariants
 

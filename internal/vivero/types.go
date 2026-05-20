@@ -90,9 +90,21 @@ type DeployConfig struct {
 }
 
 type DeployEnvironmentConfig struct {
-	ApplyCommand    string `yaml:"applyCommand" json:"applyCommand,omitempty"`
-	StatusCommand   string `yaml:"statusCommand" json:"statusCommand,omitempty"`
-	RollbackCommand string `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
+	Strategy        string                `yaml:"strategy" json:"strategy,omitempty"`
+	ApplyCommand    string                `yaml:"applyCommand" json:"applyCommand,omitempty"`
+	StatusCommand   string                `yaml:"statusCommand" json:"statusCommand,omitempty"`
+	RollbackCommand string                `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
+	BlueGreen       BlueGreenDeployConfig `yaml:"blueGreen" json:"blueGreen,omitempty"`
+}
+
+type BlueGreenDeployConfig struct {
+	Slots             []string `yaml:"slots" json:"slots,omitempty"`
+	ActiveSlotCommand string   `yaml:"activeSlotCommand" json:"activeSlotCommand,omitempty"`
+	PrepareCommand    string   `yaml:"prepareCommand" json:"prepareCommand,omitempty"`
+	SmokeCommand      string   `yaml:"smokeCommand" json:"smokeCommand,omitempty"`
+	PromoteCommand    string   `yaml:"promoteCommand" json:"promoteCommand,omitempty"`
+	StatusCommand     string   `yaml:"statusCommand" json:"statusCommand,omitempty"`
+	RollbackCommand   string   `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
 }
 
 type BackingConfig struct {
