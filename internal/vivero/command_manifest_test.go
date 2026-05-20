@@ -73,8 +73,11 @@ func TestSchemaForComesFromManifest(t *testing.T) {
 func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 	a := &App{Home: t.TempDir()}
 	caps := a.capabilities()
+	if build, ok := caps["build"].(VersionInfo); !ok || build.Version != Version || build.Commit == "" || build.Date == "" {
+		t.Fatalf("capabilities should expose build provenance: %#v", caps["build"])
+	}
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "clig-compatible-help", "cli-coverage-ratchet", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}
