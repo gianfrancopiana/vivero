@@ -161,13 +161,15 @@ make verify
 make cover
 make example-e2e
 make integration-fixtures
+make nasty-integration-fixtures
+make dogfood-configs
 make deploy-fixtures
 make release-smoke
 ```
 
-`make example-e2e` is the fast canonical preview proof. `make cover` enforces the current repo-wide coverage floor (`COVER_MIN`, default 72.0) so test confidence ratchets upward instead of drifting. `make integration-fixtures` is the Docker lifecycle proof. `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
+`make example-e2e` is the fast canonical preview proof. `make cover` enforces the current repo-wide coverage floor (`COVER_MIN`, default 72.0) so test confidence ratchets upward instead of drifting. `make integration-fixtures` is the Docker lifecycle proof. `make nasty-integration-fixtures` exercises the messy config matrix: static app, app+database, monorepo app-owned Dockerfile, warm volumes, named public routes, invalid public route rejection, bad fingerprint paths, quick-tunnel/browser-path unit coverage, and cleanup/routing edge tests. `make dogfood-configs` validates committed examples plus any live Helper/Flexile/Chetear/self checkouts under `VIVERO_DOGFOOD_ROOT` (default `~/.hermes/workspace`). `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
 
-CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, deploy/release fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
+CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration matrix checks, dogfood config validation, deploy/release fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
 
 ## License
 
