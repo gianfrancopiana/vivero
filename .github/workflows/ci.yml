@@ -62,6 +62,17 @@ jobs:
       - run: docker version
       - run: make integration-fixtures
 
+  deploy-fixtures:
+    name: Deploy/release fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make deploy-fixtures
+
   release-snapshot:
     name: Release snapshot smoke
     runs-on: ubuntu-latest
