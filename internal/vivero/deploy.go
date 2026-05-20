@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
+const deployStateVersion = 1
+
 type DeployPlan struct {
+	StateVersion    int                          `json:"stateVersion"`
 	ID              string                       `json:"id"`
 	Project         string                       `json:"project"`
 	Path            string                       `json:"path"`
@@ -16,6 +19,7 @@ type DeployPlan struct {
 	OK              bool                         `json:"ok"`
 	Verdict         string                       `json:"verdict"`
 	Diagnostics     []ProductionDoctorDiagnostic `json:"diagnostics"`
+	Changes         []DeployChange               `json:"changes,omitempty"`
 	Services        []DeployServiceArtifact      `json:"services,omitempty"`
 	ApplyCommand    string                       `json:"applyCommand,omitempty"`
 	StatusCommand   string                       `json:"statusCommand,omitempty"`
@@ -42,7 +46,16 @@ type DeployServiceArtifact struct {
 	Image string `json:"image"`
 }
 
+type DeployChange struct {
+	Kind    string `json:"kind"`
+	Name    string `json:"name,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Summary string `json:"summary"`
+}
+
 type ReleaseRecord struct {
+	StateVersion int                 `json:"stateVersion"`
 	ID           string              `json:"id"`
 	PlanID       string              `json:"planId"`
 	Project      string              `json:"project"`
@@ -54,9 +67,24 @@ type ReleaseRecord struct {
 	PreviousSlot string              `json:"previousSlot,omitempty"`
 	TargetSlot   string              `json:"targetSlot,omitempty"`
 	Phases       []DeployPhaseRecord `json:"phases,omitempty"`
+	Audit        []DeployAuditEvent  `json:"audit,omitempty"`
+	Artifacts    []DeployArtifact    `json:"artifacts,omitempty"`
 	Output       string              `json:"output,omitempty"`
 	CreatedAt    time.Time           `json:"createdAt"`
 	UpdatedAt    time.Time           `json:"updatedAt"`
+}
+
+type DeployAuditEvent struct {
+	At      time.Time `json:"at"`
+	Action  string    `json:"action"`
+	Status  string    `json:"status"`
+	Message string    `json:"message,omitempty"`
+}
+
+type DeployArtifact struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 type DeployPhaseRecord struct {
@@ -82,14 +110,15 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 	}
 	now := nowUTC()
 	plan := DeployPlan{
-		ID:          newDeployID("plan"),
-		Project:     cfg.Project.Name,
-		Path:        root,
-		Environment: environment,
-		OK:          doctor.OK,
-		Verdict:     doctor.Verdict,
-		Diagnostics: append([]ProductionDoctorDiagnostic{}, doctor.Diagnostics...),
-		CreatedAt:   now,
+		StateVersion: deployStateVersion,
+		ID:           newDeployID("plan"),
+		Project:      cfg.Project.Name,
+		Path:         root,
+		Environment:  environment,
+		OK:           doctor.OK,
+		Verdict:      doctor.Verdict,
+		Diagnostics:  append([]ProductionDoctorDiagnostic{}, doctor.Diagnostics...),
+		CreatedAt:    now,
 	}
 	for _, name := range sortedMapKeys(cfg.Services) {
 		image := strings.TrimSpace(cfg.Services[name].Image)
@@ -97,6 +126,7 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 			continue
 		}
 		plan.Services = append(plan.Services, DeployServiceArtifact{Name: name, Image: image})
+		plan.Changes = append(plan.Changes, DeployChange{Kind: "service-image", Name: name, To: image, Summary: fmt.Sprintf("deploy %s image %s", name, image)})
 	}
 	deployEnv, ok := cfg.Deploy.Environments[environment]
 	if !ok {
@@ -104,6 +134,7 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 	} else {
 		strategy := normalizeDeployStrategy(deployEnv.Strategy)
 		plan.Strategy = strategy
+		plan.Changes = append(plan.Changes, DeployChange{Kind: "deploy-strategy", To: strategy, Summary: fmt.Sprintf("apply %s strategy in %s", strategy, environment)})
 		switch strategy {
 		case "command":
 			plan.ApplyCommand = strings.TrimSpace(deployEnv.ApplyCommand)
@@ -165,6 +196,11 @@ func normalizeDeployStrategy(raw string) string {
 	}
 }
 
+func (r *ReleaseRecord) addAudit(action, status, message string) {
+	r.Audit = append(r.Audit, DeployAuditEvent{At: nowUTC(), Action: action, Status: status, Message: message})
+	r.UpdatedAt = nowUTC()
+}
+
 func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 	plan, err := a.loadDeployPlan(planID)
 	if err != nil {
@@ -173,21 +209,45 @@ func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 	if !plan.OK {
 		return ReleaseRecord{}, fmt.Errorf("deploy plan %s is blocked", planID)
 	}
+	if existing, ok, err := a.findSuccessfulReleaseForPlan(plan); err != nil {
+		return ReleaseRecord{}, err
+	} else if ok {
+		return existing, nil
+	}
+	unlock, err := a.acquireDeployLock(plan.Project, plan.Environment)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	defer unlock()
+	if existing, ok, err := a.findSuccessfulReleaseForPlan(plan); err != nil {
+		return ReleaseRecord{}, err
+	} else if ok {
+		return existing, nil
+	}
 	if plan.Strategy == "blue-green" {
 		return a.applyBlueGreenDeployPlan(plan)
 	}
 	if strings.TrimSpace(plan.ApplyCommand) == "" {
 		return ReleaseRecord{}, fmt.Errorf("deploy plan %s has no apply command", planID)
 	}
-	release := newReleaseRecord(plan, "applied", "")
+	release := newReleaseRecord(plan, "applying", "")
+	release.addAudit("apply", "started", "running app-owned apply command")
+	if err := a.saveReleaseHistory(release); err != nil {
+		return ReleaseRecord{}, err
+	}
 	out, err := runDeployShell(plan, release, plan.ApplyCommand, map[string]string{"VIVERO_RELEASE_ACTION": "apply"})
 	release.Output = strings.TrimSpace(string(out))
 	if err != nil {
 		release.Status = "failed"
-		release.UpdatedAt = nowUTC()
-		_ = a.saveRelease(release)
+		release.addAudit("apply", "failed", strings.TrimSpace(string(out)))
+		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "apply", "command-output", string(out)); artifactErr == nil {
+			release.Artifacts = append(release.Artifacts, artifact)
+		}
+		_ = a.saveReleaseHistory(release)
 		return release, fmt.Errorf("deploy apply failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	release.Status = "applied"
+	release.addAudit("apply", "succeeded", "app-owned apply command completed")
 	if err := a.saveRelease(release); err != nil {
 		return ReleaseRecord{}, err
 	}
@@ -214,7 +274,7 @@ func (a *App) CurrentRelease(project, environment string) (ReleaseRecord, error)
 		if status := strings.TrimSpace(string(out)); status != "" {
 			release.Status = status
 			release.Output = status
-			release.UpdatedAt = nowUTC()
+			release.addAudit("status", "succeeded", status)
 			if err := a.saveRelease(release); err != nil {
 				return ReleaseRecord{}, err
 			}
@@ -244,18 +304,42 @@ func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRe
 	if strings.TrimSpace(plan.RollbackCommand) == "" {
 		return ReleaseRecord{}, fmt.Errorf("release %s has no rollback command", releaseID)
 	}
+	if existing, ok, err := a.findRollbackForRelease(project, environment, releaseID); err != nil {
+		return ReleaseRecord{}, err
+	} else if ok {
+		return existing, nil
+	}
+	unlock, err := a.acquireDeployLock(project, environment)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	defer unlock()
+	if existing, ok, err := a.findRollbackForRelease(project, environment, releaseID); err != nil {
+		return ReleaseRecord{}, err
+	} else if ok {
+		return existing, nil
+	}
 	if plan.Strategy == "blue-green" {
 		return a.rollbackBlueGreenRelease(plan, release)
 	}
-	rollback := newReleaseRecord(plan, "rolled_back", releaseID)
+	rollback := newReleaseRecord(plan, "rolling_back", releaseID)
+	rollback.addAudit("rollback", "started", "running app-owned rollback command")
+	if err := a.saveReleaseHistory(rollback); err != nil {
+		return ReleaseRecord{}, err
+	}
 	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "rollback", "VIVERO_ROLLBACK_RELEASE_ID": releaseID})
 	rollback.Output = strings.TrimSpace(string(out))
 	if err != nil {
 		rollback.Status = "rollback_failed"
-		rollback.UpdatedAt = nowUTC()
-		_ = a.saveRelease(rollback)
+		rollback.addAudit("rollback", "failed", strings.TrimSpace(string(out)))
+		if artifact, artifactErr := a.saveDeployArtifact(rollback.ID, "rollback", "command-output", string(out)); artifactErr == nil {
+			rollback.Artifacts = append(rollback.Artifacts, artifact)
+		}
+		_ = a.saveReleaseHistory(rollback)
 		return rollback, fmt.Errorf("release rollback failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	rollback.Status = "rolled_back"
+	rollback.addAudit("rollback", "succeeded", "app-owned rollback command completed")
 	if err := a.saveRelease(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}

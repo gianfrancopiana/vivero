@@ -55,7 +55,7 @@ services:
 deploy:
   environments:
     production:
-      applyCommand: 'printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt'
+      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf "%s" "$count" > deploy-count.txt; printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt'
       statusCommand: 'printf "live-status:%s\n" "$VIVERO_RELEASE_ID" > deploy-status.txt; printf live-status'
       rollbackCommand: 'printf "rollback:%s\n" "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt'
 YAML
@@ -128,11 +128,14 @@ import sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 plan = payload.get("plan") or {}
 assert plan.get("ok") is True, plan
+assert plan.get("stateVersion") == 1, plan
 assert plan.get("verdict") == "ready", plan
 assert plan.get("project") == "deploy-ready", plan
 assert plan.get("environment") == "production", plan
 assert plan.get("applyCommand"), plan
 assert plan.get("rollbackCommand"), plan
+changes = {change.get("kind") for change in plan.get("changes", [])}
+assert {"service-image", "deploy-strategy"}.issubset(changes), (changes, plan)
 services = plan.get("services") or []
 assert len(services) == 1, services
 assert "@sha256:" in services[0].get("image", ""), services
@@ -149,13 +152,27 @@ payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 release = payload.get("release") or {}
 proof = pathlib.Path(sys.argv[2]).read_text()
 plan_id = sys.argv[3]
+assert release.get("stateVersion") == 1, release
 assert release.get("status") == "applied", release
 assert release.get("planId") == plan_id, release
+assert any(event.get("action") == "apply" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
 assert plan_id in proof, proof
 assert release.get("id") in proof, (release, proof)
 print(release["id"])
 PY
 )"
+
+run_json apply-repeat bin/vivero deploy apply "$plan_id" --json --no-input
+python3 - "$out/apply-repeat.json" "$ready_project/deploy-count.txt" "$release_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+count = pathlib.Path(sys.argv[2]).read_text().strip()
+assert release.get("id") == sys.argv[3], release
+assert count == "1", count
+PY
 
 run_json status bin/vivero release status deploy-ready --environment production --json --no-input
 python3 - "$out/status.json" "$ready_project/deploy-status.txt" "$release_id" <<'PY'
@@ -169,11 +186,25 @@ release_id = sys.argv[3]
 assert release.get("id") == release_id, release
 assert payload.get("status") == "live-status", payload
 assert release.get("status") == "live-status", release
+assert any(event.get("action") == "status" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
 assert release_id in proof, proof
 PY
 
+run_json apply-after-status bin/vivero deploy apply "$plan_id" --json --no-input
+python3 - "$out/apply-after-status.json" "$ready_project/deploy-count.txt" "$release_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+count = pathlib.Path(sys.argv[2]).read_text().strip()
+assert release.get("id") == sys.argv[3], release
+assert release.get("status") == "live-status", release
+assert count == "1", count
+PY
+
 run_json rollback bin/vivero release rollback deploy-ready "$release_id" --environment production --json --no-input
-python3 - "$out/rollback.json" "$ready_project/deploy-rollback.txt" "$release_id" <<'PY'
+rollback_id="$(python3 - "$out/rollback.json" "$ready_project/deploy-rollback.txt" "$release_id" <<'PY'
 import json
 import pathlib
 import sys
@@ -182,7 +213,21 @@ release = payload.get("release") or {}
 proof = pathlib.Path(sys.argv[2]).read_text()
 assert release.get("status") == "rolled_back", release
 assert release.get("rollbackOf") == sys.argv[3], release
+assert any(event.get("action") == "rollback" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
 assert sys.argv[3] in proof, proof
+print(release["id"])
+PY
+)"
+
+run_json rollback-repeat bin/vivero release rollback deploy-ready "$release_id" --environment production --json --no-input
+python3 - "$out/rollback-repeat.json" "$rollback_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release = payload.get("release") or {}
+assert release.get("id") == sys.argv[2], release
+assert release.get("status") == "rolled_back", release
 PY
 
 run_json plan-blue-green bin/vivero deploy plan "$blue_green_project" --environment production --json --no-input
