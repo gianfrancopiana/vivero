@@ -129,6 +129,50 @@ func TestScreenshotBreakpointsPreferExplicitThenProjectThenViewport(t *testing.T
 	}
 }
 
+func TestScreenshotDimensionsAndNameHelpers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shot.png")
+	img := image.NewRGBA(image.Rect(0, 0, 37, 23))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	writePNG(t, path, img)
+
+	width, height, err := screenshotDimensions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if width != 37 || height != 23 {
+		t.Fatalf("screenshotDimensions = %dx%d", width, height)
+	}
+	if _, _, err := screenshotDimensions(filepath.Join(t.TempDir(), "missing.png")); err == nil {
+		t.Fatal("screenshotDimensions should fail for missing files")
+	}
+	if got := sanitizeScreenshotName(" !!! "); got != "viewport" {
+		t.Fatalf("sanitizeScreenshotName empty fallback = %q", got)
+	}
+	if got := screenshotFileBase("web", "/account?tab=billing", ScreenshotBreakpoint{Width: 390, Height: 844}, true, "Dark Mode"); got != "web-_account_tab_billing-390x844-dark-mode.png" {
+		t.Fatalf("screenshotFileBase = %q", got)
+	}
+}
+
+func TestScreenshotValidationRejectsBadOptions(t *testing.T) {
+	for _, spec := range []string{"desktop", "desktop=0x800", "desktop=800x0"} {
+		if _, err := parseScreenshotBreakpoint(spec); err == nil {
+			t.Fatalf("parseScreenshotBreakpoint(%q) should fail", spec)
+		}
+	}
+	if err := validateColorSchemes([]string{"light", "sepia"}); err == nil || !strings.Contains(err.Error(), "light or dark") {
+		t.Fatalf("expected color scheme validation error, got %v", err)
+	}
+	if got := normalizeArtifactTarget("external"); got != "public" {
+		t.Fatalf("normalizeArtifactTarget external = %q", got)
+	}
+	if got := normalizeArtifactTarget("direct"); got != "origin" {
+		t.Fatalf("normalizeArtifactTarget direct = %q", got)
+	}
+	if got := normalizeArtifactTarget("staging"); got != "staging" {
+		t.Fatalf("normalizeArtifactTarget custom = %q", got)
+	}
+}
+
 func writePNG(t *testing.T, path string, img image.Image) {
 	t.Helper()
 	f, err := os.Create(path)

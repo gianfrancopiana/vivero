@@ -39,6 +39,32 @@ func TestPlainErrorShape(t *testing.T) {
 	}
 }
 
+func TestCLIErrorDetailsAndCause(t *testing.T) {
+	err := cliError{Code: "wrapped", Message: "outer", Cause: errors.New("inner")}
+	if got := err.Error(); got != "outer: inner" {
+		t.Fatalf("cliError.Error = %q", got)
+	}
+
+	details := normalizeDetails(struct{ Name string }{Name: "demo"})
+	if details["value"] == nil {
+		t.Fatalf("normalizeDetails should preserve non-map values: %#v", details)
+	}
+	copied := normalizeDetails(map[string]any{"path": "vivero.yml"})
+	copied["path"] = "mutated"
+	if copied["path"] != "mutated" {
+		t.Fatalf("normalizeDetails copy not mutable as expected: %#v", copied)
+	}
+
+	missing := missingArgError("diagnose startup", "preview")
+	ce, ok := asCLIError(missing)
+	if !ok {
+		t.Fatalf("missingArgError should produce cliError: %v", missing)
+	}
+	if ce.Code != "missing_required_argument" || ce.Details["required"] != "preview" || !strings.Contains(ce.Hint, "vivero help diagnose startup") {
+		t.Fatalf("unexpected missing arg error: %#v", ce)
+	}
+}
+
 func TestNoInputConfirmationPolicy(t *testing.T) {
 	if err := requireExplicitConfirmation(true, true, "", "prod"); err == nil || !strings.Contains(err.Error(), "--confirm prod") {
 		t.Fatalf("expected no-input confirmation error, got %v", err)
@@ -48,5 +74,8 @@ func TestNoInputConfirmationPolicy(t *testing.T) {
 	}
 	if err := requireExplicitConfirmation(true, false, "", "prod"); err != nil {
 		t.Fatalf("non-dangerous command should not require confirmation: %v", err)
+	}
+	if err := requireExplicitConfirmation(false, true, "", "prod"); err == nil || !strings.Contains(err.Error(), `confirmation "prod"`) {
+		t.Fatalf("interactive dangerous command should require confirmation text, got %v", err)
 	}
 }

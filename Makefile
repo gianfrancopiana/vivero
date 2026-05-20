@@ -1,5 +1,7 @@
 BINARY := vivero
 VERSION ?= dev
+COVERPROFILE ?= /tmp/vivero-cover.out
+COVER_MIN ?= 72.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION)"
 
 .PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke example-e2e integration-fixtures deploy-fixtures clean
@@ -28,8 +30,10 @@ fmt-check:
 	fi
 
 cover:
-	go test -coverprofile=/tmp/vivero-cover.out ./...
-	go tool cover -func=/tmp/vivero-cover.out
+	go test -coverprofile=$(COVERPROFILE) ./...
+	go tool cover -func=$(COVERPROFILE) | tee /tmp/vivero-cover-func.out
+	@total="$$(awk '/^total:/ {gsub(/%/, "", $$3); print $$3}' /tmp/vivero-cover-func.out)"; \
+	awk -v total="$$total" -v min="$(COVER_MIN)" 'BEGIN { if (total + 0 < min + 0) { printf "coverage %.1f%% is below floor %.1f%%\n", total, min; exit 1 } printf "coverage %.1f%% meets floor %.1f%%\n", total, min }'
 
 verify: fmt-check vet test build
 

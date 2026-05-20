@@ -85,6 +85,72 @@ func TestDockerPublishedPortParsingSupportsIPv4IPv6AndZeroHostFallback(t *testin
 	}
 }
 
+func TestPreviewPortHelpersSelectAndMapPorts(t *testing.T) {
+	primary, ok := primaryServicePort([]ServicePort{{Name: "http"}, {Name: "metrics"}})
+	if ok || primary.Name != "" {
+		t.Fatalf("primaryServicePort should reject ambiguous ports, got %#v ok=%v", primary, ok)
+	}
+
+	ports := []PreviewPort{
+		{Name: "metrics", Host: 49154},
+		{Name: "http", Host: 49153, Primary: true},
+	}
+	byName := previewPortsByName(ports)
+	if byName["http"].Host != 49153 || byName["metrics"].Host != 49154 {
+		t.Fatalf("previewPortsByName = %#v", byName)
+	}
+	if got := previewPortsByName(nil); got != nil {
+		t.Fatalf("empty previewPortsByName = %#v, want nil", got)
+	}
+	if primary, ok := primaryPreviewPort(byName); !ok || primary.Name != "http" {
+		t.Fatalf("primaryPreviewPort = %#v ok=%v", primary, ok)
+	}
+	if primary, ok := primaryPreviewPort(map[string]PreviewPort{"only": {Name: "only", Host: 49155}}); !ok || primary.Name != "only" {
+		t.Fatalf("single primaryPreviewPort = %#v ok=%v", primary, ok)
+	}
+	if primary, ok := primaryPreviewPort(map[string]PreviewPort{"a": {Name: "a"}, "b": {Name: "b"}}); ok || primary.Name != "" {
+		t.Fatalf("ambiguous primaryPreviewPort = %#v ok=%v", primary, ok)
+	}
+
+	configured := []ServicePort{
+		{Name: "http", Container: 3000, Protocol: "tcp", Primary: true},
+		{Name: "metrics", Container: 9090, Protocol: "tcp"},
+	}
+	mapped, err := previewPortsFromPublished(configured, ports, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapped["http"].URL != "http://127.0.0.1:49153" || !mapped["http"].Primary || mapped["metrics"].URL != "http://127.0.0.1:49154" {
+		t.Fatalf("previewPortsFromPublished = %#v", mapped)
+	}
+	if _, err := previewPortsFromPublished(configured, []PreviewPort{{Name: "http", Host: 49153}}, "127.0.0.1"); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("expected missing published port error, got %v", err)
+	}
+	if _, err := previewPortsFromPublished([]ServicePort{{Name: "http"}}, []PreviewPort{{Name: "http"}}, "127.0.0.1"); err == nil || !strings.Contains(err.Error(), "invalid host port") {
+		t.Fatalf("expected invalid host port error, got %v", err)
+	}
+}
+
+func TestServicePortPlanRejectsInvalidNamedPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		svc  ServiceConfig
+		want string
+	}{
+		{name: "legacy and named", svc: ServiceConfig{Port: 3000, Ports: map[string]PortConfig{"http": {Container: 3000}}}, want: "cannot declare both"},
+		{name: "empty name", svc: ServiceConfig{Ports: map[string]PortConfig{"": {Container: 3000}}}, want: "empty name"},
+		{name: "whitespace name", svc: ServiceConfig{Ports: map[string]PortConfig{" http ": {Container: 3000}}}, want: "surrounding whitespace"},
+		{name: "missing primary", svc: ServiceConfig{PrimaryPort: "admin", Ports: map[string]PortConfig{"http": {Container: 3000}}}, want: "primaryPort"},
+		{name: "bad protocol", svc: ServiceConfig{Ports: map[string]PortConfig{"http": {Container: 3000, Protocol: "udp"}}}, want: "unsupported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := servicePortPlan(tc.svc); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("servicePortPlan error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestCleanupPreviewServicesRemovesStrayDockerContainersByPreviewLabel(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	installFakeDocker(t)

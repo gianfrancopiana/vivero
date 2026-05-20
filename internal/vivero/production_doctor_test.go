@@ -198,6 +198,62 @@ services:
 	}
 }
 
+func TestProductionDoctorFlagsBackingServiceReadiness(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+services:
+  web:
+    image: registry.example.com/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    port: 3000
+    resources:
+      cpus: "1"
+      memory: 512m
+    health:
+      path: /
+      timeout: 30s
+backingServices:
+  db:
+    image: postgres:16
+    env:
+      POSTGRES_PASSWORD: plain-password-value
+      VAULT_TOKEN: vault://secret/db/token
+    dependencyVolumes:
+      - name: pgdata
+        target: /var/lib/postgresql/data
+        lifetime: project
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ProductionDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK || report.Verdict != "candidate" {
+		t.Fatalf("backing warnings should keep report a candidate: %#v", report)
+	}
+	codes := productionDiagnosticCodes(report.Diagnostics)
+	for _, want := range []string{"image-not-immutable", "resource-limits-missing", "health-timeout-missing", "inline-secret", "backup-policy-missing"} {
+		if !codes[want] {
+			t.Fatalf("missing backing diagnostic %s in %#v", want, report.Diagnostics)
+		}
+	}
+	encoded, _ := json.Marshal(report)
+	if strings.Contains(string(encoded), "plain-password-value") || strings.Contains(string(encoded), "vault://secret") {
+		t.Fatalf("diagnostics leaked backing secret values: %s", string(encoded))
+	}
+}
+
+func TestDoctorProjectPathParsesFlagsAndPositionals(t *testing.T) {
+	if got := doctorProjectPath([]string{"--production", "--project", "/tmp/app"}); got != "/tmp/app" {
+		t.Fatalf("doctorProjectPath --project = %q", got)
+	}
+	if got := doctorProjectPath([]string{"--production", "./app"}); got != "./app" {
+		t.Fatalf("doctorProjectPath positional = %q", got)
+	}
+	if got := doctorProjectPath(nil); got != "." {
+		t.Fatalf("doctorProjectPath default = %q", got)
+	}
+}
+
 func TestRunDoctorProductionJSONExitCode(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	root := writeConfigDoctorFile(t, `project:
