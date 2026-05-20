@@ -868,6 +868,37 @@ func TestUpValidatesNamedPublicRouteBeforeStartingDockerNetwork(t *testing.T) {
 	}
 }
 
+func TestUpRejectsInvalidNamedPublicRouteBeforeStartingDockerNetwork(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	installFakeDocker(t)
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+public:
+  provider: cloudflare
+  mode: named-tunnel
+services:
+  web:
+    image: alpine:latest
+    port: 3000
+    public: true
+`)
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Up(UpRequest{Project: "demo", ID: "demo-pr-18", Public: true})
+	if err == nil || !strings.Contains(err.Error(), "public.baseDomain") {
+		t.Fatalf("expected invalid public route error before docker startup, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(os.Getenv("FAKE_DOCKER_STATE"), "network-"+dockerNetworkName("demo-pr-18"))); !os.IsNotExist(statErr) {
+		t.Fatalf("docker network should not be created before invalid public route is rejected, stat err=%v", statErr)
+	}
+}
+
 func TestDownSafeDirtySourceStillRemovesDockerNetwork(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	installFakeDocker(t)

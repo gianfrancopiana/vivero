@@ -124,6 +124,80 @@ services:
 	}
 }
 
+func TestProductionDoctorBlocksInvalidNamedPublicRoute(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+public:
+  provider: cloudflare
+  mode: named-tunnel
+services:
+  web:
+    image: registry.example.com/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    public: true
+    port: 3000
+    resources:
+      cpus: "1"
+      memory: 512m
+    health:
+      path: /
+      timeout: 30s
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ProductionDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK || report.Verdict != "blocked" {
+		t.Fatalf("expected invalid named public route to block production readiness: %#v", report)
+	}
+	if !productionDiagnosticCodes(report.Diagnostics)["public-route-invalid"] {
+		t.Fatalf("missing public-route-invalid diagnostic: %#v", report.Diagnostics)
+	}
+}
+
+func TestProductionDoctorBlocksDuplicateNamedPublicRoutes(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+public:
+  provider: cloudflare
+  mode: named-tunnel
+  baseDomain: preview.example.com
+  hostname: staging.preview.example.com
+services:
+  web:
+    image: registry.example.com/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    public: true
+    port: 3000
+    resources:
+      cpus: "1"
+      memory: 512m
+    health:
+      path: /
+      timeout: 30s
+  api:
+    image: registry.example.com/api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    public: true
+    port: 3001
+    resources:
+      cpus: "1"
+      memory: 512m
+    health:
+      path: /
+      timeout: 30s
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ProductionDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK || report.Verdict != "blocked" {
+		t.Fatalf("expected duplicate named public routes to block production readiness: %#v", report)
+	}
+	if !productionDiagnosticCodes(report.Diagnostics)["public-route-invalid"] {
+		t.Fatalf("missing public-route-invalid diagnostic: %#v", report.Diagnostics)
+	}
+}
+
 func TestRunDoctorProductionJSONExitCode(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	root := writeConfigDoctorFile(t, `project:
