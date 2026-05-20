@@ -160,7 +160,7 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 			}
 		}
 	}
-	path := filepath.Join(a.Home, "run", previewID, "compose.yml")
+	path := previewRunFilePath(a.Home, previewID, "compose.yml")
 	if err := ensureDir(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		}
 	}
 	env := a.envForService(cfg.Project.Name, svc, includeSecrets)
-	logPath := filepath.Join(a.Home, "logs", previewID, name+".log")
+	logPath := serviceLogPath(a.Home, previewID, name, ".log")
 	ps.LogPath = logPath
 	if err := ensureDir(filepath.Dir(logPath)); err != nil {
 		return ps, err
@@ -418,7 +418,7 @@ func (a *App) startQuickTunnel(previewID, service, originURL, hostHeader string)
 	if _, err := exec.LookPath("cloudflared"); err != nil {
 		return "", 0, "", fmt.Errorf("cloudflared not found: %w", err)
 	}
-	logPath := filepath.Join(a.Home, "logs", previewID, service+".cloudflared.log")
+	logPath := serviceLogPath(a.Home, previewID, service, ".cloudflared.log")
 	if err := ensureDir(filepath.Dir(logPath)); err != nil {
 		return "", 0, "", err
 	}

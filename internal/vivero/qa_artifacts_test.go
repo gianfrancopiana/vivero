@@ -2,6 +2,7 @@ package vivero
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -188,6 +189,29 @@ func TestDefaultPreviewServiceSkipsURLLessBackingServices(t *testing.T) {
 	}}
 	if got := defaultPreviewService(AgentConfig{}, p); got != "web" {
 		t.Fatalf("default preview service = %q; want web", got)
+	}
+}
+
+func TestQAArtifactDirKeepsPreviewAndScopeUnderArtifactRoot(t *testing.T) {
+	home := t.TempDir()
+	projectRoot := t.TempDir()
+	dir, err := qaArtifactDir(home, projectRoot, "../outside", "auth/../admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(home, "qa")
+	if !pathWithinRoot(root, dir) {
+		t.Fatalf("artifact dir escaped root: dir=%s root=%s", dir, root)
+	}
+	if strings.Contains(dir, "..") {
+		t.Fatalf("artifact dir should not preserve path traversal elements: %s", dir)
+	}
+}
+
+func TestQAArtifactDirRejectsProjectRelativeRootEscape(t *testing.T) {
+	_, err := qaArtifactDir(t.TempDir(), t.TempDir(), "preview", "smoke", "../outside")
+	if err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("expected project-relative artifact root escape error, got %v", err)
 	}
 }
 

@@ -173,7 +173,7 @@ func screenshotBreakpoints(opts ScreenshotOptions, project []ScreenshotBreakpoin
 
 func screenshotFileBase(service, pagePath string, bp ScreenshotBreakpoint, multi bool, colorScheme string) string {
 	replacer := strings.NewReplacer("/", "_", ":", "_", "?", "_", "&", "_", "=", "_")
-	base := service + "-" + replacer.Replace(pagePath)
+	base := safePathComponent(service, "service") + "-" + replacer.Replace(pagePath)
 	if multi || bp.Name != "" {
 		name := bp.Name
 		if name == "" {
@@ -191,7 +191,7 @@ func screenshotOutputPath(home, outputDir, previewID, service, pagePath string, 
 	if outputDir != "" {
 		return filepath.Join(expandPath(outputDir), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
 	}
-	return filepath.Join(home, "screenshots", previewID, screenshotFileBase(service, pagePath, bp, multi, colorScheme))
+	return filepath.Join(home, "screenshots", safePathComponent(previewID, "preview"), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
 }
 
 func sanitizeScreenshotName(name string) string {

@@ -41,7 +41,7 @@ func (a *App) resolveSource(project, projectPath, previewID, name string, src So
 	if src.Repo == "" {
 		return PreviewSource{}, fmt.Errorf("source %s has no repo/path and no %s.path override", name, name)
 	}
-	repoPath := filepath.Join(a.Home, "repos", name)
+	repoPath := managedRepoPath(a.Home, name)
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); os.IsNotExist(err) {
 		if out, err := runCmd("", nil, "git", "clone", src.Repo, repoPath); err != nil {
 			return PreviewSource{}, fmt.Errorf("git clone %s: %w: %s", src.Repo, err, string(out))
@@ -50,7 +50,7 @@ func (a *App) resolveSource(project, projectPath, previewID, name string, src So
 	if out, err := runCmd(repoPath, nil, "git", "fetch", "--all", "--prune"); err != nil {
 		return PreviewSource{}, fmt.Errorf("git fetch: %w: %s", err, string(out))
 	}
-	wt := filepath.Join(a.Home, "worktrees", project, previewID, name)
+	wt := managedWorktreePath(a.Home, project, previewID, name)
 	_ = os.RemoveAll(wt)
 	if err := ensureDir(filepath.Dir(wt)); err != nil {
 		return PreviewSource{}, err
@@ -63,6 +63,10 @@ func (a *App) resolveSource(project, projectPath, previewID, name string, src So
 		sha = strings.TrimSpace(string(out))
 	}
 	return PreviewSource{Name: name, Mode: "managed", Ref: sha, Path: wt, Owned: true}, nil
+}
+
+func managedWorktreePath(home, project, previewID, source string) string {
+	return filepath.Join(home, "worktrees", safePathComponent(project, "project"), safePathComponent(previewID, "preview"), safePathComponent(source, "source"))
 }
 
 func resolveSourcePath(projectPath, value string) (string, error) {
