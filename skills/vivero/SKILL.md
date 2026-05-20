@@ -53,6 +53,29 @@ Use project inspection to learn the available sources, services, profiles, healt
 - Blue/green apply runs `prepareCommand`, then `smokeCommand`, then `promoteCommand`. If smoke fails, Vivero exits before promote and records only release history, not a new current release.
 - Blue/green commands receive `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
 - Use `release status` after apply and `release rollback <project> <release-id>` for slot-aware rollback; do not manually edit Vivero release state.
+- Deploy/release state is versioned and audited. Treat `planId`, `releaseId`, `stateVersion`, and audit events as the durable contract for recovery/debugging.
+- Production apply/rollback is guarded by project/environment locks and idempotency checks. If an operation is already applied or rolled back, prefer re-reading status/history over rerunning app-owned commands manually.
+
+## Repo quality gates
+
+Before claiming a Vivero runtime/release change is ready, run the focused gate for the surface you touched and then the repo gate:
+
+```sh
+make verify
+make cover
+make example-e2e
+make integration-fixtures
+make nasty-integration-fixtures
+make dogfood-configs
+make deploy-fixtures
+make release-smoke
+```
+
+- `make cover` enforces the coverage ratchet (`COVER_MIN`, default 72.0).
+- `make nasty-integration-fixtures` covers messy project shapes: static-only, app+database, monorepo Dockerfile, warm volumes, profiles, named tunnels, invalid public routes, and fingerprint-path failures.
+- `make dogfood-configs` validates committed examples plus live Helper/Flexile/Chetear/self checkouts when present under `VIVERO_DOGFOOD_ROOT`.
+- `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback.
+- `make release-smoke` builds snapshot artifacts, verifies `checksums.txt`, extracts the host archive, checks `vivero version --json` provenance, and validates packaged config examples.
 
 ## Agent invariants
 
