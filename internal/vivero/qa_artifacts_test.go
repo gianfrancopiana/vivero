@@ -34,6 +34,29 @@ func TestQAURLsDefaultToLocalProxyForFastEvidence(t *testing.T) {
 	}
 }
 
+func TestQAExplicitTargetsDoNotFallbackToLocalURLs(t *testing.T) {
+	localOnly := PreviewRecord{Services: map[string]PreviewService{
+		"web": {ProxyURL: "http://127.0.0.1:4444"},
+	}}
+	if _, err := qaURLForServicePathWithTarget(localOnly, "web", "/login", "public"); err == nil || !strings.Contains(err.Error(), "no public URL") {
+		t.Fatalf("explicit public target should require a public URL, got %v", err)
+	}
+
+	runtimeLocal := PreviewRecord{Services: map[string]PreviewService{
+		"web": {URL: "http://127.0.0.1:4444", OriginURL: "http://127.0.0.1:3000", ProxyURL: "http://127.0.0.1:4444"},
+	}}
+	if _, err := qaURLForServicePathWithTarget(runtimeLocal, "web", "/login", "public"); err == nil || !strings.Contains(err.Error(), "no public URL") {
+		t.Fatalf("explicit public target should not treat runtime local/proxy URL as public, got %v", err)
+	}
+
+	proxiedOnly := PreviewRecord{Services: map[string]PreviewService{
+		"web": {URL: "https://public.example.trycloudflare.com", ProxyURL: "http://127.0.0.1:4444"},
+	}}
+	if _, err := qaURLForServicePathWithTarget(proxiedOnly, "web", "/login", "origin"); err == nil || !strings.Contains(err.Error(), "no origin URL") {
+		t.Fatalf("explicit origin target should require an origin URL, got %v", err)
+	}
+}
+
 func TestNormalizeArtifactRecordingDefaults(t *testing.T) {
 	shot := normalizeScreenshotOptions(ScreenshotOptions{})
 	if shot.Target != "local" {

@@ -120,6 +120,7 @@ func productionDoctorCheckControlPlane(report *ProductionDoctorResult) {
 }
 
 func productionDoctorCheckServices(report *ProductionDoctorResult, cfg ProjectConfig) {
+	productionDoctorCheckPublicRoutes(report, cfg)
 	for _, name := range sortedMapKeys(cfg.Services) {
 		svc := cfg.Services[name]
 		base := "services." + name
@@ -130,9 +131,6 @@ func productionDoctorCheckServices(report *ProductionDoctorResult, cfg ProjectCo
 			report.addDiagnostic("error", "mutable-build", base+".build", fmt.Sprintf("service %s builds from project context at runtime", name), "Move build output to an immutable image artifact and reference it by digest for production.")
 		}
 		productionDoctorCheckImage(report, base+".image", svc.Image)
-		if svc.Public && !isNamedPublicTunnel(cfg.Public) {
-			report.addDiagnostic("error", "quick-tunnel-production", "public", fmt.Sprintf("public service %s would rely on an ephemeral quick tunnel", name), "Production ingress needs explicit DNS/TLS ownership, not Cloudflare quick tunnels.")
-		}
 		productionDoctorCheckResources(report, base+".resources", svc.ResourceLimits)
 		productionDoctorCheckHealth(report, base+".health", svc.Health)
 		productionDoctorCheckEnv(report, base+".env", svc.Env)
@@ -149,6 +147,28 @@ func productionDoctorCheckBackingServices(report *ProductionDoctorResult, cfg Pr
 		productionDoctorCheckHealth(report, base+".health", backing.Health)
 		productionDoctorCheckEnv(report, base+".env", backing.Env)
 		productionDoctorCheckVolumes(report, base+".dependencyVolumes", backing.DependencyVolumes)
+	}
+}
+
+func productionDoctorCheckPublicRoutes(report *ProductionDoctorResult, cfg ProjectConfig) {
+	var publicServices []string
+	for _, name := range sortedMapKeys(cfg.Services) {
+		if cfg.Services[name].Public {
+			publicServices = append(publicServices, name)
+		}
+	}
+	if len(publicServices) == 0 {
+		return
+	}
+	if !isNamedPublicTunnel(cfg.Public) {
+		for _, service := range publicServices {
+			report.addDiagnostic("error", "quick-tunnel-production", "public", fmt.Sprintf("public service %s would rely on an ephemeral quick tunnel", service), "Production ingress needs explicit DNS/TLS ownership, not Cloudflare quick tunnels.")
+		}
+		return
+	}
+	_, err := plannedNamedPublicHosts(UpRequest{Project: cfg.Project.Name, ID: cfg.Project.Name, Labels: map[string]string{}, Metadata: map[string]string{}}, cfg)
+	if err != nil {
+		report.addDiagnostic("error", "public-route-invalid", "public", fmt.Sprintf("stable public route plan is invalid: %v", err), "Set public.baseDomain, public.hostname, or public.hostnameTemplate to unique valid stable DNS hosts before production.")
 	}
 }
 

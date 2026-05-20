@@ -998,21 +998,12 @@ func serviceBaseURLForTarget(svc PreviewService, target string) string {
 	origin := serviceOriginURL(svc)
 	switch normalizeArtifactTarget(target) {
 	case artifactTargetPublic:
-		if svc.URL != "" {
+		if previewServiceHasPublicURL(svc) {
 			return svc.URL
 		}
-		if svc.ProxyURL != "" {
-			return svc.ProxyURL
-		}
-		return origin
+		return ""
 	case artifactTargetOrigin:
-		if origin != "" {
-			return origin
-		}
-		if svc.ProxyURL != "" {
-			return svc.ProxyURL
-		}
-		return svc.URL
+		return origin
 	default:
 		if svc.ProxyURL != "" {
 			return svc.ProxyURL
