@@ -56,9 +56,12 @@ func commandManifests() []CommandManifest {
 		{Name: "--quiet", Description: "suppress progress output", Global: true},
 		{Name: "--verbose", Description: "show more progress detail", Global: true},
 		{Name: "--debug", Description: "show debugging context for unexpected failures", Global: true},
+		{Name: "--version", Description: "print Vivero version", Global: true},
 	}
 	return []CommandManifest{
 		manifest([]string{"capabilities"}, "print runtime capabilities", "vivero capabilities --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, home, features, and invariants"}),
+		manifest([]string{"version"}, "print Vivero version", "vivero version --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version string"}),
+		manifest([]string{"help"}, "show examples-first help", "vivero help <command>", true, "stable", []CommandFlag{{Name: "<command>", Description: "optional command or command group"}}, nil, map[string]any{"returns": "human-readable help on stdout"}),
 		manifest([]string{"commands"}, "list public commands", "vivero commands --json --no-input", true, "stable", global, nil, map[string]any{"returns": "typed command manifest for public commands"}),
 		manifest([]string{"schema"}, "print command schema", "vivero schema up --json --no-input", true, "stable", append(global, CommandFlag{Name: "<command>", Description: "optional command name"}), nil, map[string]any{"returns": "schema for one command or all commands"}),
 		manifest([]string{"doctor"}, "check local Vivero environment", "vivero doctor --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "validate project config via ConfigDoctor instead of local environment checks"}), nil, map[string]any{"returns": "environment checks, or configDoctor when --project is passed"}),
@@ -123,11 +126,16 @@ func schemaFor(command string) map[string]any {
 	manifests := commandManifests()
 	if command != "" {
 		for _, cmd := range manifests {
-			if cmd.Name() == command || strings.Join(cmd.Path, " ") == command || (len(cmd.Path) > 0 && cmd.Path[0] == command) {
+			if cmd.Name() == command || strings.Join(cmd.Path, " ") == command {
 				return map[string]any{"command": cmd.Name(), "schema": schemaBody(cmd)}
 			}
 		}
-		return map[string]any{"command": command, "schema": map[string]any{"usage": "see vivero commands --json", "jsonStability": "none"}}
+		for _, cmd := range manifests {
+			if len(cmd.Path) > 1 && cmd.Path[0] == command {
+				return map[string]any{"command": cmd.Name(), "schema": schemaBody(cmd)}
+			}
+		}
+		return map[string]any{"command": command, "schema": map[string]any{"usage": "see vivero commands --json", "jsonStability": "none", "unknown": true}}
 	}
 	out := map[string]any{}
 	for _, cmd := range manifests {

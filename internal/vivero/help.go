@@ -29,15 +29,18 @@ func rootHelp() string {
 		b.WriteString(fmt.Sprintf("  %-22s %s\n", "vivero "+cmd.Name(), cmd.Summary))
 	}
 	b.WriteString("\nGlobal flags:\n")
-	b.WriteString("  --json       stable machine-readable output\n")
+	b.WriteString("  --json       stable machine-readable output on stdout\n")
 	b.WriteString("  --no-input   never prompt; fail fast with an actionable error\n")
 	b.WriteString("  --quiet      suppress progress output\n")
 	b.WriteString("  --verbose    include more progress detail\n")
 	b.WriteString("  --debug      include debugging context\n")
+	b.WriteString("  --version    print the Vivero version\n")
 	b.WriteString("\nMore help:\n")
 	b.WriteString("  vivero help <command>\n")
 	b.WriteString("  vivero commands --json --no-input\n")
 	b.WriteString("  vivero schema <command> --json --no-input\n")
+	b.WriteString("  docs: https://github.com/gianfrancopiana/vivero\n")
+	b.WriteString("  issues: https://github.com/gianfrancopiana/vivero/issues\n")
 	return b.String()
 }
 
@@ -48,7 +51,42 @@ func commandHelp(path []string) (string, bool) {
 			return renderCommandHelp(cmd), true
 		}
 	}
+	if len(path) == 1 {
+		if help, ok := renderCommandGroupHelp(path[0]); ok {
+			return help, true
+		}
+	}
 	return "", false
+}
+
+func renderCommandGroupHelp(group string) (string, bool) {
+	commands := []CommandManifest{}
+	for _, cmd := range commandCatalog() {
+		if len(cmd.Path) > 1 && cmd.Path[0] == group {
+			commands = append(commands, cmd)
+		}
+	}
+	if len(commands) == 0 {
+		return "", false
+	}
+	var b strings.Builder
+	b.WriteString("vivero " + group + " - command group\n\n")
+	b.WriteString("Examples:\n")
+	for _, cmd := range commands {
+		if len(cmd.Examples) == 0 {
+			continue
+		}
+		b.WriteString("  # " + cmd.Summary + "\n")
+		b.WriteString("  " + strings.Join(cmd.Examples[0].Command, " ") + "\n")
+	}
+	b.WriteString("\nSubcommands:\n")
+	for _, cmd := range commands {
+		b.WriteString(fmt.Sprintf("  %-22s %s\n", "vivero "+cmd.Name(), cmd.Summary))
+	}
+	b.WriteString("\nMore help:\n")
+	b.WriteString("  vivero help " + group + " <subcommand>\n")
+	b.WriteString("  vivero schema " + group + " <subcommand> --json --no-input\n")
+	return b.String(), true
 }
 
 func renderCommandHelp(cmd CommandManifest) string {
@@ -95,11 +133,19 @@ func renderCommandHelp(cmd CommandManifest) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString(fmt.Sprintf("JSON stability: %s\n", cmd.JSONStability))
+	if cmd.AgentSafe {
+		b.WriteString("Agent safety: safe for unattended agent use.\n")
+	} else {
+		b.WriteString("Agent safety: inspect before unattended use.\n")
+	}
 	if cmd.RequiresNet {
 		b.WriteString("Network: may use Docker/network resources.\n")
 	}
 	if cmd.WritesLocal {
 		b.WriteString("Side effects: writes local preview/runtime state.\n")
+	}
+	if cmd.Dangerous {
+		b.WriteString("Risk: can remove or mutate local/remote runtime state.\n")
 	}
 	return b.String()
 }

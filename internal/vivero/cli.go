@@ -16,6 +16,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage())
 		return 0
 	}
+	if hasArg(args, "--version") {
+		output(stdout, jsonOut, map[string]any{"version": Version}, Version)
+		return 0
+	}
 	if args[0] == "help" || hasArg(args, "--help") || hasArg(args, "-h") {
 		path := helpPathFromArgs(args)
 		if len(path) == 0 {
@@ -62,6 +66,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "capabilities":
 		output(stdout, jsonOut, a.capabilities(), "vivero "+Version)
 		return 0
+	case "version":
+		output(stdout, jsonOut, map[string]any{"version": Version}, "vivero "+Version)
+		return 0
 	case "commands":
 		output(stdout, jsonOut, map[string]any{"commands": commandCatalog()}, commandsHuman())
 		return 0
@@ -71,7 +78,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(pos) > 0 {
 			command = strings.Join(pos, " ")
 		}
-		output(stdout, jsonOut, schemaFor(command), "schema: "+command)
+		schema := schemaFor(command)
+		if command != "" {
+			if body, ok := schema["schema"].(map[string]any); ok && body["unknown"] == true {
+				return errOut(stderr, jsonOut, unknownCommandError(command))
+			}
+		}
+		output(stdout, jsonOut, schema, "schema: "+command)
 		return 0
 	case "doctor":
 		if len(rest) > 0 && rest[0] == "config" {
@@ -138,7 +151,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(rest) > 0 && rest[0] == "sync" {
 			pos := positionalArgs(rest[1:])
 			if len(pos) == 0 {
-				return errOut(stderr, jsonOut, fmt.Errorf("projects sync requires a path"))
+				return errOut(stderr, jsonOut, missingArgError("projects sync", "path"))
 			}
 			rec, err := a.SyncProject(pos[0])
 			if err != nil {
@@ -154,10 +167,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		output(stdout, jsonOut, map[string]any{"projects": list}, projectsHuman(list))
 		return 0
 	case "project":
-		if len(rest) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero project inspect <project>"))
+		pos := positionalArgs(rest)
+		if len(pos) == 0 {
+			return errOut(stderr, jsonOut, missingArgError("project inspect", "project"))
 		}
-		name := rest[1]
+		if pos[0] != "inspect" {
+			return errOut(stderr, jsonOut, unknownSubcommandError("project", pos[0]))
+		}
+		if len(pos) < 2 {
+			return errOut(stderr, jsonOut, missingArgError("project inspect", "project"))
+		}
+		name := pos[1]
 		rec, err := a.getProject(name)
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
@@ -167,11 +187,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "up":
 		pos := positionalArgs(rest)
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("up requires project"))
+			return errOut(stderr, jsonOut, missingArgError("up", "project"))
 		}
 		id, _ := flagValue(rest, "--id")
 		if id == "" {
-			return errOut(stderr, jsonOut, fmt.Errorf("up requires --id"))
+			return errOut(stderr, jsonOut, missingRequiredError("up", "--id", "vivero help up"))
 		}
 		sources, err := collectKV(rest, "--source")
 		if err != nil {
@@ -561,7 +581,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		output(stdout, jsonOut, v, fmt.Sprintf("qa report: %s", v["path"]))
 		return 0
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown qa action: %s", action))
+		return errOut(stderr, jsonOut, unknownSubcommandError("qa", action))
 	}
 }
 
@@ -623,7 +643,7 @@ func (a *App) runSecrets(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		output(stdout, jsonOut, map[string]any{"project": project, "keys": keysOf(m)}, "unset")
 		return 0
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown secrets action: %s", action))
+		return errOut(stderr, jsonOut, unknownSubcommandError("secrets", action))
 	}
 }
 
@@ -666,7 +686,7 @@ func (a *App) runSkill(args []string, stdout, stderr io.Writer, jsonOut bool) in
 		output(stdout, jsonOut, v, "skill doctor complete")
 		return 0
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown skill action: %s", args[0]))
+		return errOut(stderr, jsonOut, unknownSubcommandError("skill", args[0]))
 	}
 }
 

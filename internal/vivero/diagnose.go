@@ -1,7 +1,6 @@
 package vivero
 
 import (
-	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -216,8 +215,14 @@ func diagnosticMetadataLooksSensitive(key, value string) bool {
 }
 
 func (a *App) runDiagnose(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if len(args) < 2 || args[0] != "startup" {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero diagnose startup <preview>"))
+	if len(args) == 0 {
+		return errOut(stderr, jsonOut, missingArgError("diagnose startup", "preview"))
+	}
+	if args[0] != "startup" {
+		return errOut(stderr, jsonOut, unknownSubcommandError("diagnose", args[0]))
+	}
+	if len(args) < 2 {
+		return errOut(stderr, jsonOut, missingArgError("diagnose startup", "preview"))
 	}
 	diag, err := a.DiagnoseStartup(args[1])
 	if err != nil {

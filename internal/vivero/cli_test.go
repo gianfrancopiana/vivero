@@ -11,6 +11,31 @@ import (
 	"time"
 )
 
+func TestRunVersionEntrypoints(t *testing.T) {
+	for _, args := range [][]string{{"--version"}, {"up", "--version"}} {
+		code, stdout, stderr := runCLITestCommand(t, t.TempDir(), args...)
+		if code != 0 || stderr != "" || strings.TrimSpace(stdout) != Version {
+			t.Fatalf("Run(%v) exit=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+	}
+
+	for _, args := range [][]string{{"--version", "--json", "--no-input"}, {"up", "demo", "--version", "--json", "--no-input"}, {"version", "--json", "--no-input"}} {
+		code, stdout, stderr := runCLITestCommand(t, t.TempDir(), args...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("Run(%v) exit=%d stdout=%s stderr=%s", args, code, stdout, stderr)
+		}
+		var payload struct {
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+			t.Fatalf("invalid version JSON for %v: %v stdout=%s", args, err, stdout)
+		}
+		if payload.Version != Version {
+			t.Fatalf("version payload for %v = %#v", args, payload)
+		}
+	}
+}
+
 func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	home := t.TempDir()
 	code, stdout, stderr := runCLITestCommand(t, home, "--help")
@@ -59,6 +84,28 @@ func TestRunUnknownCommandReturnsJSONErrorShape(t *testing.T) {
 	}
 }
 
+func TestRunMissingRequiredArgumentErrorsAreActionableJSON(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "up", "demo", "--json", "--no-input")
+	if code == 0 || stdout != "" {
+		t.Fatalf("missing --id should fail on stderr only, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Hint    string            `json:"hint"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
+	}
+	if payload.OK || payload.Error.Code != "missing_required_argument" || payload.Error.Details["required"] != "--id" || !strings.Contains(payload.Error.Hint, "vivero help up") {
+		t.Fatalf("unexpected missing arg payload: %#v", payload)
+	}
+}
+
 func TestRunSchemaDiagnoseReturnsCommandSchema(t *testing.T) {
 	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "schema", "diagnose", "--json", "--no-input")
 	if code != 0 || stderr != "" {
@@ -77,6 +124,61 @@ func TestRunSchemaDiagnoseReturnsCommandSchema(t *testing.T) {
 	}
 	if payload.Command != "diagnose startup" || payload.Schema.JSONStability != "experimental" || !payload.Schema.AgentSafe || !strings.Contains(payload.Schema.Usage, "diagnose startup") {
 		t.Fatalf("unexpected diagnose schema: %#v", payload)
+	}
+}
+
+func TestRunSchemaUnknownCommandFailsActionably(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "schema", "qa", "rn", "--json", "--no-input")
+	if code == 0 || stdout != "" {
+		t.Fatalf("schema unknown command should fail on stderr only, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
+	}
+	if payload.OK || payload.Error.Code != "unknown_command" || !strings.Contains(payload.Error.Hint, "vivero qa run") {
+		t.Fatalf("unexpected schema error payload: %#v", payload)
+	}
+}
+
+func TestEveryPublicCommandHasHelpAndSchemaContract(t *testing.T) {
+	for _, cmd := range commandCatalog() {
+		helpArgs := append([]string{"help"}, cmd.Path...)
+		code, stdout, stderr := runCLITestCommand(t, t.TempDir(), helpArgs...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("help %s exit=%d stdout=%s stderr=%s", cmd.Name(), code, stdout, stderr)
+		}
+		for _, want := range []string{"Examples:", "JSON stability:"} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("help %s missing %q:\n%s", cmd.Name(), want, stdout)
+			}
+		}
+
+		schemaArgs := append([]string{"schema"}, cmd.Path...)
+		schemaArgs = append(schemaArgs, "--json", "--no-input")
+		code, stdout, stderr = runCLITestCommand(t, t.TempDir(), schemaArgs...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("schema %s exit=%d stdout=%s stderr=%s", cmd.Name(), code, stdout, stderr)
+		}
+		var payload struct {
+			Command string `json:"command"`
+			Schema  struct {
+				Usage         string `json:"usage"`
+				JSONStability string `json:"jsonStability"`
+			} `json:"schema"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+			t.Fatalf("invalid schema JSON for %s: %v stdout=%s", cmd.Name(), err, stdout)
+		}
+		if payload.Command != cmd.Name() || payload.Schema.Usage == "" || payload.Schema.JSONStability != cmd.JSONStability {
+			t.Fatalf("schema drift for %s: %#v", cmd.Name(), payload)
+		}
 	}
 }
 

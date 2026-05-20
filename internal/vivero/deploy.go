@@ -346,7 +346,7 @@ func safeStateID(s string) string {
 
 func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	if len(args) == 0 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero deploy <plan|apply>"))
+		return errOut(stderr, jsonOut, missingArgError("deploy", "plan|apply"))
 	}
 	switch args[0] {
 	case "plan":
@@ -359,7 +359,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 			}
 		}
 		if strings.TrimSpace(projectPath) == "" {
-			return errOut(stderr, jsonOut, fmt.Errorf("deploy plan requires <path> or --project PATH"))
+			return errOut(stderr, jsonOut, missingRequiredError("deploy plan", "path or --project PATH", "vivero help deploy plan"))
 		}
 		environment, _ := flagValue(cmdArgs, "--environment")
 		plan, err := a.DeployPlan(projectPath, environment)
@@ -374,7 +374,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 	case "apply":
 		pos := positionalArgs(args[1:])
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("deploy apply requires <plan-id>"))
+			return errOut(stderr, jsonOut, missingArgError("deploy apply", "plan-id"))
 		}
 		release, err := a.ApplyDeployPlan(pos[0])
 		if err != nil {
@@ -386,19 +386,19 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 		}
 		return 0
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown deploy action: %s", args[0]))
+		return errOut(stderr, jsonOut, unknownSubcommandError("deploy", args[0]))
 	}
 }
 
 func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	if len(args) == 0 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero release <status|rollback>"))
+		return errOut(stderr, jsonOut, missingArgError("release", "status|rollback"))
 	}
 	switch args[0] {
 	case "status":
 		pos := positionalArgs(args[1:])
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("release status requires <project>"))
+			return errOut(stderr, jsonOut, missingArgError("release status", "project"))
 		}
 		environment, _ := flagValue(args[1:], "--environment")
 		release, err := a.CurrentRelease(pos[0], environment)
@@ -410,7 +410,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 	case "rollback":
 		pos := positionalArgs(args[1:])
 		if len(pos) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("release rollback requires <project> <release-id>"))
+			return errOut(stderr, jsonOut, missingRequiredError("release rollback", "project and release-id", "vivero help release rollback"))
 		}
 		environment, _ := flagValue(args[1:], "--environment")
 		release, err := a.RollbackRelease(pos[0], pos[1], environment)
@@ -423,7 +423,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		}
 		return 0
 	default:
-		return errOut(stderr, jsonOut, fmt.Errorf("unknown release action: %s", args[0]))
+		return errOut(stderr, jsonOut, unknownSubcommandError("release", args[0]))
 	}
 }
 
