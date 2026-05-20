@@ -13,9 +13,10 @@ import (
 )
 
 type App struct {
-	Home       string
-	db         *sql.DB
-	containers containerRuntime
+	Home           string
+	db             *sql.DB
+	containers     containerRuntime
+	qaRecordRunner qaRecordRunner
 }
 
 func NewApp() (*App, error) {
