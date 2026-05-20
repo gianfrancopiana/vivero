@@ -56,23 +56,45 @@ func missingRequiredError(command, required, example string) error {
 	return newCLIError("missing_required_argument", fmt.Sprintf("%s requires %s", command, required), "Run: "+example, map[string]string{"command": command, "required": required})
 }
 
+func missingArgError(command, required string) error {
+	return missingRequiredError(command, required, "vivero help "+command)
+}
+
 func unknownCommandError(name string) error {
+	name = strings.TrimSpace(name)
 	hint := "Run: vivero commands --json --no-input"
+	details := map[string]string{"command": name}
 	if suggestion := suggestCommand(name); suggestion != "" {
 		hint = "Did you mean `vivero " + suggestion + "`?"
+		details["suggestion"] = suggestion
 	}
-	return newCLIError("unknown_command", "unknown command: "+name, hint, map[string]string{"command": name})
+	return newCLIError("unknown_command", "unknown command: "+name, hint, details)
+}
+
+func unknownSubcommandError(group, action string) error {
+	return unknownCommandError(strings.TrimSpace(group + " " + action))
 }
 
 func suggestCommand(name string) string {
+	name = strings.TrimSpace(name)
 	best := ""
 	bestDistance := 1000
+	seen := map[string]bool{}
 	for _, cmd := range commandCatalog() {
-		candidate := cmd.Path[0]
-		d := levenshtein(name, candidate)
-		if d < bestDistance {
-			bestDistance = d
-			best = candidate
+		candidates := []string{cmd.Name()}
+		if len(cmd.Path) > 0 {
+			candidates = append(candidates, cmd.Path[0])
+		}
+		for _, candidate := range candidates {
+			if candidate == "" || seen[candidate] {
+				continue
+			}
+			seen[candidate] = true
+			d := levenshtein(name, candidate)
+			if d < bestDistance {
+				bestDistance = d
+				best = candidate
+			}
 		}
 	}
 	if bestDistance <= 3 {

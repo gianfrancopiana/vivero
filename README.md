@@ -47,6 +47,15 @@ vivero down webapp-local --archive-patch --json --no-input --quiet
 
 `vivero up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving.
 
+## CLI contract
+
+Vivero follows a small, test-ratcheted CLI contract:
+
+- Human help is examples-first: `vivero --help`, `vivero help <command>`, and grouped help such as `vivero help qa`.
+- Machines can discover commands with `vivero commands --json --no-input` and schemas with `vivero schema <command> --json --no-input`.
+- JSON command output goes to stdout; JSON errors go to stderr with `code`, `message`, `hint`, and `details` when available.
+- `vivero version --json --no-input` and `vivero --version` expose the installed version.
+
 ## `vivero.yml` at a glance
 
 Keep the file small. It should select sources, services, health checks, profiles, warm volume rules, smoke tests, QA flows, and optional public URL policy. It should reference app-owned runtime assets instead of copying them.
