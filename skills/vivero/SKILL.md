@@ -28,7 +28,7 @@ Vivero:
 
 Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are intentionally unsupported.
 
-Vivero is preview-first. Do not use it to deploy production apps; `vivero doctor production` is a read-only readiness assessment and production hosting remains an RFC track until separate deploy/release/rollback/auth/ingress/storage requirements exist.
+Vivero is preview-first. Production operations must use the separate deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production.
 
 ## First checks
 
@@ -39,6 +39,7 @@ vivero capabilities --json --no-input
 vivero commands --json --no-input
 vivero doctor config <project-path> --json --no-input
 vivero doctor production --project <project-path> --json --no-input
+vivero deploy plan <project-path> --environment production --json --no-input
 vivero project inspect <project> --json --no-input
 vivero skill doctor --json --no-input
 ```

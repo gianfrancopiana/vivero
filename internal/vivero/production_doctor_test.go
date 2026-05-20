@@ -40,7 +40,7 @@ services:
 		t.Fatalf("expected blocked report: %#v", report)
 	}
 	codes := productionDiagnosticCodes(report.Diagnostics)
-	for _, want := range []string{"preview-first", "mutable-source", "quick-tunnel-production", "image-not-immutable", "resource-limits-missing", "health-timeout-missing", "inline-secret", "backup-policy-missing"} {
+	for _, want := range []string{"deploy-surface", "mutable-source", "quick-tunnel-production", "image-not-immutable", "resource-limits-missing", "health-timeout-missing", "inline-secret", "backup-policy-missing"} {
 		if !codes[want] {
 			t.Fatalf("missing diagnostic %s in %#v", want, report.Diagnostics)
 		}
@@ -79,8 +79,8 @@ services:
 		t.Fatalf("expected production candidate report: %#v", report)
 	}
 	codes := productionDiagnosticCodes(report.Diagnostics)
-	if !codes["preview-first"] {
-		t.Fatalf("expected preview-first guardrail diagnostic: %#v", report.Diagnostics)
+	if !codes["deploy-surface"] {
+		t.Fatalf("expected deploy-surface guardrail diagnostic: %#v", report.Diagnostics)
 	}
 	for _, blocked := range []string{"mutable-source", "quick-tunnel-production", "image-not-immutable", "resource-limits-missing", "health-timeout-missing"} {
 		if codes[blocked] {
@@ -88,8 +88,8 @@ services:
 		}
 	}
 	features := stringSet(a.capabilities()["features"].([]string))
-	if !features["preview-runtime"] || !features["production-readiness-doctor"] {
-		t.Fatalf("capabilities missing read-only production features: %#v", features)
+	if !features["preview-runtime"] || !features["production-readiness-doctor"] || !features["app-owned-deploy-surface"] {
+		t.Fatalf("capabilities missing production surface features: %#v", features)
 	}
 	if features["production-hosting"] {
 		t.Fatalf("capabilities must not claim production hosting: %#v", features)

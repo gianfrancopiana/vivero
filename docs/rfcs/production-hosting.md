@@ -2,9 +2,9 @@
 
 ## Decision
 
-Vivero stays preview-first for now. It must not be advertised as production hosting and preview commands must not gain production stakes by flag.
+Vivero stays preview-first. Production behavior must remain in a separate, explicit `deploy`/`release` namespace and must not be smuggled into preview commands.
 
-The current production posture is: **not production hosting today**. Vivero is useful as a local-first preview/runtime control plane. A future production track can reuse some primitives, but it needs a separate product surface, safety model, and operational contract.
+The current production posture is: **app-owned deploy command surface, not a general production host**. Vivero can plan/apply/status/rollback by running commands supplied by the app repo after `doctor production` passes, but it does not provide a production control plane, ingress manager, secret backend, backup system, or orchestrator by itself.
 
 ## Why
 
@@ -17,9 +17,10 @@ Mixing those semantics into `vivero up` / `vivero down` would make a safe previe
 
 ## Future tracks
 
-1. **Preview-only Vivero** — recommended near-term. Keep improving previews, diagnostics, QA evidence, and local automation.
-2. **Single-node/personal production supervisor** — possible after hardening. Scope would be one trusted operator, explicit deploy/release commands, and documented backups.
-3. **General PaaS/orchestrator** — out of scope unless Vivero integrates with an existing orchestrator instead of replacing one.
+1. **Preview-only Vivero** — keep improving previews, diagnostics, QA evidence, and local automation.
+2. **App-owned deploy wrapper** — current scope. Vivero records deploy plans and release history, then runs app-provided apply/status/rollback commands for trusted operators.
+3. **Single-node/personal production supervisor** — possible after more hardening. Scope would be one trusted operator plus documented backups, auth, and recovery.
+4. **General PaaS/orchestrator** — out of scope unless Vivero integrates with an existing orchestrator instead of replacing one.
 
 ## Shared primitives
 
@@ -59,7 +60,7 @@ A production track must have all of these before Vivero can claim production hos
 
 ## CLI namespace
 
-Future production commands must be separate and explicit. Examples:
+Production commands are separate and explicit:
 
 ```sh
 vivero deploy plan <project> --environment production --json --no-input
@@ -72,7 +73,7 @@ Do not overload preview `up`, `down`, or quick-tunnel flows for production.
 
 ## Readiness doctor
 
-`vivero doctor production --project <path> --json --no-input` is read-only. It answers: “Could this config become production deployable after a dedicated production track exists?” It does not deploy, mutate state, or enable production hosting.
+`vivero doctor production --project <path> --json --no-input` is read-only. It answers: “Can this config produce a deploy plan that is safe enough to hand to app-owned production commands?” It does not deploy or mutate production state.
 
 The first checks are intentionally conservative:
 
@@ -83,4 +84,4 @@ The first checks are intentionally conservative:
 - Warning on persistent volumes without backup/restore policy.
 - Warning on likely inline secret values.
 
-Capabilities may advertise `preview-runtime` and `production-readiness-doctor`, but must not advertise `production-hosting` until the production-only requirements are implemented and tested.
+Capabilities may advertise `preview-runtime`, `production-readiness-doctor`, and `app-owned-deploy-surface`, but must not advertise `production-hosting` until the production-only requirements are implemented and tested.

@@ -27,7 +27,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing public manifest for %s", name)
 		}
@@ -46,6 +46,11 @@ func TestCommandCatalogUsesManifestMetadata(t *testing.T) {
 		if cmd.Name() == "up" {
 			if !cmd.WritesLocal || !cmd.RequiresNet || !cmd.AgentSafe {
 				t.Fatalf("up metadata should describe side effects and agent safety: %#v", cmd)
+			}
+		}
+		if cmd.Name() == "release status" {
+			if cmd.AgentSafe || !cmd.WritesLocal || !cmd.RequiresNet || cmd.Schema["runsAppOwnedCommand"] != true || cmd.Schema["mayUpdateLocalReleaseState"] != true {
+				t.Fatalf("release status metadata should disclose app-owned status command side effects: %#v", cmd)
 			}
 		}
 	}
@@ -69,7 +74,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 	a := &App{Home: t.TempDir()}
 	caps := a.capabilities()
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "clig-compatible-help", "cli-coverage-ratchet", "config-doctor", "production-readiness-doctor", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "clig-compatible-help", "cli-coverage-ratchet", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}
