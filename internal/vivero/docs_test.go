@@ -28,6 +28,7 @@ func TestBundledExamplesLoad(t *testing.T) {
 	examples := map[string]string{
 		"../../examples/gumroad":              "gumroad-main",
 		"../../examples/helper-host-products": "helper-host-products",
+		"../../examples/nasty-integration":    "nasty-integration",
 	}
 	for path, wantName := range examples {
 		t.Run(wantName, func(t *testing.T) {
@@ -133,6 +134,30 @@ func TestHelperHostProductsExampleUsesExplicitHostProfiles(t *testing.T) {
 	}
 	if flexileCfg.Services["helper-web"].Env["HOST_PRODUCT"] != "flexile" || flexileCfg.Services["helper-web"].Env["FLEXILE_URL"] != "http://flexile-web:3000" {
 		t.Fatalf("flexile profile should point Helper at flexile-web: %#v", flexileCfg.Services["helper-web"].Env)
+	}
+}
+
+func TestNastyIntegrationExampleCoversMessyProjectShapes(t *testing.T) {
+	_, cfg, err := loadProjectConfig("../../examples/nasty-integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []string{"static-only", "app-with-db", "monorepo", "full"} {
+		if _, ok := cfg.Profiles[profile]; !ok {
+			t.Fatalf("nasty integration example should declare %s profile", profile)
+		}
+	}
+	if cfg.Public.Mode != "named-tunnel" || cfg.Public.BaseDomain == "" {
+		t.Fatalf("nasty integration example should cover named public tunnel planning: %#v", cfg.Public)
+	}
+	if _, ok := cfg.BackingServices["db"]; !ok {
+		t.Fatal("nasty integration example should cover app+database previews")
+	}
+	if cfg.Services["monorepo-web"].Build.Dockerfile != "apps/web/Dockerfile" {
+		t.Fatalf("monorepo service should reference app-owned Dockerfile, got %#v", cfg.Services["monorepo-web"].Build)
+	}
+	if len(cfg.Services["monorepo-web"].DependencyVolumes) < 2 {
+		t.Fatalf("monorepo service should cover warm/dependency volumes: %#v", cfg.Services["monorepo-web"].DependencyVolumes)
 	}
 }
 

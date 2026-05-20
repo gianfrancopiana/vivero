@@ -4,7 +4,7 @@ COVERPROFILE ?= /tmp/vivero-cover.out
 COVER_MIN ?= 72.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION)"
 
-.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke example-e2e integration-fixtures deploy-fixtures clean
+.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures dogfood-configs clean
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
@@ -64,6 +64,12 @@ integration-fixtures:
 
 deploy-fixtures:
 	scripts/deploy-fixtures.sh
+
+nasty-integration-fixtures:
+	scripts/nasty-integration-fixtures.sh
+
+dogfood-configs:
+	scripts/dogfood-configs.sh
 
 clean:
 	rm -rf bin dist

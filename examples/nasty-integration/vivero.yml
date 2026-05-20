@@ -1,0 +1,210 @@
+# Nasty integration matrix fixture.
+#
+# This is intentionally broader than the fast agent demo: it models the shapes
+# that tend to break preview orchestration before real users do.
+project:
+  name: nasty-integration
+
+sources:
+  static:
+    mode: external
+    path: apps/static
+  api:
+    mode: external
+    path: apps/api
+  monorepo:
+    mode: external
+    path: apps/monorepo
+
+public:
+  provider: cloudflare
+  mode: named-tunnel
+  baseDomain: preview.example.com
+  hostnameTemplate: "{{ .PreviewID }}-{{ .Service }}.{{ .BaseDomain }}"
+  inactiveBehavior: 410
+
+backingServices:
+  db:
+    image: postgres:16-alpine
+    env:
+      POSTGRES_PASSWORD: password
+    health:
+      command: pg_isready -U postgres
+      timeout: 1m
+      interval: 2s
+
+seeds:
+  db:
+    path: fixtures/seed.sql
+    restore: psql "$DATABASE_URL" < fixtures/seed.sql
+
+warm:
+  baselineRefs:
+    - main
+    - master
+  fingerprint:
+    paths:
+      - package.json
+      - apps/api/package.json
+      - apps/monorepo/pnpm-lock.yaml
+
+prebuild:
+  api:
+    steps:
+      - npm ci --ignore-scripts
+      - npm run build
+
+setup:
+  afterSeeds:
+    - service: api
+      command: npm run db:migrate
+      policy: once-per-fingerprint
+      fingerprint:
+        paths:
+          - apps/api/migrations
+
+services:
+  static-web:
+    source: static
+    runtime: docker
+    image: python:3.12-alpine
+    command: python -m http.server 3000 --bind 0.0.0.0
+    public: true
+    ports:
+      http:
+        container: 3000
+    primaryPort: http
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 45s
+      interval: 1s
+
+  api:
+    source: api
+    runtime: docker
+    image: node:22-alpine
+    command: node server.js
+    env:
+      DATABASE_URL: postgres://postgres:password@db:5432/postgres
+    ports:
+      http:
+        container: 3100
+      metrics:
+        container: 9394
+    primaryPort: http
+    health:
+      path: /health
+      expectStatus: 200
+      timeout: 90s
+      interval: 2s
+
+  monorepo-web:
+    source: monorepo
+    runtime: docker
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        APP_ENV: preview
+    workingDir: apps/web
+    command: pnpm dev --host 0.0.0.0 --port 3200
+    dependencyVolumes:
+      - name: pnpm-store
+        target: /pnpm/store
+        lifetime: project
+      - name: next-cache
+        target: /workspace/apps/web/.next/cache
+        lifetime: preview
+    ports:
+      http:
+        container: 3200
+    primaryPort: http
+    health:
+      path: /healthz
+      expectStatus: 200
+      timeout: 2m
+      interval: 2s
+
+agent:
+  defaultPreviewService: static-web
+  commonPages:
+    static-home:
+      service: static-web
+      path: /
+    api-health:
+      service: api
+      path: /health
+    monorepo-health:
+      service: monorepo-web
+      path: /healthz
+  smokeTests:
+    - name: static-home
+      service: static-web
+      path: /
+      expectStatus: 200
+    - name: api-health
+      service: api
+      path: /health
+      expectStatus: 200
+    - name: monorepo-health
+      service: monorepo-web
+      path: /healthz
+      expectStatus: 200
+  qa:
+    defaultScope: smoke
+    scopes:
+      - name: smoke
+        pages:
+          - static-home
+          - api-health
+        flows:
+          - name: static-and-api
+            start: static-home
+            steps:
+              - visit: static-home
+                expectText: Nasty static fixture
+              - visit: api-health
+                expectText: ok
+      - name: monorepo
+        pages:
+          - monorepo-health
+        flows:
+          - name: monorepo-health
+            start: monorepo-health
+            steps:
+              - visit: monorepo-health
+                expectText: ok
+
+profiles:
+  static-only:
+    services:
+      - static-web
+    smokeTests:
+      - static-home
+
+  app-with-db:
+    services:
+      - api
+    backingServices:
+      - db
+    smokeTests:
+      - api-health
+
+  monorepo:
+    services:
+      - monorepo-web
+    smokeTests:
+      - monorepo-health
+
+  full:
+    services:
+      - static-web
+      - api
+      - monorepo-web
+    backingServices:
+      - db
+    smokeTests:
+      - static-home
+      - api-health
+      - monorepo-health
