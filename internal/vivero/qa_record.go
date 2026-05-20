@@ -33,7 +33,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 		}
 	}
 	if outputDir == "" {
-		outputDir = filepath.Join(a.Home, "qa", previewID, "videos")
+		outputDir = qaVideoFallbackDir(a.Home, previewID)
 	}
 	if err := ensureDir(outputDir); err != nil {
 		return nil, err

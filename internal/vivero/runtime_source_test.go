@@ -33,3 +33,15 @@ func TestResolveSourcePathRejectsProjectRelativeEscape(t *testing.T) {
 		t.Fatalf("expected project-relative escape error, got %v", err)
 	}
 }
+
+func TestManagedWorktreePathKeepsDynamicNamesUnderWorktreeRoot(t *testing.T) {
+	home := t.TempDir()
+	path := managedWorktreePath(home, "../project", "../preview", "../source")
+	root := filepath.Join(home, "worktrees")
+	if !pathWithinRoot(root, path) {
+		t.Fatalf("managed worktree path escaped root: path=%s root=%s", path, root)
+	}
+	if strings.Contains(path, "..") {
+		t.Fatalf("managed worktree path should not preserve traversal elements: %s", path)
+	}
+}

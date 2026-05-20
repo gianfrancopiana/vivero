@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,27 @@ func TestNormalizeScreenshotOptionsDefaultsToViewportCapture(t *testing.T) {
 	}
 	if opts.Crop {
 		t.Fatal("crop should be opt-in so screenshots stay true viewport-sized by default")
+	}
+}
+
+func TestScreenshotOutputPathKeepsPreviewUnderScreenshotsDir(t *testing.T) {
+	home := t.TempDir()
+	out := screenshotOutputPath(home, "", "../outside", "../web", "/", ScreenshotBreakpoint{}, false, "")
+	root := filepath.Join(home, "screenshots")
+	if !pathWithinRoot(root, out) {
+		t.Fatalf("screenshot path escaped root: out=%s root=%s", out, root)
+	}
+	if filepath.Dir(out) == filepath.Join(home, "outside") || strings.Contains(out, "..") {
+		t.Fatalf("screenshot path preserved traversal elements: %s", out)
+	}
+}
+
+func TestScreenshotOutputPathKeepsServiceUnderCustomOutputDir(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "custom-shots")
+	out := screenshotOutputPath(home, root, "preview", "../../web", "/", ScreenshotBreakpoint{}, false, "")
+	if !pathWithinRoot(root, out) {
+		t.Fatalf("screenshot path escaped custom output dir: out=%s root=%s", out, root)
 	}
 }
 

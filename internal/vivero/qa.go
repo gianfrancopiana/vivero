@@ -31,7 +31,10 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	artifactDir := qaArtifactDir(a.Home, project.Path, previewID, selectedScope, agent.QA.ArtifactRoot)
+	artifactDir, err := qaArtifactDir(a.Home, project.Path, previewID, selectedScope, agent.QA.ArtifactRoot)
+	if err != nil {
+		return nil, err
+	}
 	driver := qaDriver(agent.QA.Driver)
 	authPlan, authSessions, err := qaAuthPlan(project.Path, agent.QA.Auth)
 	if err != nil {
@@ -607,21 +610,35 @@ func qaDriver(cfg QADriverConfig) map[string]any {
 	return map[string]any{"preferred": preferred, "evidence": evidence, "exploratory": exploratory, "allowed": allowed, "notes": cfg.Notes}
 }
 
-func qaArtifactDir(home, projectPath, previewID, scope, root string) string {
+func qaArtifactDir(home, projectPath, previewID, scope, root string) (string, error) {
 	base := strings.TrimSpace(root)
 	if base == "" {
-		base = filepath.Join(home, "qa")
+		var err error
+		base, err = filepath.Abs(filepath.Join(home, "qa"))
+		if err != nil {
+			return "", err
+		}
 	} else {
-		base = expandPath(base)
-		if !filepath.IsAbs(base) {
-			base = filepath.Join(projectPath, base)
+		expanded := expandPath(base)
+		if filepath.IsAbs(expanded) {
+			abs, err := filepath.Abs(expanded)
+			if err != nil {
+				return "", err
+			}
+			base = abs
+		} else {
+			resolved, err := resolveProjectPath(projectPath, expanded)
+			if err != nil {
+				return "", err
+			}
+			base = resolved
 		}
 	}
-	dir := filepath.Join(base, previewID)
+	dir := filepath.Join(base, safePathComponent(previewID, "preview"))
 	if scope != "" && scope != "default" && scope != "all" {
-		dir = filepath.Join(dir, sanitizeScreenshotName(scope))
+		dir = filepath.Join(dir, safePathComponent(scope, "scope"))
 	}
-	return dir
+	return dir, nil
 }
 
 func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentConfig, scopes []QAScope, authSessions map[string]resolvedQAAuthSession, target, artifactDir string) (map[string]any, error) {

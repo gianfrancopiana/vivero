@@ -285,7 +285,7 @@ func (a *App) events(previewID string, limit int) ([]Event, error) {
 }
 
 func (a *App) secretFile(project string) string {
-	return filepath.Join(a.Home, "secrets", project+".env")
+	return projectSecretFilePath(a.Home, project)
 }
 
 func readEnvFile(path string) (map[string]string, error) {

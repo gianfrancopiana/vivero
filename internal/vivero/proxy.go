@@ -474,7 +474,7 @@ func (a *App) startHeaderRewriteProxy(previewID, service, originURL, hostHeader 
 	}
 	listen := fmt.Sprintf("127.0.0.1:%d", port)
 	proxyURL := fmt.Sprintf("http://%s", listen)
-	logPath := filepath.Join(a.Home, "logs", previewID, service+".proxy.log")
+	logPath := serviceLogPath(a.Home, previewID, service, ".proxy.log")
 	if err := ensureDir(filepath.Dir(logPath)); err != nil {
 		return "", 0, err
 	}
