@@ -134,22 +134,22 @@ func (a *App) prepareSmartWarmVolumes(project ProjectRecord, req UpRequest, cfg 
 
 	for _, binding := range state.Volumes {
 		if mode == warmModeBaseline {
-			if err := ensureDockerVolume(binding.BaselineName); err != nil {
+			if err := a.containerRuntime().EnsureVolume(binding.BaselineName); err != nil {
 				return cfg, state, err
 			}
 			a.recordEvent(req.ID, "info", "warm.baseline", "using canonical smart warm volume", binding.Service, map[string]string{"volume": binding.BaselineName, "fingerprint": fingerprint, "ref": ref})
 			continue
 		}
-		if err := removeDockerVolume(binding.ActiveName); err != nil {
+		if err := a.containerRuntime().RemoveVolume(binding.ActiveName); err != nil {
 			return cfg, state, err
 		}
-		if dockerVolumeExists(binding.BaselineName) {
-			if err := copyDockerVolume(binding.BaselineName, binding.ActiveName); err != nil {
+		if a.containerRuntime().VolumeExists(binding.BaselineName) {
+			if err := a.containerRuntime().CopyVolume(binding.BaselineName, binding.ActiveName); err != nil {
 				return cfg, state, err
 			}
 			a.recordEvent(req.ID, "info", "warm.derived", "created preview-local smart warm volume from baseline", binding.Service, map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "baselineReady": fmt.Sprint(state.BaselineReady), "ref": ref})
 		} else {
-			if err := ensureDockerVolume(binding.ActiveName); err != nil {
+			if err := a.containerRuntime().EnsureVolume(binding.ActiveName); err != nil {
 				return cfg, state, err
 			}
 			a.recordEvent(req.ID, "info", "warm.derived", "created empty preview-local smart warm volume; baseline is missing", binding.Service, map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "ref": ref})
@@ -211,7 +211,7 @@ func (a *App) smartWarmBaselineReady(projectName string, cfg ProjectConfig, fing
 	checked := 0
 	for _, binding := range smartWarmVolumeBindings(projectName, cfg) {
 		state, err := a.readWarmVolumeState(projectName, binding.Service, binding.Name)
-		if err != nil || state.Fingerprint != fingerprint || state.VolumeName != binding.BaselineName || !dockerVolumeExists(binding.BaselineName) {
+		if err != nil || state.Fingerprint != fingerprint || state.VolumeName != binding.BaselineName || !a.containerRuntime().VolumeExists(binding.BaselineName) {
 			return false
 		}
 		checked++

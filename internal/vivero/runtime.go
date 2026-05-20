@@ -32,7 +32,7 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return existing, err
 	} else if found {
-		if err := removePreviewDependencyVolumes(req.ID, project.Config); err != nil {
+		if err := a.removePreviewDependencyVolumes(req.ID, project.Config); err != nil {
 			_ = a.setPreviewStatus(req.ID, "unhealthy")
 			return existing, fmt.Errorf("cleanup existing preview dependency volumes %s: %w", req.ID, err)
 		}
@@ -98,7 +98,7 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if err := a.writeComposeManifest(req.ID, runtimeConfig, p.Sources); err != nil {
 		return p, err
 	}
-	if err := ensureDockerNetwork(req.ID); err != nil {
+	if err := a.containerRuntime().EnsureNetwork(req.ID); err != nil {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
