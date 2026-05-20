@@ -46,6 +46,32 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
+	if !knownTopLevelCommand(args[0]) {
+		return errOut(stderr, jsonOut, unknownCommandError(args[0]))
+	}
+	if group, action, ok := stateFreeUnknownSubcommand(args); ok {
+		return errOut(stderr, jsonOut, unknownSubcommandError(group, action))
+	}
+	switch args[0] {
+	case "commands":
+		output(stdout, jsonOut, map[string]any{"commands": commandCatalog()}, commandsHuman())
+		return 0
+	case "schema":
+		rest := args[1:]
+		pos := positionalArgs(rest)
+		command := ""
+		if len(pos) > 0 {
+			command = strings.Join(pos, " ")
+		}
+		schema := schemaFor(command)
+		if command != "" {
+			if body, ok := schema["schema"].(map[string]any); ok && body["unknown"] == true {
+				return errOut(stderr, jsonOut, unknownCommandError(command))
+			}
+		}
+		output(stdout, jsonOut, schema, "schema: "+command)
+		return 0
+	}
 	a, err := NewApp()
 	if err != nil {
 		return errOut(stderr, jsonOut, err)
@@ -68,23 +94,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "version":
 		output(stdout, jsonOut, map[string]any{"version": Version}, "vivero "+Version)
-		return 0
-	case "commands":
-		output(stdout, jsonOut, map[string]any{"commands": commandCatalog()}, commandsHuman())
-		return 0
-	case "schema":
-		pos := positionalArgs(rest)
-		command := ""
-		if len(pos) > 0 {
-			command = strings.Join(pos, " ")
-		}
-		schema := schemaFor(command)
-		if command != "" {
-			if body, ok := schema["schema"].(map[string]any); ok && body["unknown"] == true {
-				return errOut(stderr, jsonOut, unknownCommandError(command))
-			}
-		}
-		output(stdout, jsonOut, schema, "schema: "+command)
 		return 0
 	case "doctor":
 		if len(rest) > 0 && rest[0] == "config" {
@@ -448,6 +457,54 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	default:
 		return errOut(stderr, jsonOut, unknownCommandError(cmd))
 	}
+}
+
+func knownTopLevelCommand(command string) bool {
+	for _, manifest := range commandCatalog() {
+		if len(manifest.Path) > 0 && manifest.Path[0] == command {
+			return true
+		}
+	}
+	return false
+}
+
+func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
+	if len(args) < 2 {
+		return "", "", false
+	}
+	group := args[0]
+	switch group {
+	case "deploy", "diagnose", "project", "qa", "release", "secrets", "skill":
+	default:
+		return "", "", false
+	}
+	action := args[1]
+	if action == "" || strings.HasPrefix(action, "-") {
+		return "", "", false
+	}
+	if commandPathPrefixExists([]string{group, action}) {
+		return "", "", false
+	}
+	return group, action, true
+}
+
+func commandPathPrefixExists(path []string) bool {
+	for _, manifest := range commandCatalog() {
+		if len(manifest.Path) < len(path) {
+			continue
+		}
+		matches := true
+		for i, part := range path {
+			if manifest.Path[i] != part {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {

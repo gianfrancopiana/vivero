@@ -278,6 +278,78 @@ func TestQAFinalUsesRecordingPlanForDefaultProof(t *testing.T) {
 	}
 }
 
+func TestQAPureHelperFallbacks(t *testing.T) {
+	p := PreviewRecord{Services: map[string]PreviewService{
+		"api": {Name: "api", OriginURL: "http://127.0.0.1:3001"},
+		"web": {Name: "web", OriginURL: "http://127.0.0.1:3000", URL: "https://web.example.test"},
+	}}
+	agent := AgentConfig{
+		CommonPages: map[string]AgentPage{
+			"login": {Service: "web", Path: "login"},
+		},
+		SmokeTests: []SmokeTest{{Name: "health", Path: "/health"}},
+	}
+
+	page, err := resolveQAPage(p, agent, "login", "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page["path"] != "/login" || page["url"] != "http://127.0.0.1:3000/login" {
+		t.Fatalf("resolveQAPage should normalize paths and local URL: %#v", page)
+	}
+	if _, err := resolveQAPage(PreviewRecord{}, AgentConfig{}, "/missing", ""); err == nil || !strings.Contains(err.Error(), "no service") {
+		t.Fatalf("expected no-service page error, got %v", err)
+	}
+
+	if got := qaCommandWithTarget("vivero screenshot pr web /", "origin"); got != "vivero screenshot pr web / --target origin" {
+		t.Fatalf("qaCommandWithTarget origin = %q", got)
+	}
+	if got := qaServiceMap(p)["api"].(map[string]any)["url"]; got != "http://127.0.0.1:3001" {
+		t.Fatalf("qaServiceMap default url = %v", got)
+	}
+
+	plan := map[string]any{
+		"evidence": map[string]any{
+			"screenshots": map[string]any{"colorSchemes": []any{"Light", "dark", "light", 7}},
+			"recordings":  map[string]any{"commands": []any{map[string]any{"colorScheme": "dark"}}},
+		},
+		"services": map[string]any{
+			"api": map[string]any{"url": ""},
+			"web": map[string]any{"url": "http://127.0.0.1:3000"},
+		},
+		"defaultPreviewService": "missing",
+	}
+	if got := qaScreenshotColorSchemesFromPlan(plan); !reflect.DeepEqual(got, []string{"light", "dark"}) {
+		t.Fatalf("qaScreenshotColorSchemesFromPlan = %#v", got)
+	}
+	if got := firstQARecordingCommand(plan); got == nil || got["colorScheme"] != "dark" {
+		t.Fatalf("firstQARecordingCommand = %#v", got)
+	}
+	if got := qaFinalPrimaryURL(plan); got != "http://127.0.0.1:3000" {
+		t.Fatalf("qaFinalPrimaryURL fallback = %q", got)
+	}
+
+	scopes, selected, err := selectedQAScopes(agent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "default" || len(scopes) != 1 || !reflect.DeepEqual(scopes[0].Pages, []string{"login"}) || len(scopes[0].Checks) != 1 {
+		t.Fatalf("default selected QA scope = selected %q scopes %#v", selected, scopes)
+	}
+	if got := qaScopeNames([]QAScope{{Name: "z"}, {}, {Name: "a"}}); !reflect.DeepEqual(got, []string{"a", "default", "z"}) {
+		t.Fatalf("qaScopeNames = %#v", got)
+	}
+	if got := qaRecordHuman(map[string]any{"ok": true, "recordPath": "/tmp/record.json"}); got != "qa record ok\nrecord: /tmp/record.json" {
+		t.Fatalf("qaRecordHuman = %q", got)
+	}
+	if got := qaFinalScreenshotPaths([]map[string]any{{"path": "/tmp/a.png"}, {"path": ""}}); !reflect.DeepEqual(got, []string{"/tmp/a.png"}) {
+		t.Fatalf("qaFinalScreenshotPaths map slice = %#v", got)
+	}
+	if got := qaFinalScreenshotPaths([]any{map[string]any{"path": "/tmp/b.png"}, "skip"}); !reflect.DeepEqual(got, []string{"/tmp/b.png"}) {
+		t.Fatalf("qaFinalScreenshotPaths any slice = %#v", got)
+	}
+}
+
 func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	qa := schemaFor("qa")["schema"].(map[string]any)
 	usage := qa["usage"].(string)

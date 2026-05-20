@@ -91,6 +91,41 @@ func TestDiagnoseStartupHandlesLegacyAndFailureEvents(t *testing.T) {
 	}
 }
 
+func TestDiagnosticRecommendationsCoverKnownFailuresAndPhases(t *testing.T) {
+	failures := map[string]string{
+		"source.clone.failed": "source preparation failed",
+		"image.build.failed":  "image build failed",
+		"service.failed":      "service startup failed",
+		"tunnel.failed":       "public tunnel failed",
+		"other.failed":        "inspect the failure event",
+	}
+	for typ, want := range failures {
+		if got := recommendationForFailure(typ); !strings.Contains(got, want) {
+			t.Fatalf("recommendationForFailure(%q) = %q, want %q", typ, got, want)
+		}
+	}
+
+	phases := map[string]string{
+		"setup.before":  "split dependency install",
+		"service.start": "inspect service startup",
+		"tunnel.ready":  "public tunnel is bottleneck",
+		"source.ready":  "source resolution is slow",
+		"unknown.phase": "inspect the slowest phase",
+	}
+	for typ, want := range phases {
+		if got := recommendationForPhase(typ); !strings.Contains(got, want) {
+			t.Fatalf("recommendationForPhase(%q) = %q, want %q", typ, got, want)
+		}
+	}
+
+	recs := appendRecommendation(nil, "inspect logs")
+	recs = appendRecommendation(recs, "")
+	recs = appendRecommendation(recs, "inspect logs")
+	if len(recs) != 1 || recs[0] != "inspect logs" {
+		t.Fatalf("appendRecommendation should skip empty and duplicate values: %#v", recs)
+	}
+}
+
 func TestRunDiagnoseStartupJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)

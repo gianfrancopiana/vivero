@@ -64,6 +64,76 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	}
 }
 
+func TestRunDiscoveryCommandsAreStateFree(t *testing.T) {
+	blockedHome := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedHome, []byte("state should not be opened"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIVERO_HOME", blockedHome)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "commands json", args: []string{"commands", "--json", "--no-input"}, want: `"commands"`},
+		{name: "schema json", args: []string{"schema", "--json", "--no-input"}, want: `"commands"`},
+		{name: "schema command json", args: []string{"schema", "qa", "run", "--json", "--no-input"}, want: `"command": "qa run"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(tc.args, &stdout, &stderr)
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("Run(%v) exit=%d stdout=%s stderr=%s", tc.args, code, stdout.String(), stderr.String())
+			}
+			if !json.Valid(stdout.Bytes()) {
+				t.Fatalf("Run(%v) stdout should be JSON: %s", tc.args, stdout.String())
+			}
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Fatalf("Run(%v) stdout missing %q: %s", tc.args, tc.want, stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunUnknownCommandsAreStateFree(t *testing.T) {
+	blockedHome := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedHome, []byte("state should not be opened"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIVERO_HOME", blockedHome)
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantDetail string
+		wantHint   string
+	}{
+		{name: "top level", args: []string{"capabilties", "--json", "--no-input"}, wantDetail: `"command": "capabilties"`, wantHint: "capabilities"},
+		{name: "nested", args: []string{"qa", "rn", "preview", "--json", "--no-input"}, wantDetail: `"command": "qa rn"`, wantHint: "vivero qa run"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(tc.args, &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("Run(%v) should fail", tc.args)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("Run(%v) should keep JSON errors on stderr, stdout=%s", tc.args, stdout.String())
+			}
+			body := stderr.String()
+			for _, want := range []string{`"ok": false`, `"code": "unknown_command"`, tc.wantDetail, tc.wantHint} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("Run(%v) JSON error missing %q: %s", tc.args, want, body)
+				}
+			}
+			if strings.Contains(body, "database") || strings.Contains(body, "not-a-directory") {
+				t.Fatalf("Run(%v) should not expose state initialization errors: %s", tc.args, body)
+			}
+		})
+	}
+}
+
 func TestRunUnknownCommandReturnsJSONErrorShape(t *testing.T) {
 	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "prevue", "--json", "--no-input")
 	if code == 0 {
