@@ -50,6 +50,18 @@ jobs:
           go-version-file: go.mod
       - run: make example-e2e
 
+  integration-fixtures:
+    name: Integration fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: docker version
+      - run: make integration-fixtures
+
   release-snapshot:
     name: Release snapshot smoke
     runs-on: ubuntu-latest

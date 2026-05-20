@@ -1,0 +1,133 @@
+project:
+  name: integration-stack
+
+sources:
+  app:
+    mode: external
+    path: .
+
+warm:
+  baselineRefs:
+    - main
+  fingerprint:
+    paths:
+      - db/schema.sql
+
+resources:
+  maxStartupConcurrency: 2
+
+backingServices:
+  api:
+    image: node:22-alpine
+    command: |
+      node - <<'NODE'
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        if (req.url === '/health') {
+          res.writeHead(200, { 'content-type': 'text/plain' });
+          res.end('backing-ok');
+          return;
+        }
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('missing');
+      });
+      server.listen(3101, '0.0.0.0', () => console.log('backing api listening'));
+      NODE
+    health:
+      command: >-
+        node -e "fetch('http://127.0.0.1:3101/health').then(async r => { const body = await r.text(); process.exit(r.ok && body.includes('backing-ok') ? 0 : 1); }).catch(() => process.exit(1))"
+      timeout: 45s
+      interval: 1s
+
+services:
+  web:
+    source: app
+    runtime: docker
+    image: node:22-alpine
+    workingDir: .
+    command: node server.js
+    env:
+      PORT: "3000"
+      BACKING_URL: http://api:3101
+      SEED_PATH: /data/seed.txt
+    dependencyVolumes:
+      - name: db
+        target: /data
+        lifetime: smart
+    ports:
+      http:
+        container: 3000
+    primaryPort: http
+    health:
+      path: /health
+      expectStatus: 200
+      timeout: 1m
+      interval: 1s
+
+setup:
+  afterSeeds:
+    - service: web
+      policy: once-per-project
+      command: mkdir -p /data && printf seed-from-main > /data/seed.txt
+
+agent:
+  defaultPreviewService: web
+  smokeTests:
+    - name: health
+      service: web
+      path: /health
+      expectStatus: 200
+    - name: status-command
+      service: web
+      command: >-
+        node -e "fetch('http://127.0.0.1:3000/api/status').then(async r => { const body = await r.text(); if (!r.ok || !body.includes('seed-from-main') || !body.includes('backing-ok')) { console.error(body); process.exit(1); } }).catch(err => { console.error(err.message); process.exit(1); })"
+  commonPages:
+    home:
+      service: web
+      path: /
+    status-json:
+      service: web
+      path: /api/status
+  qa:
+    defaultScope: smoke
+    artifactRoot: ~/.cache/vivero/integration-stack
+    driver:
+      preferred: playwright
+      evidence: playwright
+      exploratory: browser
+      allowed:
+        - playwright
+        - browser
+    evidence:
+      screenshots:
+        colorSchemes:
+          - light
+      recordings:
+        colorSchemes:
+          - light
+    scopes:
+      - name: smoke
+        description: Multi-container lifecycle and smart-warm smoke proof.
+        pages:
+          - home
+          - status-json
+        flows:
+          - name: browse-status
+            start: home
+            steps:
+              - visit: home
+                expectText: Integration fixture ready
+                screenshot: home
+              - visit: status-json
+                expectText: seed-from-main
+        checks:
+          - name: backing-service-healthy
+            category: runtime
+            severity: critical
+            method: vivero-up
+            description: Backing service must pass command health before app services start.
+          - name: smart-warm-volume-copied
+            category: warm
+            severity: high
+            method: derived-preview-status
+            description: Feature previews should inherit the main baseline smart-warm volume.
