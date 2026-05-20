@@ -10,6 +10,38 @@ import (
 	"strings"
 )
 
+type qaRecordRunner interface {
+	LookPath(file string) (string, error)
+	Run(name string, args ...string) ([]byte, []byte, error)
+	CombinedOutput(name string, args ...string) ([]byte, error)
+}
+
+type osQARecordRunner struct{}
+
+func (osQARecordRunner) LookPath(file string) (string, error) {
+	return exec.LookPath(file)
+}
+
+func (osQARecordRunner) Run(name string, args ...string) ([]byte, []byte, error) {
+	cmd := exec.Command(name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func (osQARecordRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
+func (a *App) recordRunner() qaRecordRunner {
+	if a != nil && a.qaRecordRunner != nil {
+		return a.qaRecordRunner
+	}
+	return osQARecordRunner{}
+}
+
 func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, error) {
 	opts = normalizeQARecordOptions(opts)
 	if err := validateColorScheme(opts.ColorScheme); err != nil {
@@ -38,7 +70,8 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	if err := ensureDir(outputDir); err != nil {
 		return nil, err
 	}
-	if _, err := exec.LookPath("npm"); err != nil {
+	runner := a.recordRunner()
+	if _, err := runner.LookPath("npm"); err != nil {
 		return nil, fmt.Errorf("npm/playwright not available for qa recording: %w", err)
 	}
 
@@ -57,17 +90,14 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 		return nil, err
 	}
 
-	cmd := exec.Command("npm", "exec", "--yes", "--package", "playwright", "--", "sh", "-lc", `NODE_PATH="$(dirname "$(dirname "$(command -v playwright)")")" exec node "$1" "$2"`, "vivero-playwright", scriptPath, inputPath)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("playwright qa record failed: %w: %s", err, strings.TrimSpace(stderr.String()+"\n"+stdout.String()))
+	stdout, stderr, err := runner.Run("npm", "exec", "--yes", "--package", "playwright", "--", "sh", "-lc", `NODE_PATH="$(dirname "$(dirname "$(command -v playwright)")")" exec node "$1" "$2"`, "vivero-playwright", scriptPath, inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("playwright qa record failed: %w: %s", err, strings.TrimSpace(string(stderr)+"\n"+string(stdout)))
 	}
 
 	var result map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
-		return nil, fmt.Errorf("parse qa record output: %w: %s", err, strings.TrimSpace(stdout.String()))
+	if err := json.Unmarshal(bytes.TrimSpace(stdout), &result); err != nil {
+		return nil, fmt.Errorf("parse qa record output: %w: %s", err, strings.TrimSpace(string(stdout)))
 	}
 	result["preview"] = previewID
 	result["scope"] = scopeNameFromPlan(plan)
@@ -77,7 +107,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	result["outputDir"] = outputDir
 	result["plan"] = plan
 	if opts.Format == "mp4" {
-		if err := convertRecordVideosToMP4(result); err != nil {
+		if err := convertRecordVideosToMP4(runner, result); err != nil {
 			result["ok"] = false
 			result["conversionError"] = err.Error()
 			return result, err
@@ -92,8 +122,8 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	return result, nil
 }
 
-func convertRecordVideosToMP4(result map[string]any) error {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+func convertRecordVideosToMP4(runner qaRecordRunner, result map[string]any) error {
+	if _, err := runner.LookPath("ffmpeg"); err != nil {
 		return fmt.Errorf("ffmpeg not available for mp4 conversion: %w", err)
 	}
 	videos, _ := result["videos"].([]any)
@@ -107,8 +137,7 @@ func convertRecordVideosToMP4(result map[string]any) error {
 			continue
 		}
 		mp4 := strings.TrimSuffix(webm, filepath.Ext(webm)) + ".mp4"
-		cmd := exec.Command("ffmpeg", "-y", "-i", webm, "-movflags", "+faststart", "-pix_fmt", "yuv420p", mp4)
-		b, err := cmd.CombinedOutput()
+		b, err := runner.CombinedOutput("ffmpeg", "-y", "-i", webm, "-movflags", "+faststart", "-pix_fmt", "yuv420p", mp4)
 		if err != nil {
 			return fmt.Errorf("ffmpeg convert %s: %w: %s", webm, err, strings.TrimSpace(string(b)))
 		}
