@@ -27,6 +27,14 @@ make example-e2e
 
 It syncs `examples/agent-demo`, starts a Dockerized local preview, runs `vivero qa final` in lightweight mode, verifies artifact paths, diagnoses startup, tears the preview down, and checks that the example app files stayed clean. To opt into browser screenshots/video for that fixture, run `VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e`.
 
+For a fuller Docker lifecycle check, run:
+
+```sh
+make integration-fixtures
+```
+
+That fixture covers a Docker app plus backing service, container networking, smart warm baseline/derived volumes, setup skip policy, final QA proof paths, and cleanup. Browser recording is optional with `VIVERO_INTEGRATION_BROWSER_QA=1`.
+
 A normal project flow looks like this:
 
 ```sh
@@ -101,17 +109,19 @@ Vivero is preview-first. Production hosting is still an RFC/readiness track, not
 vivero doctor production --project <path> --json --no-input
 ```
 
-Before release-facing changes, run:
+Before release-facing changes, run the local confidence ladder:
 
 ```sh
 make verify
 make cover
+make example-e2e
+make integration-fixtures
 make release-smoke
 ```
 
-`make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
+`make example-e2e` is the fast canonical preview proof. `make integration-fixtures` is the Docker lifecycle proof. `make release-smoke` builds snapshot archives with GoReleaser, extracts the host-compatible tarball, runs `vivero doctor`, checks command/schema JSON, and validates the example configs from the packaged binary path.
 
-CI runs quality gates, Linux/macOS builds, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
+CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, and a snapshot release smoke. Tag releases publish darwin/linux archives for amd64 and arm64 after the same archive smoke. Windows and Homebrew are intentionally out of scope for now.
 
 ## License
 
