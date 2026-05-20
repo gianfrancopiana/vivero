@@ -184,6 +184,10 @@ func buildDockerImage(spec dockerBuildSpec) error {
 }
 
 func (a *App) startDockerService(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error) {
+	return a.containerRuntime().StartService(a.Home, projectName, previewID, service, svc, sources, env)
+}
+
+func startDockerService(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return "", fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
 	}
@@ -191,7 +195,7 @@ func (a *App) startDockerService(projectName, previewID, service string, svc Ser
 	if err != nil {
 		return "", err
 	}
-	if err := spec.writeEnvFile(a.dockerEnvFile(previewID, service)); err != nil {
+	if err := spec.writeEnvFile(dockerEnvFilePath(home, previewID, service)); err != nil {
 		return "", err
 	}
 	if spec.EnvFile != "" {
@@ -215,6 +219,10 @@ func (a *App) startDockerService(projectName, previewID, service string, svc Ser
 }
 
 func (a *App) runDockerOneShot(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
+	return a.containerRuntime().RunOneShot(a.Home, projectName, previewID, service, svc, sources, env, command)
+}
+
+func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
 	}
@@ -222,7 +230,7 @@ func (a *App) runDockerOneShot(projectName, previewID, service string, svc Servi
 	if err != nil {
 		return nil, err
 	}
-	if err := spec.writeEnvFile(a.dockerEnvFile(previewID, service)); err != nil {
+	if err := spec.writeEnvFile(dockerEnvFilePath(home, previewID, service)); err != nil {
 		return nil, err
 	}
 	if spec.EnvFile != "" {
@@ -319,8 +327,12 @@ func dockerSpecForService(projectName, previewID, service string, svc ServiceCon
 }
 
 func (a *App) dockerEnvFile(previewID, service string) string {
+	return dockerEnvFilePath(a.Home, previewID, service)
+}
+
+func dockerEnvFilePath(home, previewID, service string) string {
 	name := strings.ReplaceAll(dockerResourceName("env", previewID, service), ".", "-") + ".env"
-	return filepath.Join(a.Home, "run", "docker", name)
+	return filepath.Join(home, "run", "docker", name)
 }
 
 func (spec *dockerServiceSpec) writeEnvFile(path string) error {

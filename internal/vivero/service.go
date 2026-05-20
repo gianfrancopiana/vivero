@@ -271,7 +271,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		return cleanupErr
 	}
 	if len(ports) > 0 {
-		published, err := dockerPublishedPorts(containerID, ports)
+		published, err := a.containerRuntime().PublishedPorts(containerID, ports)
 		if err != nil {
 			if cleanupErr := cleanupStarted(); cleanupErr != nil {
 				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
@@ -301,7 +301,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 	if strings.TrimSpace(svc.Health.Command) != "" {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
 		healthTimer := startOperationTimer()
-		if err := waitDockerHealthCommand(containerID, svc.Health, timeout); err != nil {
+		if err := a.containerRuntime().WaitHealthCommand(containerID, svc.Health, timeout); err != nil {
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"container": containerID}))

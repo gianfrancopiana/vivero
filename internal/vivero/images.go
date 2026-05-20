@@ -32,7 +32,7 @@ func (a *App) buildServiceImages(project ProjectRecord, previewID string, source
 		}
 		timer := startOperationTimer()
 		a.recordEvent(previewID, "info", "image.building", "building service image", name, map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile})
-		if err := buildDockerImage(spec); err != nil {
+		if err := a.containerRuntime().BuildImage(spec); err != nil {
 			a.recordEvent(previewID, "error", "image.build_failed", err.Error(), name, timer.metadata(map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile}))
 			return fmt.Errorf("build image for service %s: %w", name, err)
 		}

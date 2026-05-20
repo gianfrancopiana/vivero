@@ -13,8 +13,9 @@ import (
 )
 
 type App struct {
-	Home string
-	db   *sql.DB
+	Home       string
+	db         *sql.DB
+	containers containerRuntime
 }
 
 func NewApp() (*App, error) {

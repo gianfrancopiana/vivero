@@ -42,10 +42,10 @@ func (a *App) deletePreviewSources(previewID string) error {
 func (a *App) cleanupPreviewServices(previewID string, services map[string]PreviewService) error {
 	if len(services) == 0 {
 		var errs []string
-		if err := removeDockerContainersForPreview(previewID); err != nil {
+		if err := a.containerRuntime().RemoveContainersForPreview(previewID); err != nil {
 			errs = append(errs, err.Error())
 		}
-		if err := removeDockerNetwork(previewID); err != nil {
+		if err := a.containerRuntime().RemoveNetwork(previewID); err != nil {
 			errs = append(errs, err.Error())
 		}
 		if len(errs) > 0 {
@@ -67,10 +67,10 @@ func (a *App) cleanupPreviewServices(previewID string, services map[string]Previ
 			errs = append(errs, fmt.Sprintf("save service %s: %v", name, saveErr))
 		}
 	}
-	if err := removeDockerContainersForPreview(previewID); err != nil {
+	if err := a.containerRuntime().RemoveContainersForPreview(previewID); err != nil {
 		errs = append(errs, err.Error())
 	}
-	if networkErr := removeDockerNetwork(previewID); networkErr != nil {
+	if networkErr := a.containerRuntime().RemoveNetwork(previewID); networkErr != nil {
 		errs = append(errs, networkErr.Error())
 	}
 	if len(errs) > 0 {
@@ -110,9 +110,9 @@ func (a *App) stopPreviewServiceResources(previewID, name string, svc PreviewSer
 	}
 	if svc.ContainerID != "" {
 		containerID := svc.ContainerID
-		out, err := runCmd("", nil, "docker", "rm", "-f", containerID)
-		if err != nil && !isDockerNoSuchContainer(string(out)) {
-			errs = append(errs, fmt.Sprintf("docker rm -f %s: %v: %s", containerID, err, strings.TrimSpace(string(out))))
+		missing, out, err := a.containerRuntime().RemoveContainer(containerID)
+		if err != nil && !missing {
+			errs = append(errs, fmt.Sprintf("docker rm -f %s: %v: %s", containerID, err, strings.TrimSpace(out)))
 		} else {
 			svc.ContainerID = ""
 			a.recordEvent(previewID, "info", "service.stopped", "container stopped", name, map[string]string{"container": containerID})
@@ -133,7 +133,7 @@ func serviceResourcesStopped(svc PreviewService) bool {
 	return svc.ContainerID == "" && svc.PID == 0 && svc.ProxyPID == 0 && svc.TunnelPID == 0
 }
 
-func removePreviewDependencyVolumes(previewID string, cfg ProjectConfig) error {
+func (a *App) removePreviewDependencyVolumes(previewID string, cfg ProjectConfig) error {
 	volumeNames := map[string]struct{}{}
 	collect := func(service string, volumes []VolumeConfig) error {
 		for _, vol := range volumes {
@@ -170,7 +170,7 @@ func removePreviewDependencyVolumes(previewID string, cfg ProjectConfig) error {
 	}
 	var errs []string
 	for _, name := range sortedMapKeys(volumeNames) {
-		if err := removeDockerVolume(name); err != nil {
+		if err := a.containerRuntime().RemoveVolume(name); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}
@@ -203,7 +203,7 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 			cleanupErrs = append(cleanupErrs, fmt.Sprintf("save service %s: %v", name, saveErr))
 		}
 	}
-	if err := removeDockerContainersForPreview(id); err != nil {
+	if err := a.containerRuntime().RemoveContainersForPreview(id); err != nil {
 		cleanupErrs = append(cleanupErrs, err.Error())
 	}
 	for _, src := range p.Sources {
@@ -231,11 +231,11 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 		project, projectErr := a.getProject(p.Project)
 		if projectErr != nil {
 			cleanupErrs = append(cleanupErrs, fmt.Sprintf("load project %s for volume cleanup: %v", p.Project, projectErr))
-		} else if volumeErr := removePreviewDependencyVolumes(id, project.Config); volumeErr != nil {
+		} else if volumeErr := a.removePreviewDependencyVolumes(id, project.Config); volumeErr != nil {
 			cleanupErrs = append(cleanupErrs, volumeErr.Error())
 		}
 	}
-	if networkErr := removeDockerNetwork(id); networkErr != nil {
+	if networkErr := a.containerRuntime().RemoveNetwork(id); networkErr != nil {
 		cleanupErrs = append(cleanupErrs, networkErr.Error())
 	}
 	if safeDirtyErr != nil {
