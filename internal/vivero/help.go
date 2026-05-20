@@ -86,7 +86,11 @@ func renderCommandHelp(cmd CommandManifest) string {
 			if flag.ValueName != "" {
 				name += " " + flag.ValueName
 			}
-			b.WriteString(fmt.Sprintf("  %-22s %s\n", name, flag.Description))
+			description := flag.Description
+			if flag.Default != "" {
+				description += " (default: " + flag.Default + ")"
+			}
+			b.WriteString(fmt.Sprintf("  %-22s %s\n", name, description))
 		}
 		b.WriteByte('\n')
 	}

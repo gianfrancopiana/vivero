@@ -53,6 +53,8 @@ Use project inspection to learn the available sources, services, profiles, healt
 - Use `--wait --timeout <duration>` when readiness matters.
 - Prefer exact commit SHAs or explicit local source paths.
 - Use stable preview IDs, usually `<project>-<purpose>` or `<project>-pr<id>`.
+- Use `--metadata branch=<name>` or `--metadata ref=<sha-or-ref>` when smart warm volumes need baseline-vs-branch behavior.
+- Use `--label KEY=VALUE` for caller-owned bookkeeping only; do not put secrets in labels.
 - Pass `--profile <name>` when the project has profiles and the task needs a non-default service set. If `profiles.default` exists, omitted `--profile` uses it.
 - Never announce a preview URL until `vivero up` or `vivero inspect` reports the relevant service healthy. The contract is **URL = works**.
 - Mutate source through Vivero-managed host worktrees or explicit external paths, not by editing container files.
@@ -290,6 +292,12 @@ After QA, generate or refresh the report scaffold:
 
 ```sh
 vivero qa report webapp-local --scope public --json --no-input --quiet
+```
+
+For handoff or release evidence, run the final proof command:
+
+```sh
+vivero qa final webapp-local --scope public --json --no-input --quiet
 ```
 
 Use the produced artifacts as evidence wherever the calling workflow needs them.

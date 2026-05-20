@@ -25,7 +25,7 @@ func TestCommandHelpFromManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("expected up help")
 	}
-	for _, want := range []string{"Examples:", "vivero up", "--json", "--no-input", "--timeout"} {
+	for _, want := range []string{"Examples:", "vivero up", "--json", "--no-input", "--metadata", "--label", "--timeout", "default: 5m"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("up help missing %q:\n%s", want, out)
 		}
@@ -34,7 +34,7 @@ func TestCommandHelpFromManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("expected qa run help")
 	}
-	for _, want := range []string{"local", "public", "vivero qa run"} {
+	for _, want := range []string{"local", "public", "vivero qa run", "default: local"} {
 		if !strings.Contains(qa, want) {
 			t.Fatalf("qa run help missing %q:\n%s", want, qa)
 		}
