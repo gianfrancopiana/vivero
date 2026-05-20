@@ -86,6 +86,20 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	if !strings.Contains(string(rollbackBytes), applyPayload.Release.ID) {
 		t.Fatalf("rollback proof should include release id: %s", rollbackBytes)
 	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", applyPayload.Release.ID, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("repeat release rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var repeatRollbackPayload struct {
+		Release ReleaseRecord `json:"release"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &repeatRollbackPayload); err != nil {
+		t.Fatalf("invalid repeat release rollback JSON: %v stdout=%s", err, stdout)
+	}
+	if repeatRollbackPayload.Release.ID != rollbackPayload.Release.ID {
+		t.Fatalf("repeat rollback should return existing rollback release, got %#v want %#v", repeatRollbackPayload.Release, rollbackPayload.Release)
+	}
 }
 
 func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
@@ -242,6 +256,108 @@ func TestRunDeployPlanBlocksMutablePreviewConfig(t *testing.T) {
 	}
 }
 
+func TestApplyDeployPlanIsIdempotentAuditedAndVersioned(t *testing.T) {
+	a := &App{Home: t.TempDir()}
+	projectDir := writeCountingDeployFixture(t)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.StateVersion != deployStateVersion {
+		t.Fatalf("deploy plan should carry state version %d, got %#v", deployStateVersion, plan)
+	}
+	changes := map[string]bool{}
+	for _, change := range plan.Changes {
+		changes[change.Kind] = change.Summary != ""
+	}
+	if !changes["service-image"] || !changes["deploy-strategy"] {
+		t.Fatalf("deploy plan should summarize service and strategy changes, got %#v", plan.Changes)
+	}
+
+	first, err := a.ApplyDeployPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StateVersion != deployStateVersion || first.Status != "applied" {
+		t.Fatalf("unexpected first release: %#v", first)
+	}
+	if !hasAudit(first.Audit, "apply", "started") || !hasAudit(first.Audit, "apply", "succeeded") {
+		t.Fatalf("applied release should include apply audit trail: %#v", first.Audit)
+	}
+
+	second, err := a.ApplyDeployPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("applying the same plan twice should return existing release, first=%s second=%s", first.ID, second.ID)
+	}
+	countBytes, err := os.ReadFile(filepath.Join(projectDir, "deploy-count.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(countBytes)) != "1" {
+		t.Fatalf("idempotent apply should run app-owned command once, count=%s", countBytes)
+	}
+	current, err := a.CurrentRelease("demo-counting", "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.ID != first.ID || current.Status != "applied" {
+		t.Fatalf("current release should remain the applied release: %#v", current)
+	}
+}
+
+func TestFailedDeployApplyKeepsCurrentReleaseCleanAndStoresArtifact(t *testing.T) {
+	a := &App{Home: t.TempDir()}
+	projectDir := writeFailingDeployFixture(t)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.ApplyDeployPlan(plan.ID)
+	if err == nil || !strings.Contains(err.Error(), "deploy apply failed") {
+		t.Fatalf("expected deploy apply failure, release=%#v err=%v", release, err)
+	}
+	if release.Status != "failed" || !hasAudit(release.Audit, "apply", "failed") {
+		t.Fatalf("failed release should keep failed status and audit trail: %#v", release)
+	}
+	if len(release.Artifacts) != 1 {
+		t.Fatalf("failed release should store command output artifact: %#v", release.Artifacts)
+	}
+	artifactBytes, err := os.ReadFile(release.Artifacts[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(artifactBytes), "boom-output") {
+		t.Fatalf("artifact should contain failed command output, got %q", artifactBytes)
+	}
+	_, err = a.CurrentRelease("demo-failing", "production")
+	if err == nil || !strings.Contains(err.Error(), "no current release") {
+		t.Fatalf("failed apply should not become current release, got %v", err)
+	}
+}
+
+func TestDeployLockRejectsConcurrentMutation(t *testing.T) {
+	a := &App{Home: t.TempDir()}
+	unlock, err := a.acquireDeployLock("demo", "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.acquireDeployLock("demo", "production"); err == nil || !strings.Contains(err.Error(), "deploy lock already held") {
+		t.Fatalf("expected concurrent deploy lock rejection, got %v", err)
+	}
+	unlock()
+
+	unlockAgain, err := a.acquireDeployLock("demo", "production")
+	if err != nil {
+		t.Fatalf("lock should be reusable after unlock: %v", err)
+	}
+	unlockAgain()
+}
+
 func TestDeployAndReleaseCommandsAreDiscoverable(t *testing.T) {
 	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "help", "deploy", "plan")
 	if code != 0 || stderr != "" {
@@ -364,6 +480,69 @@ func TestCurrentReleaseRejectsMismatchedStateBeforeStatusCommand(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(dir, "tampered.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("mismatched current release should not run status command, stat err=%v", statErr)
 	}
+}
+
+func writeCountingDeployFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	config := "project:\n" +
+		"  name: demo-counting\n" +
+		"services:\n" +
+		"  web:\n" +
+		"    image: registry.example.com/demo-counting@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n" +
+		"    port: 3000\n" +
+		"    health:\n" +
+		"      path: /\n" +
+		"      timeout: 30s\n" +
+		"    resources:\n" +
+		"      cpus: '1'\n" +
+		"      memory: 512m\n" +
+		"deploy:\n" +
+		"  environments:\n" +
+		"    production:\n" +
+		"      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf \"%s\" \"$count\" > deploy-count.txt; printf applied:$VIVERO_DEPLOY_PLAN_ID:$VIVERO_RELEASE_ID > deploy-applied.txt'\n" +
+		"      statusCommand: 'printf applied'\n" +
+		"      rollbackCommand: 'printf rollback:$VIVERO_ROLLBACK_RELEASE_ID > deploy-rollback.txt'\n"
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeFailingDeployFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	config := "project:\n" +
+		"  name: demo-failing\n" +
+		"services:\n" +
+		"  web:\n" +
+		"    image: registry.example.com/demo-failing@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n" +
+		"    port: 3000\n" +
+		"    health:\n" +
+		"      path: /\n" +
+		"      timeout: 30s\n" +
+		"    resources:\n" +
+		"      cpus: '1'\n" +
+		"      memory: 512m\n" +
+		"deploy:\n" +
+		"  environments:\n" +
+		"    production:\n" +
+		"      applyCommand: 'printf boom-output; exit 23'\n" +
+		"      statusCommand: 'printf should-not-run'\n" +
+		"      rollbackCommand: 'printf rollback:$VIVERO_ROLLBACK_RELEASE_ID > deploy-rollback.txt'\n"
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func hasAudit(events []DeployAuditEvent, action, status string) bool {
+	for _, event := range events {
+		if event.Action == action && event.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func writeDeployFixture(t *testing.T, immutable bool) string {

@@ -99,6 +99,10 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 	release.PreviousSlot = plan.BlueGreen.ActiveSlot
 	release.TargetSlot = plan.BlueGreen.TargetSlot
 	release.ActiveSlot = plan.BlueGreen.ActiveSlot
+	release.addAudit("blue_green_apply", "started", fmt.Sprintf("targeting inactive slot %s", release.TargetSlot))
+	if err := a.saveReleaseHistory(release); err != nil {
+		return ReleaseRecord{}, err
+	}
 	var outputs []string
 	for _, phase := range plan.BlueGreen.Phases {
 		if strings.TrimSpace(phase.Command) == "" {
@@ -115,17 +119,21 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 			release.Phases = append(release.Phases, record)
 			release.Status = phase.Name + "_failed"
 			release.Output = strings.Join(outputs, "\n")
-			release.UpdatedAt = nowUTC()
+			release.addAudit("blue_green_"+phase.Name, "failed", trimmed)
+			if artifact, artifactErr := a.saveDeployArtifact(release.ID, phase.Name, "phase-output", string(out)); artifactErr == nil {
+				release.Artifacts = append(release.Artifacts, artifact)
+			}
 			_ = a.saveReleaseHistory(release)
 			return release, fmt.Errorf("blue/green deploy %s_failed: %w: %s", phase.Name, err, trimmed)
 		}
+		release.addAudit("blue_green_"+phase.Name, "succeeded", trimmed)
 		release.Phases = append(release.Phases, record)
 	}
 	release.Status = "promoted"
 	release.ActiveSlot = plan.BlueGreen.TargetSlot
 	release.PreviousSlot = plan.BlueGreen.ActiveSlot
 	release.Output = strings.Join(outputs, "\n")
-	release.UpdatedAt = nowUTC()
+	release.addAudit("blue_green_apply", "succeeded", fmt.Sprintf("promoted %s", release.ActiveSlot))
 	if err := a.saveRelease(release); err != nil {
 		return ReleaseRecord{}, err
 	}
@@ -133,24 +141,32 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 }
 
 func (a *App) rollbackBlueGreenRelease(plan DeployPlan, release ReleaseRecord) (ReleaseRecord, error) {
-	rollback := newReleaseRecord(plan, "rolled_back", release.ID)
+	rollback := newReleaseRecord(plan, "rolling_back", release.ID)
 	rollback.ActiveSlot = release.ActiveSlot
 	rollback.PreviousSlot = release.ActiveSlot
 	rollback.TargetSlot = release.PreviousSlot
 	if rollback.TargetSlot == "" && plan.BlueGreen != nil {
 		rollback.TargetSlot = plan.BlueGreen.ActiveSlot
 	}
+	rollback.addAudit("blue_green_rollback", "started", fmt.Sprintf("targeting previous slot %s", rollback.TargetSlot))
+	if err := a.saveReleaseHistory(rollback); err != nil {
+		return ReleaseRecord{}, err
+	}
 	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_rollback", "VIVERO_ROLLBACK_RELEASE_ID": release.ID})
 	rollback.Output = strings.TrimSpace(string(out))
 	if err != nil {
 		rollback.Status = "rollback_failed"
-		rollback.UpdatedAt = nowUTC()
+		rollback.addAudit("blue_green_rollback", "failed", strings.TrimSpace(string(out)))
+		if artifact, artifactErr := a.saveDeployArtifact(rollback.ID, "rollback", "command-output", string(out)); artifactErr == nil {
+			rollback.Artifacts = append(rollback.Artifacts, artifact)
+		}
 		_ = a.saveReleaseHistory(rollback)
 		return rollback, fmt.Errorf("release rollback failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	rollback.Status = "rolled_back"
 	rollback.ActiveSlot = rollback.TargetSlot
 	rollback.PreviousSlot = release.ActiveSlot
-	rollback.UpdatedAt = nowUTC()
+	rollback.addAudit("blue_green_rollback", "succeeded", fmt.Sprintf("active slot is now %s", rollback.ActiveSlot))
 	if err := a.saveRelease(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}

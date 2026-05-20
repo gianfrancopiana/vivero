@@ -6,7 +6,7 @@ import (
 
 func newReleaseRecord(plan DeployPlan, status, rollbackOf string) ReleaseRecord {
 	now := nowUTC()
-	return ReleaseRecord{ID: newDeployID("rel"), PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Strategy: plan.Strategy, Status: status, RollbackOf: rollbackOf, CreatedAt: now, UpdatedAt: now}
+	return ReleaseRecord{StateVersion: deployStateVersion, ID: newDeployID("rel"), PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Strategy: plan.Strategy, Status: status, RollbackOf: rollbackOf, CreatedAt: now, UpdatedAt: now}
 }
 
 func runDeployShell(plan DeployPlan, release ReleaseRecord, command string, extra map[string]string) ([]byte, error) {

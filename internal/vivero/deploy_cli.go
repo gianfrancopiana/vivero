@@ -43,7 +43,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
-		if release.Status != "applied" && release.Status != "promoted" {
+		if !releaseStatusReapplySafe(release) {
 			return 1
 		}
 		return 0
