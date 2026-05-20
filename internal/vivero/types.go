@@ -12,6 +12,7 @@ type ProjectConfig struct {
 	Seeds           map[string]SeedConfig     `yaml:"seeds" json:"seeds,omitempty"`
 	Prebuild        map[string]PrebuildConfig `yaml:"prebuild" json:"prebuild,omitempty"`
 	Public          PublicConfig              `yaml:"public" json:"public,omitempty"`
+	Deploy          DeployConfig              `yaml:"deploy" json:"deploy,omitempty"`
 	Warm            WarmConfig                `yaml:"warm" json:"warm,omitempty"`
 	Setup           SetupConfig               `yaml:"setup" json:"setup,omitempty"`
 	Routes          map[string]string         `yaml:"routes" json:"routes,omitempty"`
@@ -82,6 +83,16 @@ type PublicConfig struct {
 	Hostname         string `yaml:"hostname" json:"hostname,omitempty"`
 	HostnameTemplate string `yaml:"hostnameTemplate" json:"hostnameTemplate,omitempty"`
 	InactiveBehavior string `yaml:"inactiveBehavior" json:"inactiveBehavior,omitempty"`
+}
+
+type DeployConfig struct {
+	Environments map[string]DeployEnvironmentConfig `yaml:"environments" json:"environments,omitempty"`
+}
+
+type DeployEnvironmentConfig struct {
+	ApplyCommand    string `yaml:"applyCommand" json:"applyCommand,omitempty"`
+	StatusCommand   string `yaml:"statusCommand" json:"statusCommand,omitempty"`
+	RollbackCommand string `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
 }
 
 type BackingConfig struct {

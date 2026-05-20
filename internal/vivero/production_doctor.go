@@ -59,7 +59,7 @@ func (a *App) ProductionDoctor(path string) (ProductionDoctorResult, error) {
 		return report, nil
 	}
 	report.Project = cfg.Project.Name
-	report.addDiagnostic("info", "preview-first", "", "Vivero is preview-first today; this command is read-only and does not enable production hosting.", "Use the production hosting RFC before adding deploy/release/rollback commands.")
+	report.addDiagnostic("info", "deploy-surface", "", "Vivero production deploys are app-owned commands gated by this read-only readiness check.", "Use deploy plan first; apply only plans whose production doctor diagnostics are not blocked.")
 	productionDoctorCheckControlPlane(&report)
 	productionDoctorCheckServices(&report, cfg)
 	productionDoctorCheckBackingServices(&report, cfg)

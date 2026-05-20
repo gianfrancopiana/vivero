@@ -130,6 +130,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		output(stdout, jsonOut, v, "doctor ok")
 		return 0
+	case "deploy":
+		return a.runDeploy(rest, stdout, stderr, jsonOut)
+	case "release":
+		return a.runRelease(rest, stdout, stderr, jsonOut)
 	case "projects":
 		if len(rest) > 0 && rest[0] == "sync" {
 			pos := positionalArgs(rest[1:])

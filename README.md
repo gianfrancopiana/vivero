@@ -103,10 +103,27 @@ The bundled skill tells coding agents how to use Vivero. It stays generic; proje
 
 ## Production and release
 
-Vivero is preview-first. Production hosting is still an RFC/readiness track, not current behavior. Use this read-only check before adding deploy semantics:
+Vivero stays preview-first, but it now has an explicit production/release command surface for app-owned deploy logic. `vivero doctor production` is the read-only gate: it blocks mutable preview inputs, quick tunnels, and other risky config before a deploy plan can be applied.
+
+Configure deploy commands in `vivero.yml` and keep the implementation in the app repo:
+
+```yaml
+deploy:
+  environments:
+    production:
+      applyCommand: ./script/deploy production
+      statusCommand: ./script/deploy-status production
+      rollbackCommand: ./script/deploy-rollback production
+```
+
+Run the flow explicitly:
 
 ```sh
 vivero doctor production --project <path> --json --no-input
+vivero deploy plan <path> --environment production --json --no-input
+vivero deploy apply <plan-id> --json --no-input
+vivero release status <project> --environment production --json --no-input
+vivero release rollback <project> <release-id> --environment production --json --no-input
 ```
 
 Before release-facing changes, run the local confidence ladder:
