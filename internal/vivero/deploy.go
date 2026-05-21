@@ -23,6 +23,7 @@ type DeployPlan struct {
 	Services        []DeployServiceArtifact      `json:"services,omitempty"`
 	ApplyCommand    string                       `json:"applyCommand,omitempty"`
 	StatusCommand   string                       `json:"statusCommand,omitempty"`
+	SmokeCommand    string                       `json:"smokeCommand,omitempty"`
 	RollbackCommand string                       `json:"rollbackCommand,omitempty"`
 	BlueGreen       *BlueGreenDeployPlan         `json:"blueGreen,omitempty"`
 	CreatedAt       time.Time                    `json:"createdAt"`
@@ -139,6 +140,7 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 		case "command":
 			plan.ApplyCommand = strings.TrimSpace(deployEnv.ApplyCommand)
 			plan.StatusCommand = strings.TrimSpace(deployEnv.StatusCommand)
+			plan.SmokeCommand = strings.TrimSpace(deployEnv.SmokeCommand)
 			plan.RollbackCommand = strings.TrimSpace(deployEnv.RollbackCommand)
 			if plan.ApplyCommand == "" {
 				plan.addDiagnostic("error", "deploy-apply-missing", "deploy.environments."+environment+".applyCommand", "deploy apply command is not configured", "Set an app-owned applyCommand for this environment.")
@@ -246,6 +248,16 @@ func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 		_ = a.saveReleaseHistory(release)
 		return release, fmt.Errorf("deploy apply failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	if artifact, artifactErr := a.saveDeployArtifact(release.ID, "apply", "command-output", string(out)); artifactErr == nil && strings.TrimSpace(string(out)) != "" {
+		release.Artifacts = append(release.Artifacts, artifact)
+	}
+	if strings.TrimSpace(plan.SmokeCommand) != "" {
+		smoke, smokeErr := a.runReleaseSmoke(plan, &release)
+		if smokeErr != nil {
+			_ = a.saveReleaseHistory(release)
+			return release, fmt.Errorf("deploy smoke failed: %w: %s", smokeErr, smoke.Output)
+		}
+	}
 	release.Status = "applied"
 	release.addAudit("apply", "succeeded", "app-owned apply command completed")
 	if err := a.saveRelease(release); err != nil {
@@ -274,6 +286,9 @@ func (a *App) CurrentRelease(project, environment string) (ReleaseRecord, error)
 		if status := strings.TrimSpace(string(out)); status != "" {
 			release.Status = status
 			release.Output = status
+			if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", string(out)); artifactErr == nil {
+				release.Artifacts = append(release.Artifacts, artifact)
+			}
 			release.addAudit("status", "succeeded", status)
 			if err := a.saveRelease(release); err != nil {
 				return ReleaseRecord{}, err

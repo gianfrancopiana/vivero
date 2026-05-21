@@ -114,7 +114,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 		t.Fatalf("capabilities should expose build provenance: %#v", caps["build"])
 	}
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}

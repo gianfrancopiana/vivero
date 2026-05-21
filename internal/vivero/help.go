@@ -21,6 +21,8 @@ func rootHelp() string {
 		"  vivero deploy plan . --environment production --json --no-input",
 		"  vivero deploy apply <plan-id> --json --no-input",
 		"  vivero release status my-app --environment production --json --no-input",
+		"  vivero release events release:<release-id> --json --no-input",
+		"  vivero release logs release:<release-id> --json --no-input",
 		"",
 		"  # Evidence/debug: reuse logs, events, smoke, screenshots, and QA commands",
 		"  vivero logs preview:my-app-local web --json --no-input",
