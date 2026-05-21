@@ -57,13 +57,13 @@ A normal preview flow looks like this:
 
 ```sh
 vivero projects sync /path/to/project --json --no-input
-vivero up webapp --id webapp-local --source app.path=/path/to/webapp --wait --timeout 5m --json --no-input --quiet
-vivero inspect webapp-local --json --no-input
+vivero preview up webapp --id webapp-local --source app.path=/path/to/webapp --wait --timeout 5m --json --no-input --quiet
+vivero preview inspect webapp-local --json --no-input
 vivero qa run webapp-local --scope public --json --no-input --quiet
-vivero down webapp-local --archive-patch --json --no-input --quiet
+vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-`vivero up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing.
+`vivero preview up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing.
 
 ## CLI contract
 

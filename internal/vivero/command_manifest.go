@@ -76,7 +76,7 @@ func commandManifests() []CommandManifest {
 		{Name: "--debug", Description: "show debugging context for unexpected failures", Global: true},
 		{Name: "--version", Description: "print Vivero version", Global: true},
 	}
-	return []CommandManifest{
+	commands := []CommandManifest{
 		manifest([]string{"capabilities"}, "print runtime capabilities", "vivero capabilities --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, build provenance, home, features, and invariants"}),
 		manifest([]string{"version"}, "print Vivero version", "vivero version --json --no-input", true, "stable", global, nil, map[string]any{"returns": "version, commit, and build date"}),
 		manifest([]string{"help"}, "show examples-first help", "vivero help <command>", true, "stable", []CommandFlag{{Name: "<command>", Description: "optional command or command group"}}, nil, map[string]any{"returns": "human-readable help on stdout"}),
@@ -122,6 +122,59 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"skill", "doctor"}, "check bundled skill installation", "vivero skill doctor --json --no-input", true, "stable", global, nil, map[string]any{"returns": "skill doctor result"}),
 		manifest([]string{"diagnose", "startup"}, "diagnose startup timing from preview events", "vivero diagnose startup my-preview --json --no-input", true, "experimental", global, []CommandArg{{Name: "preview", Required: true}}, map[string]any{"returns": "startup timing diagnosis once diagnostics are enabled"}),
 	}
+	return append(commands, previewNamespaceAliases(commands)...)
+}
+
+func previewNamespaceAliases(commands []CommandManifest) []CommandManifest {
+	aliasNames := map[string]bool{
+		"up":      true,
+		"wait":    true,
+		"down":    true,
+		"list":    true,
+		"inspect": true,
+		"events":  true,
+		"sync":    true,
+		"rm":      true,
+		"diff":    true,
+		"exec":    true,
+	}
+	aliases := []CommandManifest{}
+	for _, cmd := range commands {
+		if !aliasNames[cmd.Name()] {
+			continue
+		}
+		alias := cmd
+		alias.Path = append([]string{"preview"}, cmd.Path...)
+		alias.Command = strings.Join(alias.Path, " ")
+		alias.Usage = previewAliasUsage(cmd.Usage)
+		alias.Examples = previewAliasExamples(cmd.Examples)
+		aliases = append(aliases, alias)
+	}
+	return aliases
+}
+
+func previewAliasUsage(usage string) string {
+	if strings.HasPrefix(usage, "vivero ") {
+		return "vivero preview " + strings.TrimPrefix(usage, "vivero ")
+	}
+	return usage
+}
+
+func previewAliasExamples(examples []CommandExample) []CommandExample {
+	if len(examples) == 0 {
+		return nil
+	}
+	out := make([]CommandExample, 0, len(examples))
+	for _, ex := range examples {
+		copyEx := ex
+		if len(ex.Command) > 1 && ex.Command[0] == "vivero" {
+			copyEx.Command = append([]string{"vivero", "preview"}, ex.Command[1:]...)
+		} else {
+			copyEx.Command = append([]string{}, ex.Command...)
+		}
+		out = append(out, copyEx)
+	}
+	return out
 }
 
 func manifest(path []string, summary, usage string, agentSafe bool, stability string, flags []CommandFlag, args []CommandArg, schema map[string]any) CommandManifest {
