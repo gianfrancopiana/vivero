@@ -4,9 +4,11 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COVERPROFILE ?= /tmp/vivero-cover.out
 COVER_MIN ?= 72.0
+STATICCHECK ?= honnef.co/go/tools/cmd/staticcheck@v0.6.1
+DEADCODE ?= golang.org/x/tools/cmd/deadcode@v0.36.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION) -X github.com/gianfrancopiana/vivero/internal/vivero.Commit=$(COMMIT) -X github.com/gianfrancopiana/vivero/internal/vivero.BuildDate=$(DATE)"
 
-.PHONY: build test test-short test-race vet fmt-check cover verify cross-build install snapshot release-smoke release-postflight live-cloud-browser-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures dogfood-configs clean
+.PHONY: build test test-short test-race vet fmt-check cover verify staticcheck deadcode stale-markers script-refs ignored-artifacts audit cross-build install snapshot release-smoke release-postflight live-cloud-browser-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures dogfood-configs clean
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
@@ -38,6 +40,23 @@ cover:
 	awk -v total="$$total" -v min="$(COVER_MIN)" 'BEGIN { if (total + 0 < min + 0) { printf "coverage %.1f%% is below floor %.1f%%\n", total, min; exit 1 } printf "coverage %.1f%% meets floor %.1f%%\n", total, min }'
 
 verify: fmt-check vet test build
+
+staticcheck:
+	go run $(STATICCHECK) ./...
+
+deadcode:
+	go run $(DEADCODE) ./...
+
+stale-markers:
+	scripts/audit-stale-markers.sh
+
+script-refs:
+	scripts/audit-script-refs.sh
+
+ignored-artifacts:
+	scripts/audit-ignored-artifacts.sh
+
+audit: verify test-race cover staticcheck deadcode stale-markers script-refs ignored-artifacts
 
 cross-build:
 	@set -e; \

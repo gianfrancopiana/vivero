@@ -15,11 +15,13 @@ git status --short --branch
 Run the local confidence ladder that proves the release path, not just unit tests:
 
 ```sh
-make verify
+make audit
 make release-smoke
 make example-e2e
 make live-cloud-browser-smoke
 ```
+
+`make audit` runs the local quality ratchet: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, and ignored-artifact checks.
 
 `make live-cloud-browser-smoke` is intentionally not required on every PR. Run it before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
 
