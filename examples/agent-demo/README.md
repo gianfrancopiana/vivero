@@ -14,9 +14,9 @@ Run it manually:
 
 ```sh
 vivero projects sync examples/agent-demo --json --no-input
-vivero up agent-demo --id agent-demo-local --wait --timeout 3m --json --no-input
-vivero qa final agent-demo-local --scope smoke --no-record --no-screenshots --json --no-input
-vivero down agent-demo-local --discard --json --no-input
+vivero preview up agent-demo --id agent-demo-local --wait --timeout 3m --json --no-input
+vivero qa final preview:agent-demo-local --scope smoke --no-record --no-screenshots --json --no-input
+vivero preview down agent-demo-local --discard --json --no-input
 ```
 
 Run the repository smoke script:

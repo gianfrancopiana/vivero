@@ -18,10 +18,84 @@ func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
 		"Deploy/release lane",
 		"Evidence/debug lane",
 		"the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
+		"Golden path: preview, prove, deploy",
+		"vivero preview up",
+		"vivero deploy plan",
+		"vivero release events",
+		"docs/certified-examples.md",
+		"## Limits",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("README should frame preview/deploy/evidence contract with %q", want)
 		}
+	}
+}
+
+func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
+	docBytes, err := os.ReadFile("../../docs/certified-examples.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(docBytes)
+	examples := map[string]string{
+		"../../examples/agent-demo":        "agent-demo",
+		"../../examples/integration-stack": "integration-stack",
+		"../../examples/nasty-integration": "nasty-integration",
+		"../../examples/deploy-command":    "deploy-ready",
+		"../../examples/deploy-blue-green": "deploy-blue-green",
+	}
+	for path, wantName := range examples {
+		t.Run(wantName, func(t *testing.T) {
+			if !strings.Contains(doc, strings.TrimPrefix(path, "../../")) {
+				t.Fatalf("certified examples doc should mention %s", path)
+			}
+			_, cfg, err := loadProjectConfig(path)
+			if err != nil {
+				t.Fatalf("load %s: %v", path, err)
+			}
+			if cfg.Project.Name != wantName {
+				t.Fatalf("project name = %q, want %q", cfg.Project.Name, wantName)
+			}
+		})
+	}
+	for _, want := range []string{"static-only", "web app", "app + database", "monorepo app-owned Dockerfile", "command deploy", "blue/green deploy", "make example-e2e", "make integration-fixtures", "make nasty-integration-fixtures", "make deploy-fixtures"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("certified examples doc should include %q", want)
+		}
+	}
+}
+
+func TestCertifiedDeployExamplesUseAppOwnedScripts(t *testing.T) {
+	cases := []struct {
+		path     string
+		strategy string
+		command  string
+	}{
+		{path: "../../examples/deploy-command", strategy: "command", command: "scripts/deploy-command.sh"},
+		{path: "../../examples/deploy-blue-green", strategy: "blue-green", command: "scripts/blue-green.sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			bodyBytes, err := os.ReadFile(tc.path + "/vivero.yml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(bodyBytes)
+			if !strings.Contains(body, tc.command) {
+				t.Fatalf("deploy example should delegate to app-owned script %q", tc.command)
+			}
+			_, cfg, err := loadProjectConfig(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env, ok := cfg.Deploy.Environments["production"]
+			if !ok {
+				t.Fatal("deploy example should configure production environment")
+			}
+			if normalizeDeployStrategy(env.Strategy) != tc.strategy {
+				t.Fatalf("strategy = %q, want %q", normalizeDeployStrategy(env.Strategy), tc.strategy)
+			}
+		})
 	}
 }
 

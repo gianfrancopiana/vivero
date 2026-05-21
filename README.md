@@ -2,7 +2,7 @@
 
 Vivero is Spanish for “nursery”: a place to grow app changes until they are ready.
 
-For coding agents, Vivero is a safe app-operations control plane. It can start isolated previews, plan and apply app-owned deploys, and collect evidence — logs, health checks, screenshots, QA reports, recordings, and release records — through stable JSON commands.
+For coding agents, Vivero is a safe app-operations control plane. It has two first-class lanes — preview and deploy/release — plus one shared evidence loop for logs, health checks, screenshots, QA reports, recordings, release events, and command output artifacts.
 
 Vivero is local-first. The boundary is simple: **the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence.** Keep Dockerfiles, scripts, migrations, env contracts, secrets, and infra logic in the app repo. Use `vivero.yml` to point at them and describe how agents should operate the app.
 
@@ -11,11 +11,10 @@ Vivero is local-first. The boundary is simple: **the app owns how it runs and de
 - **Preview lane:** isolated, disposable previews for local repos, branches, or worktrees.
 - **Deploy/release lane:** explicit `deploy` and `release` commands for app-owned production logic.
 - **Evidence/debug lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, and release artifacts.
+- JSON output for every agent-facing workflow.
 - Unique ports, networks, and state per preview.
 - Warm dependency volumes, with baseline refs like `main` feeding branch-local copies.
 - Multi-service previews and profiles for coupled apps.
-- Health checks and smoke tests before a URL is returned.
-- JSON output for every agent-facing workflow.
 - Local URLs by default; public URLs only when `public:` is configured.
 - Local-only remote control unless `VIVERO_ALLOW_REMOTE_CONTROL=1`.
 
@@ -33,46 +32,78 @@ Or install the latest release directly with checksum verification:
 curl -fsSL https://raw.githubusercontent.com/gianfrancopiana/vivero/main/scripts/install.sh | bash
 ```
 
-Tag releases publish the generated Homebrew formula to `gianfrancopiana/homebrew-tap` for `brew install gianfrancopiana/tap/vivero`; release assets also keep the formula and GitHub artifact attestations. See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`. Maintainers should use [docs/releasing.md](docs/releasing.md) for tag, postflight, and upgrade-cadence checks.
+See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`. Maintainers should use [docs/releasing.md](docs/releasing.md) for tag, postflight, and upgrade-cadence checks.
 
-## Basic workflow
+## Golden path: preview, prove, deploy
 
-Try the self-contained fixture first:
+Start with the certified example. It is small, local, and CI-proven:
 
 ```sh
 make example-e2e
 ```
 
-It syncs `examples/agent-demo`, starts a Dockerized local preview, runs `vivero qa final` in lightweight mode, verifies artifact paths, diagnoses startup, tears the preview down, and checks that the example app files stayed clean. To opt into browser screenshots/video for that fixture, run `VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e`.
-
-For a fuller Docker lifecycle check, run:
+That target runs `examples/agent-demo` through config doctor, project sync, Docker preview startup, `qa final`, startup diagnosis, teardown, and clean-file checks. Browser screenshot/video evidence is opt-in:
 
 ```sh
-make integration-fixtures
+VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e
 ```
 
-That fixture covers a Docker app plus backing service, container networking, smart warm baseline/derived volumes, setup skip policy, final QA proof paths, and cleanup. Browser recording is optional with `VIVERO_INTEGRATION_BROWSER_QA=1`.
+Then use the same shape on your app.
 
-A normal preview flow looks like this:
+### 1. Preview a change
 
 ```sh
 vivero projects sync /path/to/project --json --no-input
 vivero preview up webapp --id webapp-local --source app.path=/path/to/webapp --wait --timeout 5m --json --no-input --quiet
 vivero preview inspect webapp-local --json --no-input
-vivero qa run webapp-local --scope public --json --no-input --quiet
+vivero qa final webapp-local --scope smoke --json --no-input --quiet
 vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-`vivero preview up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing. Evidence/debug commands accept typed preview targets like `preview:webapp-local`, while plain preview IDs remain supported.
+Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases. Docs teach `preview ...` first because it is the clearer lane.
 
-## CLI contract
+### 2. Read evidence when something fails
 
-Vivero follows a small, test-ratcheted CLI contract:
+Evidence commands return one stable target-aware JSON shape. Use preview IDs, `preview:<id>`, or release targets like `release:<id>`:
 
-- Human help is examples-first: `vivero --help`, `vivero help <command>`, and grouped help such as `vivero help qa`.
-- Machines can discover commands with `vivero commands --json --no-input` and schemas with `vivero schema <command> --json --no-input`.
-- JSON command output goes to stdout; JSON errors go to stderr with `code`, `message`, `hint`, and `details` when available.
-- `vivero version --json --no-input` and `vivero --version` expose the installed version; JSON also includes commit and build date for release provenance.
+```sh
+vivero logs preview:webapp-local --json --no-input
+vivero diagnose startup preview:webapp-local --json --no-input
+vivero screenshot preview:webapp-local --page home --json --no-input
+vivero qa final preview:webapp-local --scope smoke --json --no-input
+```
+
+The same debugging loop applies after deploys:
+
+```sh
+vivero release events release:<release-id> --json --no-input
+vivero release logs release:<release-id> --json --no-input
+vivero release smoke deploy-ready --environment production --json --no-input
+```
+
+### 3. Plan and apply a deploy
+
+Vivero does not own your production infrastructure. It plans and records app-owned deploy commands.
+
+```sh
+vivero doctor production --project examples/deploy-command --json --no-input
+vivero deploy plan examples/deploy-command --environment production --json --no-input
+vivero deploy apply <plan-id> --json --no-input
+vivero release status deploy-ready --environment production --json --no-input
+vivero release rollback deploy-ready <release-id> --environment production --json --no-input
+```
+
+For blue/green deploys, configure app-owned slot commands and let Vivero enforce prepare → smoke → promote → rollback state transitions. The certified example lives at `examples/deploy-blue-green`.
+
+## Certified examples
+
+Certified examples are real committed fixtures, not aspirational snippets. See [docs/certified-examples.md](docs/certified-examples.md).
+
+- `examples/agent-demo`: web app; proven by `make example-e2e`.
+- `examples/integration-stack`: app + backing service + warm volume; proven by `make integration-fixtures`.
+- `examples/nasty-integration`: static-only, app + database, monorepo app-owned Dockerfile, public-route planning, and messy config edges; proven by `make nasty-integration-fixtures`.
+- `examples/deploy-command`: command deploy; proven by `make deploy-fixtures`.
+- `examples/deploy-blue-green`: blue/green deploy; proven by `make deploy-fixtures`.
 
 ## `vivero.yml` at a glance
 
@@ -109,38 +140,9 @@ agent:
       expectStatus: 200
 ```
 
-Add:
+Add `profiles:` for small/full preview modes, `warm:` for expensive dependency volumes, `agent.qa:` for browser evidence, and `public:` only when a preview should expose a non-local URL. Routes, selectors, QA flows, and restart commands belong in project config, not in the generic skill or Vivero core.
 
-- `profiles:` when one project has small and full preview modes.
-- `warm:` when expensive dependency volumes should be reused safely.
-- `agent.qa:` for pages, flows, auth state, screenshots, recordings, and reports.
-- `public:` only when a preview should expose a non-local URL.
-
-Routes, selectors, QA flows, and restart commands belong in project config, not in the generic skill or Vivero core.
-
-## Local state doctor
-
-```sh
-vivero doctor --json --no-input
-```
-
-The default doctor checks local Vivero state in addition to installed tools. It fails with actionable findings when active previews point at missing project/source paths, dead PIDs, or missing containers, and suggests `vivero down <preview> --discard --json --no-input` as the safe reconciliation path before rerunning `vivero up`.
-
-## Bundled skill
-
-```sh
-vivero skill print
-vivero skill install --target ~/.agents/skills/vivero --json --no-input
-vivero skill doctor --json --no-input
-```
-
-The bundled skill tells coding agents how to use Vivero. It stays generic; project-specific behavior belongs in `vivero.yml`.
-
-## Production and release
-
-Vivero has a separate deploy/release lane for app-owned production logic. `vivero doctor production` is the read-only gate: it blocks mutable preview inputs, quick tunnels, and other risky config before a deploy plan can be applied.
-
-Configure deploy commands in `vivero.yml` and keep the implementation in the app repo. The default `command` strategy delegates to app-owned commands, with an optional smoke gate that must pass before the release becomes current:
+Deploy config points to app-owned commands:
 
 ```yaml
 deploy:
@@ -152,60 +154,50 @@ deploy:
       rollbackCommand: ./script/deploy-rollback production
 ```
 
-For first-class blue/green deploys, Vivero plans the active and target slots, applies the release to the inactive slot, runs a smoke gate, then promotes traffic. `blueGreen.smokeCommand` is required; Vivero stops before `promoteCommand` if smoke fails.
+## CLI contract
 
-```yaml
-deploy:
-  environments:
-    production:
-      strategy: blue-green
-      blueGreen:
-        slots: [blue, green]
-        activeSlotCommand: ./script/bg active-slot production
-        prepareCommand: ./script/bg prepare production
-        smokeCommand: ./script/bg smoke production
-        promoteCommand: ./script/bg promote production
-        statusCommand: ./script/bg status production
-        rollbackCommand: ./script/bg rollback production
-```
+Vivero follows a small, test-ratcheted CLI contract:
 
-Blue/green commands receive these environment variables: `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
+- Human help is examples-first: `vivero --help`, `vivero help <command>`, and grouped help such as `vivero help qa`.
+- Machines can discover commands with `vivero commands --json --no-input` and schemas with `vivero schema <command> --json --no-input`.
+- JSON command output goes to stdout; JSON errors go to stderr with `code`, `message`, `hint`, and `details` when available.
+- `vivero version --json --no-input` and `vivero --version` expose version, commit, and build date for release provenance.
 
-Run the flow explicitly:
+## Bundled skill
 
 ```sh
-vivero doctor production --project <path> --json --no-input
-vivero deploy plan <path> --environment production --json --no-input
-vivero deploy apply <plan-id> --json --no-input
-vivero release status <project> --environment production --json --no-input
-vivero release events release:<release-id> --json --no-input
-vivero release logs release:<release-id> --json --no-input
-vivero release smoke <project> --environment production --json --no-input
-vivero release rollback <project> <release-id> --environment production --json --no-input
+vivero skill print
+vivero skill install --target ~/.agents/skills/vivero --json --no-input
+vivero skill doctor --json --no-input
 ```
 
-Release records keep audit events and command-output artifacts for apply, smoke, status, phase, and rollback debugging. Target release-scoped evidence with `release:<release-id>`; target the current release by passing the project name plus `--environment`.
+The bundled skill tells coding agents how to use Vivero. It stays generic; project-specific behavior belongs in `vivero.yml`.
 
-Before release-facing changes, run the local confidence ladder:
+## Confidence gates
+
+Run the strongest local non-live ladder before release-facing changes:
 
 ```sh
 make audit
-make verify
-make cover
 make example-e2e
 make integration-fixtures
 make nasty-integration-fixtures
 make dogfood-configs
 make deploy-fixtures
 make release-smoke
-GH_CLI=gh VERSION=v0.1.0 make release-postflight
 ```
 
-`make example-e2e` is the fast canonical preview proof. `make cover` enforces the current repo-wide coverage floor (`COVER_MIN`, default 72.0) so test confidence ratchets upward instead of drifting. `make integration-fixtures` is the Docker lifecycle proof. `make nasty-integration-fixtures` exercises the messy config matrix: static app, app+database, monorepo app-owned Dockerfile, warm volumes, named public routes, invalid public route rejection, bad fingerprint paths, quick-tunnel/browser-path unit coverage, and cleanup/routing edge tests. `make dogfood-configs` validates committed examples plus any live Helper/Flexile/Chetear/self checkouts under `VIVERO_DOGFOOD_ROOT` (default `~/.hermes/workspace`). `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, verifies `checksums.txt`, extracts the host-compatible tarball, runs `vivero doctor`, checks version provenance plus command/schema JSON, and validates the example configs from the packaged binary path. `make release-postflight` verifies a published tag through release metadata, checksums, attestations, the installer, and the Homebrew tap formula.
+CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. A scheduled/manual live smoke covers Docker + Cloudflare quick tunnels + Playwright evidence.
 
-For external runtime confidence, `make live-cloud-browser-smoke` starts `examples/agent-demo` through Docker plus a real Cloudflare quick tunnel, verifies the public `trycloudflare.com` URL from outside the process, runs `qa final --public` with Playwright screenshot/video evidence, and tears the preview down. This target needs Docker, `cloudflared`, npm/Playwright, Chrome, and network access, so CI runs it as a scheduled/manual live smoke instead of on every PR.
+## Limits
 
-CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration matrix checks, dogfood config validation, deploy/release fixtures, and a snapshot release smoke. A separate scheduled/manual live cloud/browser workflow exercises Docker + Cloudflare quick tunnels + Playwright against the committed agent demo and uploads QA artifacts. Tag releases publish darwin/linux artifacts for amd64 and arm64 after the same archive smoke, upload the generated `vivero.rb` Homebrew formula as a release asset, publish that formula to `gianfrancopiana/homebrew-tap`, and create GitHub artifact attestations for the archives and release metadata. Smoke verification hashes every archive, checks the packaged binary's version provenance, renders the Homebrew formula, exercises the tap publisher against a local test repo, and exercises the checksum-verifying installer against local release artifacts. Windows is intentionally out of scope for now.
+- Local-first: Vivero stores state locally and defaults to loopback preview URLs.
+- Docker-compatible runtime required for Docker preview fixtures.
+- Public URLs require configured tunnel/provider support.
+- Vivero records deploys and runs app-owned commands; it does not provision production infrastructure by itself.
+- Secrets and credentials belong outside `vivero.yml`.
+- Remote control is local-only unless `VIVERO_ALLOW_REMOTE_CONTROL=1` is set deliberately.
+- Windows is intentionally out of current release scope.
 
 ## License
 
