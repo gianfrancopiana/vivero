@@ -66,19 +66,10 @@ These are config-quality fixtures. They should keep project-specific selectors, 
 ## Full local proof ladder
 
 ```sh
-make verify
-make example-e2e
-make integration-fixtures
-make nasty-integration-fixtures
-make dogfood-configs
-make deploy-fixtures
+make certify
 ```
 
-For release/package confidence, add:
-
-```sh
-make release-smoke
-```
+`make certify` runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
 
 For external runtime confidence, run the live cloud/browser smoke manually or through the scheduled workflow:
 

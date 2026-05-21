@@ -29,13 +29,24 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version-file: go.mod
-      - run: make verify
+      - name: Verify tag points at current main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          tag_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          main_commit="$(git rev-parse origin/main)"
+          if [ "$tag_commit" != "$main_commit" ]; then
+            echo "release tags must point at current origin/main" >&2
+            echo "tag:  $tag_commit" >&2
+            echo "main: $main_commit" >&2
+            exit 1
+          fi
       # goreleaser/goreleaser-action v7
       - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89
         with:
           version: "~> v2"
-          args: release --snapshot --clean
-      - run: scripts/release-smoke.sh --skip-snapshot --dist dist
+          install-only: true
+      - run: make certify
       # goreleaser/goreleaser-action v7
       - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89
         with:

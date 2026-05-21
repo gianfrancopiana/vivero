@@ -15,13 +15,11 @@ git status --short --branch
 Run the local confidence ladder that proves the release path, not just unit tests:
 
 ```sh
-make audit
-make release-smoke
-make example-e2e
+make certify
 make live-cloud-browser-smoke
 ```
 
-`make audit` runs the local quality ratchet: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, and ignored-artifact checks.
+`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
 
 `make live-cloud-browser-smoke` is intentionally not required on every PR. Run it before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
 
@@ -35,7 +33,7 @@ git tag -a "$version" -m "Vivero $version"
 git push origin "$version"
 ```
 
-The tag triggers the Release workflow. It runs `make verify`, builds the GoReleaser archives, smokes the packaged binary, publishes the GitHub release, renders and uploads `vivero.rb`, creates GitHub artifact attestations, and publishes the formula to `gianfrancopiana/homebrew-tap`.
+The tag triggers the Release workflow. It refuses tags that do not point at current `origin/main`, installs GoReleaser, runs `make certify`, builds the GoReleaser archives, smokes the packaged binary, publishes the GitHub release, renders and uploads `vivero.rb`, creates GitHub artifact attestations, and publishes the formula to `gianfrancopiana/homebrew-tap`.
 
 ## Watch the workflow
 

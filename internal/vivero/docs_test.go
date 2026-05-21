@@ -31,6 +31,55 @@ func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
 	}
 }
 
+func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
+	files := map[string]string{
+		"makefile":          "../../Makefile",
+		"readme":            "../../README.md",
+		"certifiedExamples": "../../docs/certified-examples.md",
+		"releaseWorkflow":   "../../.github/workflows/release.yml",
+		"releasing":         "../../docs/releasing.md",
+		"skill":             "../../skills/vivero/SKILL.md",
+	}
+	bodies := map[string]string{}
+	for name, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		bodies[name] = string(body)
+	}
+	for _, want := range []string{
+		"certify:\n\t$(MAKE) audit",
+		"\t$(MAKE) example-e2e",
+		"\t$(MAKE) integration-fixtures",
+		"\t$(MAKE) nasty-integration-fixtures",
+		"\t$(MAKE) dogfood-configs",
+		"\t$(MAKE) deploy-fixtures",
+		"\t$(MAKE) release-smoke",
+	} {
+		if !strings.Contains(bodies["makefile"], want) {
+			t.Fatalf("Makefile certify target should include %q", want)
+		}
+	}
+	for _, doc := range []string{"readme", "certifiedExamples", "releaseWorkflow", "releasing", "skill"} {
+		if !strings.Contains(bodies[doc], "make certify") {
+			t.Fatalf("%s should document make certify", doc)
+		}
+	}
+	for _, want := range []string{"Verify tag points at current main", "install-only: true", "release tags must point at current origin/main"} {
+		if !strings.Contains(bodies["releaseWorkflow"], want) {
+			t.Fatalf("release workflow should enforce certification preconditions with %q", want)
+		}
+	}
+	for _, doc := range []string{"readme", "releasing", "skill"} {
+		for _, want := range []string{"release-postflight", "checksums", "attestations", "installer", "Homebrew"} {
+			if !strings.Contains(bodies[doc], want) {
+				t.Fatalf("%s should document install trust postflight with %q", doc, want)
+			}
+		}
+	}
+}
+
 func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
 	docBytes, err := os.ReadFile("../../docs/certified-examples.md")
 	if err != nil {
