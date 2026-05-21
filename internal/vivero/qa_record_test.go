@@ -50,6 +50,7 @@ func (f *fakeQARecordRunner) CombinedOutput(name string, args ...string) ([]byte
 }
 
 func TestQARecordWebMUsesInjectableRunnerAndWritesArtifact(t *testing.T) {
+	t.Setenv("VIVERO_PLAYWRIGHT_PACKAGE", "")
 	a, projectRoot := newQARecordTestApp(t)
 	defer a.Close()
 
