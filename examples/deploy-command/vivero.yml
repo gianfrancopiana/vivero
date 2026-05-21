@@ -1,0 +1,25 @@
+# Certified command-deploy example.
+#
+# Vivero owns the release plan/state/evidence. The app repo owns the deploy
+# script and the production mechanics behind it.
+project:
+  name: deploy-ready
+
+services:
+  web:
+    image: registry.example.com/deploy-ready@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+
+deploy:
+  environments:
+    production:
+      applyCommand: sh scripts/deploy-command.sh apply
+      smokeCommand: sh scripts/deploy-command.sh smoke
+      statusCommand: sh scripts/deploy-command.sh status
+      rollbackCommand: sh scripts/deploy-command.sh rollback

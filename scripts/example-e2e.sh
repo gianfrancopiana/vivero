@@ -26,7 +26,7 @@ up_started=0
 cleanup() {
   set +e
   if [ "$up_started" -eq 1 ]; then
-    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero down "$preview_id" --discard --json --no-input >/dev/null 2>&1
+    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero preview down "$preview_id" --discard --json --no-input >/dev/null 2>&1
   fi
   rm -rf "$workdir"
 }
@@ -38,17 +38,17 @@ export VIVERO_HOME="$workdir/vivero-home"
 
 bin/vivero doctor config examples/agent-demo --json --no-input > "$workdir/out/config-doctor.json"
 bin/vivero projects sync examples/agent-demo --json --no-input > "$workdir/out/sync.json"
-bin/vivero up agent-demo --id "$preview_id" --wait --timeout 3m --json --no-input > "$workdir/out/up.json"
+bin/vivero preview up agent-demo --id "$preview_id" --wait --timeout 3m --json --no-input > "$workdir/out/up.json"
 up_started=1
-bin/vivero qa final "$preview_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/final-smoke.json"
-bin/vivero diagnose startup "$preview_id" --json --no-input > "$workdir/out/diagnose.json"
+bin/vivero qa final "preview:$preview_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/final-smoke.json"
+bin/vivero diagnose startup "preview:$preview_id" --json --no-input > "$workdir/out/diagnose.json"
 
 if [ "${VIVERO_EXAMPLE_BROWSER_QA:-0}" = "1" ]; then
   if ! command -v npm >/dev/null 2>&1; then
     echo "VIVERO_EXAMPLE_BROWSER_QA=1 requires npm" >&2
     exit 127
   fi
-  bin/vivero qa final "$preview_id" --scope smoke --format webm --json --no-input > "$workdir/out/final-browser.json"
+  bin/vivero qa final "preview:$preview_id" --scope smoke --format webm --json --no-input > "$workdir/out/final-browser.json"
 fi
 
 python3 - "$workdir/out" "$repo_root" <<'PY'
@@ -99,17 +99,17 @@ diag = load("diagnose.json").get("diagnosis", {})
 assert diag.get("previewId"), diag
 assert diag.get("phases"), diag
 
-status = subprocess.check_output(["git", "status", "--short", "--", "examples/agent-demo"], cwd=repo, text=True).strip()
+status = subprocess.check_output(["git", "status", "--short", "--", "examples/agent-demo", ":(exclude)examples/agent-demo/README.md"], cwd=repo, text=True).strip()
 allowed = {"?? examples/agent-demo/"}
 assert status == "" or status in allowed, status
 PY
 
-bin/vivero down "$preview_id" --discard --json --no-input > "$workdir/out/down.json"
+bin/vivero preview down "$preview_id" --discard --json --no-input > "$workdir/out/down.json"
 up_started=0
 
-if [ -n "$(git status --short -- examples/agent-demo | grep -v '^?? examples/agent-demo/' || true)" ]; then
-  echo "agent demo e2e dirtied tracked example files" >&2
-  git status --short -- examples/agent-demo >&2
+if [ -n "$(git status --short -- examples/agent-demo ':(exclude)examples/agent-demo/README.md' | grep -v '^?? examples/agent-demo/' || true)" ]; then
+  echo "agent demo e2e dirtied tracked example app files" >&2
+  git status --short -- examples/agent-demo ':(exclude)examples/agent-demo/README.md' >&2
   exit 1
 fi
 

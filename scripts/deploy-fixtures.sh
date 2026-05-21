@@ -39,54 +39,8 @@ run_json() {
   fi
 }
 
-cat > "$ready_project/vivero.yml" <<'YAML'
-project:
-  name: deploy-ready
-services:
-  web:
-    image: registry.example.com/deploy-ready@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    port: 3000
-    health:
-      path: /
-      timeout: 30s
-    resources:
-      cpus: '1'
-      memory: 512m
-deploy:
-  environments:
-    production:
-      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf "%s" "$count" > deploy-count.txt; printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt; printf apply-output'
-      smokeCommand: 'printf "smoked:%s\n" "$VIVERO_RELEASE_ID" > deploy-smoke.txt; printf smoke-output'
-      statusCommand: 'printf "live-status:%s\n" "$VIVERO_RELEASE_ID" > deploy-status.txt; printf live-status'
-      rollbackCommand: 'printf "rollback:%s\n" "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt'
-YAML
-
-cat > "$blue_green_project/vivero.yml" <<'YAML'
-project:
-  name: deploy-blue-green
-services:
-  web:
-    image: registry.example.com/deploy-blue-green@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    port: 3000
-    health:
-      path: /
-      timeout: 30s
-    resources:
-      cpus: '1'
-      memory: 512m
-deploy:
-  environments:
-    production:
-      strategy: blue-green
-      blueGreen:
-        slots: [blue, green]
-        activeSlotCommand: 'test "$VIVERO_BLUE_GREEN_SLOTS" = "blue,green" && printf blue'
-        prepareCommand: 'printf "prepare:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
-        smokeCommand: 'printf "smoke:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
-        promoteCommand: 'printf "promote:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" >> blue-green.log'
-        statusCommand: 'printf "status:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" > blue-green-status.txt; printf live-$VIVERO_BLUE_GREEN_ACTIVE_SLOT'
-        rollbackCommand: 'printf "rollback:%s:%s\n" "$VIVERO_BLUE_GREEN_ACTIVE_SLOT" "$VIVERO_BLUE_GREEN_TARGET_SLOT" > blue-green-rollback.txt'
-YAML
+cp -R examples/deploy-command/. "$ready_project/"
+cp -R examples/deploy-blue-green/. "$blue_green_project/"
 
 cat > "$blocked_project/vivero.yml" <<'YAML'
 project:
