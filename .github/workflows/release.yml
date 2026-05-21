@@ -61,3 +61,7 @@ jobs:
           subject-path: |
             dist/checksums.txt
             dist/vivero.rb
+      - name: Publish Homebrew tap formula
+        env:
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+        run: scripts/publish-homebrew-tap.sh --formula dist/vivero.rb --repo git@github.com:gianfrancopiana/homebrew-tap.git --branch main --message "vivero ${GITHUB_REF_NAME}"

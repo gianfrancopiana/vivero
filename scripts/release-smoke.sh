@@ -94,6 +94,23 @@ esac
 
 dist_abs="$(cd "$dist_dir" && pwd)"
 scripts/render-homebrew-formula.sh --version v0.0.0 --dist "$dist_dir" --output "$dist_dir/vivero.rb" >/dev/null
+
+tap_tmp="$(mktemp -d)"
+trap 'rm -rf "$tap_tmp"' EXIT
+git init "$tap_tmp/source" >/dev/null
+git -C "$tap_tmp/source" checkout -B main >/dev/null 2>&1
+git -C "$tap_tmp/source" config user.name "release-smoke"
+git -C "$tap_tmp/source" config user.email "release-smoke@example.invalid"
+printf '# test tap\n' > "$tap_tmp/source/README.md"
+git -C "$tap_tmp/source" add README.md
+git -C "$tap_tmp/source" commit -m init >/dev/null
+git clone --bare "$tap_tmp/source" "$tap_tmp/homebrew-tap.git" >/dev/null 2>&1
+scripts/publish-homebrew-tap.sh --formula "$dist_dir/vivero.rb" --repo "$tap_tmp/homebrew-tap.git" --branch main --message "test formula publish" >/dev/null
+git clone "$tap_tmp/homebrew-tap.git" "$tap_tmp/clone" >/dev/null 2>&1
+cmp "$dist_dir/vivero.rb" "$tap_tmp/clone/Formula/vivero.rb" >/dev/null
+rm -rf "$tap_tmp"
+trap - EXIT
+
 install_tmp="$(mktemp -d)"
 trap 'rm -rf "$install_tmp"' EXIT
 scripts/install.sh --version v0.0.0 --base-url "file://$dist_abs" --bin-dir "$install_tmp/bin" >/dev/null
