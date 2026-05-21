@@ -25,6 +25,12 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		if cmd.Category == "" {
 			t.Fatalf("%s category is required", name)
 		}
+		if cmd.Lane == "" {
+			t.Fatalf("%s lane is required", name)
+		}
+		if !validCommandLane(cmd.Lane) {
+			t.Fatalf("%s lane is invalid: %q", name, cmd.Lane)
+		}
 		if !validCommandVisibility(cmd.Visibility) {
 			t.Fatalf("%s visibility is invalid: %q", name, cmd.Visibility)
 		}
@@ -42,19 +48,20 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		name       string
 		category   string
 		visibility string
+		lane       string
 	}{
-		{name: "up", category: "runtime", visibility: CommandVisibilityCommon},
-		{name: "qa run", category: "qa", visibility: CommandVisibilityCommon},
-		{name: "deploy apply", category: "release", visibility: CommandVisibilityAdvanced},
-		{name: "release rollback", category: "release", visibility: CommandVisibilityAdvanced},
-		{name: "serve", category: "control-plane", visibility: CommandVisibilityInternal},
+		{name: "up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
+		{name: "qa run", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
+		{name: "deploy apply", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
+		{name: "release rollback", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
+		{name: "serve", category: "control-plane", visibility: CommandVisibilityInternal, lane: CommandLaneSupport},
 	} {
 		cmd, ok := seen[tc.name]
 		if !ok {
 			t.Fatalf("missing manifest for %s", tc.name)
 		}
-		if cmd.Category != tc.category || cmd.Visibility != tc.visibility {
-			t.Fatalf("%s category/visibility = %s/%s, want %s/%s", tc.name, cmd.Category, cmd.Visibility, tc.category, tc.visibility)
+		if cmd.Category != tc.category || cmd.Visibility != tc.visibility || cmd.Lane != tc.lane {
+			t.Fatalf("%s category/visibility/lane = %s/%s/%s, want %s/%s/%s", cmd.Name(), cmd.Category, cmd.Visibility, cmd.Lane, tc.category, tc.visibility, tc.lane)
 		}
 	}
 }
@@ -65,7 +72,7 @@ func TestCommandCatalogUsesManifestMetadata(t *testing.T) {
 		t.Fatalf("catalog length = %d, manifests = %d", len(catalog), len(commandManifests()))
 	}
 	for _, cmd := range catalog {
-		if cmd.Summary == "" || cmd.JSONStability == "" || cmd.Category == "" || !validCommandVisibility(cmd.Visibility) {
+		if cmd.Summary == "" || cmd.JSONStability == "" || cmd.Category == "" || cmd.Lane == "" || !validCommandLane(cmd.Lane) || !validCommandVisibility(cmd.Visibility) {
 			t.Fatalf("catalog command lacks manifest metadata: %#v", cmd)
 		}
 		if cmd.Name() == "up" {
@@ -93,8 +100,8 @@ func TestSchemaForComesFromManifest(t *testing.T) {
 	if body["jsonStability"] != "stable" {
 		t.Fatalf("schema jsonStability = %v", body["jsonStability"])
 	}
-	if body["category"] != "runtime" || body["visibility"] != CommandVisibilityCommon {
-		t.Fatalf("schema category/visibility = %v/%v", body["category"], body["visibility"])
+	if body["category"] != "runtime" || body["visibility"] != CommandVisibilityCommon || body["lane"] != CommandLanePreview {
+		t.Fatalf("schema category/visibility/lane = %v/%v/%v", body["category"], body["visibility"], body["lane"])
 	}
 }
 

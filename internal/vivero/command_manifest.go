@@ -8,6 +8,15 @@ const (
 	CommandVisibilityInternal = "internal"
 )
 
+const (
+	CommandLaneDiscovery = "discovery"
+	CommandLaneProject   = "project"
+	CommandLanePreview   = "preview"
+	CommandLaneDeploy    = "deploy"
+	CommandLaneEvidence  = "evidence"
+	CommandLaneSupport   = "support"
+)
+
 type CommandManifest struct {
 	Command       string           `json:"name"`
 	Path          []string         `json:"path"`
@@ -18,6 +27,7 @@ type CommandManifest struct {
 	Flags         []CommandFlag    `json:"flags,omitempty"`
 	Args          []CommandArg     `json:"args,omitempty"`
 	Category      string           `json:"category"`
+	Lane          string           `json:"lane"`
 	Visibility    string           `json:"visibility"`
 	JSONStability string           `json:"jsonStability"`
 	ReadsLocal    bool             `json:"readsLocal,omitempty"`
@@ -119,7 +129,7 @@ func manifest(path []string, summary, usage string, agentSafe bool, stability st
 	if !validCommandVisibility(visibility) {
 		visibility = CommandVisibilityAdvanced
 	}
-	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, Schema: schema}
+	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Lane: commandLane(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, Schema: schema}
 	return m
 }
 
@@ -169,6 +179,41 @@ func commandCategory(path []string) string {
 	}
 }
 
+func commandLane(path []string) string {
+	if len(path) == 0 {
+		return CommandLaneSupport
+	}
+	name := strings.Join(path, " ")
+	switch path[0] {
+	case "capabilities", "version", "help", "commands", "schema":
+		return CommandLaneDiscovery
+	case "projects", "project":
+		return CommandLaneProject
+	case "deploy", "release":
+		return CommandLaneDeploy
+	case "doctor":
+		if name == "doctor production" {
+			return CommandLaneDeploy
+		}
+		return CommandLaneSupport
+	case "events", "logs", "smoke", "screenshot", "qa", "diagnose":
+		return CommandLaneEvidence
+	case "up", "wait", "down", "list", "inspect", "sync", "rm", "diff", "exec":
+		return CommandLanePreview
+	default:
+		return CommandLaneSupport
+	}
+}
+
+func validCommandLane(lane string) bool {
+	switch lane {
+	case CommandLaneDiscovery, CommandLaneProject, CommandLanePreview, CommandLaneDeploy, CommandLaneEvidence, CommandLaneSupport:
+		return true
+	default:
+		return false
+	}
+}
+
 func validCommandVisibility(visibility string) bool {
 	switch visibility {
 	case CommandVisibilityCommon, CommandVisibilityAdvanced, CommandVisibilityInternal:
@@ -215,6 +260,7 @@ func schemaBody(cmd CommandManifest) map[string]any {
 	body := map[string]any{
 		"usage":           cmd.Usage,
 		"category":        cmd.Category,
+		"lane":            cmd.Lane,
 		"visibility":      cmd.Visibility,
 		"jsonStability":   cmd.JSONStability,
 		"agentSafe":       cmd.AgentSafe,

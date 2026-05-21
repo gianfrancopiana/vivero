@@ -2,18 +2,20 @@
 
 Vivero is Spanish for “nursery”: a place to grow app changes until they are ready.
 
-For coding agents, Vivero is a nursery for app changes. It starts an app from a thin `vivero.yml`, waits until the app is healthy, returns a URL, and saves QA evidence.
+For coding agents, Vivero is a safe app-operations control plane. It can start isolated previews, plan and apply app-owned deploys, and collect evidence — logs, health checks, screenshots, QA reports, recordings, and release records — through stable JSON commands.
 
-Vivero is local-first. The boundary is simple: **the app owns how it runs; Vivero owns the preview.** Keep Dockerfiles, scripts, migrations, env contracts, and deploy logic in the app repo. Use `vivero.yml` to point at them and describe the preview.
+Vivero is local-first. The boundary is simple: **the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence.** Keep Dockerfiles, scripts, migrations, env contracts, secrets, and infra logic in the app repo. Use `vivero.yml` to point at them and describe how agents should operate the app.
 
 ## What Vivero gives agents
 
-- Isolated previews for local repos, branches, or worktrees.
+- **Preview lane:** isolated, disposable previews for local repos, branches, or worktrees.
+- **Deploy/release lane:** explicit `deploy` and `release` commands for app-owned production logic.
+- **Evidence/debug lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, and release artifacts.
 - Unique ports, networks, and state per preview.
 - Warm dependency volumes, with baseline refs like `main` feeding branch-local copies.
 - Multi-service previews and profiles for coupled apps.
 - Health checks and smoke tests before a URL is returned.
-- JSON output, logs, screenshots, QA reports, and recordings.
+- JSON output for every agent-facing workflow.
 - Local URLs by default; public URLs only when `public:` is configured.
 - Local-only remote control unless `VIVERO_ALLOW_REMOTE_CONTROL=1`.
 
@@ -51,7 +53,7 @@ make integration-fixtures
 
 That fixture covers a Docker app plus backing service, container networking, smart warm baseline/derived volumes, setup skip policy, final QA proof paths, and cleanup. Browser recording is optional with `VIVERO_INTEGRATION_BROWSER_QA=1`.
 
-A normal project flow looks like this:
+A normal preview flow looks like this:
 
 ```sh
 vivero projects sync /path/to/project --json --no-input
@@ -61,7 +63,7 @@ vivero qa run webapp-local --scope public --json --no-input --quiet
 vivero down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-`vivero up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving.
+`vivero up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing.
 
 ## CLI contract
 
