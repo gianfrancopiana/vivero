@@ -51,16 +51,16 @@ func TestBundledSkillHasRequiredOperatingSections(t *testing.T) {
 		seen[section.Heading] = section
 	}
 	for _, heading := range []string{
+		"Mental model",
 		"First checks",
-		"Production deploy strategy notes",
-		"Repo quality gates",
-		"Agent invariants",
-		"Common flow: run a preview",
-		"Verification",
-		"QA flow",
-		"Teardown",
-		"Secrets",
-		"Failure checklist",
+		"Choose the lane",
+		"Preview flow",
+		"Evidence/QA flow",
+		"Deploy/release flow",
+		"Failure playbooks",
+		"Teardown and safety",
+		"Secrets rules",
+		"Verification gates",
 	} {
 		section, ok := seen[heading]
 		if !ok {
@@ -92,6 +92,25 @@ func TestBundledSkillCommandSnippetsResolve(t *testing.T) {
 	}
 	if len(unresolved) > 0 {
 		t.Fatalf("all bundled skill command snippets should resolve or be explicitly allowed:\n%s", strings.Join(unresolved, "\n"))
+	}
+}
+
+func TestBundledSkillDescribesAgentLaneDecisionFlow(t *testing.T) {
+	skill := string(mustEmbeddedSkillForValidationTest(t))
+	for _, required := range []string{
+		"Preview lane",
+		"Evidence/QA lane",
+		"Deploy/release lane",
+		"Support lane",
+		"preview:<id>",
+		"release:<id>",
+		"normally require human approval",
+		"exact artifact paths",
+		"Plan is the safe entry point",
+	} {
+		if !strings.Contains(skill, required) {
+			t.Fatalf("bundled skill should include %q in the agent operating flow", required)
+		}
 	}
 }
 
@@ -158,7 +177,7 @@ func TestSkillCommandSnippetValidationRejectsUnknownFlagsAndTypos(t *testing.T) 
 }
 
 func TestSkillSectionsIgnoreFencedHeadings(t *testing.T) {
-	skill := []byte("---\nname: vivero\nversion: 0.1.0\nvivero_cli: 0.1.0\nschema: 1\nlicense: MIT\ndescription: valid\n---\n\n```md\n## First checks\n## Production deploy strategy notes\n## Repo quality gates\n## Agent invariants\n## Common flow: run a preview\n## Verification\n## QA flow\n## Teardown\n## Secrets\n## Failure checklist\n```\n")
+	skill := []byte("---\nname: vivero\nversion: 0.1.0\nvivero_cli: 0.1.0\nschema: 1\nlicense: MIT\ndescription: valid\n---\n\n```md\n## Mental model\n## First checks\n## Choose the lane\n## Preview flow\n## Evidence/QA flow\n## Deploy/release flow\n## Failure playbooks\n## Teardown and safety\n## Secrets rules\n## Verification gates\n```\n")
 	report, err := validateEmbeddedSkill(skill)
 	if err != nil {
 		t.Fatalf("validate embedded skill: %v", err)
