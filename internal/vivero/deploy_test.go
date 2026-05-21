@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
@@ -414,8 +415,12 @@ func TestRunDeployBlueGreenApplyStopsBeforePromoteWhenSmokeFails(t *testing.T) {
 	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
 
 	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
-	if code == 0 || stdout != "" || !strings.Contains(stderr, "smoke_failed") {
-		t.Fatalf("blue/green apply with failing smoke should fail on stderr before promote, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	if code != 1 || stderr != "" {
+		t.Fatalf("blue/green apply with failing smoke should return release evidence JSON before promote, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	failedRelease := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	if failedRelease["status"] != "smoke_failed" {
+		t.Fatalf("blue/green failing smoke should expose smoke_failed release evidence: %s", stdout)
 	}
 	logBytes, err := os.ReadFile(filepath.Join(projectDir, "blue-green.log"))
 	if err != nil {
@@ -537,8 +542,162 @@ func TestFailedDeployApplyKeepsCurrentReleaseCleanAndStoresArtifact(t *testing.T
 	}
 }
 
+func TestRunDeployApplyFailureReturnsReleaseEvidenceJSON(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeFailingDeployFixture(t)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("failed deploy apply should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	release := payload["release"].(map[string]any)
+	if release["status"] != "failed" || !strings.Contains(payload["error"].(map[string]any)["message"].(string), "deploy apply failed") {
+		t.Fatalf("failed deploy apply should expose failed release and error: %s", stdout)
+	}
+	if len(artifactPathsByName(release, "apply")) != 1 || !strings.Contains(stdout, "boom-output") {
+		t.Fatalf("failed deploy apply should expose command output artifact: %s", stdout)
+	}
+}
+
+func TestRunDeployBlueGreenPromoteFailureReturnsEvidenceJSON(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeBlueGreenDeployFixture(t, false)
+	configPath := filepath.Join(projectDir, "vivero.yml")
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := strings.Replace(string(configBytes), "printf ''promote:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log", "printf ''promote:%s:%s\\n'' \"$VIVERO_BLUE_GREEN_ACTIVE_SLOT\" \"$VIVERO_BLUE_GREEN_TARGET_SLOT\" >> blue-green.log; exit 9", 1)
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("blue/green deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("blue/green promote failure should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	release := payload["release"].(map[string]any)
+	if release["status"] != "promote_failed" || !strings.Contains(payload["error"].(map[string]any)["message"].(string), "promote_failed") {
+		t.Fatalf("promote failure should expose failed release and error: %s", stdout)
+	}
+	if got := phaseRecordNames(release["phases"].([]any)); strings.Join(got, ",") != "prepare:succeeded,smoke:succeeded,promote:failed" {
+		t.Fatalf("promote failure should persist completed and failed phases: %v", got)
+	}
+	if len(artifactPathsByName(release, "promote")) != 1 {
+		t.Fatalf("promote failure should store phase output artifact: %s", stdout)
+	}
+	_, err = (&App{Home: home}).CurrentRelease("demo-bg", "production")
+	if err == nil || !strings.Contains(err.Error(), "no current release") {
+		t.Fatalf("promote-failed deploy must not become current release, got %v", err)
+	}
+}
+
+func TestReleaseStatusFailurePersistsEvidenceJSON(t *testing.T) {
+	home := t.TempDir()
+	a := &App{Home: home}
+	projectDir := writeReleaseEvidenceDeployFixture(t, false)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.ApplyDeployPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.StatusCommand = "printf status-boom; exit 42"
+	if err := a.saveDeployPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "release", "status", "demo-evidence", "--environment", "production", "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("failed release status should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	updated := payload["release"].(map[string]any)
+	if updated["id"] != release.ID || updated["status"] != "status_failed" || !strings.Contains(payload["error"].(map[string]any)["message"].(string), "release status failed") {
+		t.Fatalf("status failure should expose status_failed release and error: %s", stdout)
+	}
+	if len(artifactPathsByName(updated, "status")) != 1 || !strings.Contains(stdout, "status-boom") {
+		t.Fatalf("status failure should expose command output artifact: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "events", "release:"+release.ID, "--json", "--no-input")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "\"action\": \"status\"") || !strings.Contains(stdout, "\"status\": \"failed\"") {
+		t.Fatalf("status failure should be inspectable through release events, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "logs", "release:"+release.ID, "--json", "--no-input")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "status-boom") {
+		t.Fatalf("status failure should be inspectable through release logs, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
+func TestRunReleaseRollbackFailureReturnsEvidenceJSONAndKeepsCurrent(t *testing.T) {
+	home := t.TempDir()
+	a := &App{Home: home}
+	projectDir := writeReleaseEvidenceDeployFixture(t, false)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.ApplyDeployPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.RollbackCommand = "printf rollback-boom; exit 44"
+	if err := a.saveDeployPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "release", "rollback", "demo-evidence", release.ID, "--environment", "production", "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("failed rollback should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	rollback := payload["release"].(map[string]any)
+	if rollback["status"] != "rollback_failed" || rollback["rollbackOf"] != release.ID || !strings.Contains(payload["error"].(map[string]any)["message"].(string), "release rollback failed") {
+		t.Fatalf("rollback failure should expose failed rollback release and error: %s", stdout)
+	}
+	if len(artifactPathsByName(rollback, "rollback")) != 1 || !strings.Contains(stdout, "rollback-boom") {
+		t.Fatalf("rollback failure should expose command output artifact: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "status", "demo-evidence", "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("rollback failure should leave original release current, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	current := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	if current["id"] != release.ID {
+		t.Fatalf("rollback failure should leave original release current: %s", stdout)
+	}
+}
+
 func TestDeployLockRejectsConcurrentMutation(t *testing.T) {
 	a := &App{Home: t.TempDir()}
+	lockPath := a.deployLockPath("demo/prod", "blue/green")
+	if lockPath != (&App{Home: a.Home}).deployLockPath("demo/prod", "blue/green") {
+		t.Fatalf("deploy lock path should be deterministic")
+	}
+	if a.deployLockPath("demo-prod", "blue/green") == a.deployLockPath("demo", "prod-blue/green") {
+		t.Fatalf("deploy lock path should avoid ambiguous project/environment collisions")
+	}
+
 	unlock, err := a.acquireDeployLock("demo", "production")
 	if err != nil {
 		t.Fatal(err)
@@ -553,6 +712,47 @@ func TestDeployLockRejectsConcurrentMutation(t *testing.T) {
 		t.Fatalf("lock should be reusable after unlock: %v", err)
 	}
 	unlockAgain()
+}
+
+func TestDeployLockRemovesStaleRecordBeforeAcquiring(t *testing.T) {
+	a := &App{Home: t.TempDir()}
+	if err := ensureDir(a.deployLockDir()); err != nil {
+		t.Fatal(err)
+	}
+	stale := map[string]any{"project": "demo", "environment": "production", "pid": os.Getpid(), "createdAt": nowUTC().Add(-5 * time.Hour)}
+	if err := writeIndentedJSONFile(a.deployLockPath("demo", "production"), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	unlock, err := a.acquireDeployLock("demo", "production")
+	if err != nil {
+		t.Fatalf("stale lock should be removed before acquiring: %v", err)
+	}
+	unlock()
+}
+
+func TestDeployApplyLockContentionReturnsStableJSONError(t *testing.T) {
+	home := t.TempDir()
+	a := &App{Home: home}
+	projectDir := writeCountingDeployFixture(t)
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := a.acquireDeployLock(plan.Project, plan.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	if code != 1 || stdout != "" {
+		t.Fatalf("lock contention should return a JSON error on stderr only, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stderr)
+	if !strings.Contains(payload["error"].(map[string]any)["message"].(string), "deploy lock already held for demo-counting/production") {
+		t.Fatalf("lock contention should include stable project/environment message: %s", stderr)
+	}
 }
 
 func TestDeployAndReleaseCommandsAreDiscoverable(t *testing.T) {

@@ -40,6 +40,10 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 		}
 		release, err := a.ApplyDeployPlan(pos[0])
 		if err != nil {
+			if jsonOut && strings.TrimSpace(release.ID) != "" {
+				output(stdout, jsonOut, releaseFailurePayload(release, err), releaseHuman(release))
+				return 1
+			}
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
@@ -65,6 +69,10 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		environment, _ := flagValue(args[1:], "--environment")
 		release, err := a.CurrentRelease(pos[0], environment)
 		if err != nil {
+			if jsonOut && strings.TrimSpace(release.ID) != "" {
+				output(stdout, jsonOut, releaseFailurePayload(release, err), releaseHuman(release))
+				return 1
+			}
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release, "status": release.Status}, releaseHuman(release))
@@ -121,6 +129,10 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		environment, _ := flagValue(args[1:], "--environment")
 		release, err := a.RollbackRelease(pos[0], pos[1], environment)
 		if err != nil {
+			if jsonOut && strings.TrimSpace(release.ID) != "" {
+				output(stdout, jsonOut, releaseFailurePayload(release, err), releaseHuman(release))
+				return 1
+			}
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
@@ -179,4 +191,8 @@ func releaseSmokeHuman(release ReleaseRecord, smoke ReleaseSmokeResult) string {
 		status = "ok"
 	}
 	return fmt.Sprintf("release %s smoke %s", release.ID, status)
+}
+
+func releaseFailurePayload(release ReleaseRecord, err error) map[string]any {
+	return map[string]any{"release": release, "error": cliErrorPayload(err).Error}
 }
