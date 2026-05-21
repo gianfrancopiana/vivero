@@ -324,10 +324,6 @@ func dockerSpecForService(projectName, previewID, service string, svc ServiceCon
 	return spec, nil
 }
 
-func (a *App) dockerEnvFile(previewID, service string) string {
-	return dockerEnvFilePath(a.Home, previewID, service)
-}
-
 func dockerEnvFilePath(home, previewID, service string) string {
 	name := strings.ReplaceAll(dockerResourceName("env", previewID, service), ".", "-") + ".env"
 	return filepath.Join(home, "run", "docker", name)

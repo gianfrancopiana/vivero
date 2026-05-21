@@ -108,11 +108,6 @@ func isNamedPublicTunnel(cfg PublicConfig) bool {
 	return cfg.Hostname != "" || cfg.HostnameTemplate != "" || cfg.BaseDomain != "" || mode == "named-tunnel" || mode == "fixed" || (provider == "cloudflare" && mode != "quick-tunnel")
 }
 
-func validateNamedPublicRoutes(req UpRequest, cfg ProjectConfig) error {
-	_, err := plannedNamedPublicHosts(req, cfg)
-	return err
-}
-
 func (a *App) validateNamedPublicRouteConflicts(req UpRequest, cfg ProjectConfig) error {
 	planned, err := plannedNamedPublicHosts(req, cfg)
 	if err != nil {

@@ -3,7 +3,6 @@ package vivero
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -100,5 +99,3 @@ func (a *App) SkillDoctor() (map[string]any, error) {
 	}
 	return map[string]any{"embeddedVersion": skillVersion(b), "embeddedSha256": embeddedHash, "targets": checks}, nil
 }
-
-func skillHuman(m map[string]any) string { return fmt.Sprint(m) }

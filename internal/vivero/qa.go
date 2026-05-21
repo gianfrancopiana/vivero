@@ -118,10 +118,6 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 	}, nil
 }
 
-func (a *App) QAReport(previewID, scopeName, outPath string) (map[string]any, error) {
-	return a.QAReportWithTarget(previewID, scopeName, defaultArtifactTarget, outPath)
-}
-
 func (a *App) QAReportWithTarget(previewID, scopeName, target, outPath string) (map[string]any, error) {
 	plan, err := a.QAPlanWithTarget(previewID, scopeName, target)
 	if err != nil {
@@ -145,10 +141,6 @@ func (a *App) QAReportWithTarget(previewID, scopeName, target, outPath string) (
 		return nil, err
 	}
 	return map[string]any{"ok": true, "preview": previewID, "scope": scopeNameFromPlan(plan), "path": outPath, "bytes": len(content)}, nil
-}
-
-func (a *App) QARun(previewID, scopeName string, screenshots bool) (map[string]any, error) {
-	return a.QARunWithTarget(previewID, scopeName, defaultArtifactTarget, screenshots)
 }
 
 func (a *App) QARunWithTarget(previewID, scopeName, target string, screenshots bool) (map[string]any, error) {
@@ -798,10 +790,6 @@ func shellQuote(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
 }
 
-func qaServiceMap(p PreviewRecord) map[string]any {
-	return qaServiceMapForTarget(p, defaultArtifactTarget)
-}
-
 func qaServiceMapForTarget(p PreviewRecord, target string) map[string]any {
 	target = normalizeArtifactTarget(target)
 	out := map[string]any{}
@@ -955,10 +943,6 @@ func qaChecksForScope(_ AgentConfig, scope QAScope) []map[string]any {
 	return out
 }
 
-func resolveQAPage(p PreviewRecord, agent AgentConfig, ref, fallbackService string) (map[string]any, error) {
-	return resolveQAPageForTarget(p, agent, ref, fallbackService, defaultArtifactTarget)
-}
-
 func resolveQAPageForTarget(p PreviewRecord, agent AgentConfig, ref, fallbackService, target string) (map[string]any, error) {
 	name := strings.TrimSpace(ref)
 	service := fallbackService
@@ -980,10 +964,6 @@ func resolveQAPageForTarget(p PreviewRecord, agent AgentConfig, ref, fallbackSer
 		return nil, err
 	}
 	return map[string]any{"name": name, "service": service, "path": path, "url": url}, nil
-}
-
-func qaURLForServicePath(p PreviewRecord, service, path string) (string, error) {
-	return qaURLForServicePathWithTarget(p, service, path, defaultArtifactTarget)
 }
 
 func qaURLForServicePathWithTarget(p PreviewRecord, service, path, target string) (string, error) {

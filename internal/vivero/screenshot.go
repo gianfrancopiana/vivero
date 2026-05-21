@@ -411,10 +411,6 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func (a *App) Screenshot(previewID, service, path string) (map[string]any, error) {
-	return a.ScreenshotWithOptions(previewID, service, ScreenshotOptions{Path: path})
-}
-
 func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOptions) (map[string]any, error) {
 	opts = normalizeScreenshotOptions(opts)
 	if err := validateColorScheme(opts.ColorScheme); err != nil {

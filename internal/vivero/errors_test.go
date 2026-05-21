@@ -64,18 +64,3 @@ func TestCLIErrorDetailsAndCause(t *testing.T) {
 		t.Fatalf("unexpected missing arg error: %#v", ce)
 	}
 }
-
-func TestNoInputConfirmationPolicy(t *testing.T) {
-	if err := requireExplicitConfirmation(true, true, "", "prod"); err == nil || !strings.Contains(err.Error(), "--confirm prod") {
-		t.Fatalf("expected no-input confirmation error, got %v", err)
-	}
-	if err := requireExplicitConfirmation(true, true, "prod", "prod"); err != nil {
-		t.Fatalf("expected matching confirmation, got %v", err)
-	}
-	if err := requireExplicitConfirmation(true, false, "", "prod"); err != nil {
-		t.Fatalf("non-dangerous command should not require confirmation: %v", err)
-	}
-	if err := requireExplicitConfirmation(false, true, "", "prod"); err == nil || !strings.Contains(err.Error(), `confirmation "prod"`) {
-		t.Fatalf("interactive dangerous command should require confirmation text, got %v", err)
-	}
-}

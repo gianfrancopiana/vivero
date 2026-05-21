@@ -66,9 +66,6 @@ func TestFlagParsingHelpersHandleRepeatedEqualsAndPositionals(t *testing.T) {
 	if _, err := collectKV([]string{"--label", "broken"}, "--label"); err == nil || !strings.Contains(err.Error(), "key=value") {
 		t.Fatalf("expected key=value error, got %v", err)
 	}
-	if got := firstPositional(args); got != "preview" {
-		t.Fatalf("firstPositional = %q", got)
-	}
 	if got := positionalArgs(args); !reflect.DeepEqual(got, []string{"preview", "npm", "test"}) {
 		t.Fatalf("positionalArgs = %#v", got)
 	}

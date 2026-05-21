@@ -187,7 +187,7 @@ agent:
 	if driver := qaPlan["driver"].(map[string]any); driver["evidence"] != "playwright" || driver["exploratory"] != "chrome-mcp" {
 		t.Fatalf("unexpected qa driver split: %#v", driver)
 	}
-	qaReport, err := a.QAReport("test-static", "", "")
+	qaReport, err := a.QAReportWithTarget("test-static", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

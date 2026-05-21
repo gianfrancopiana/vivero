@@ -11,10 +11,6 @@ func safePathComponent(value, fallback string) string {
 	return safepath.Component(value, fallback)
 }
 
-func isSafePathComponent(value string) bool {
-	return safepath.IsComponent(value)
-}
-
 func pathWithinRoot(root, path string) bool {
 	return safepath.WithinRoot(root, path)
 }
