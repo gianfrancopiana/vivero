@@ -325,7 +325,7 @@ For authenticated QA, the app/operator provides a project-relative Playwright st
 After QA, generate or refresh the report scaffold:
 
 ```sh
-vivero qa report webapp-local --scope public --json --no-input --quiet
+vivero qa report webapp-local --out qa/report.md --json --no-input --quiet
 ```
 
 For handoff or release evidence, run the final proof command:
