@@ -35,6 +35,8 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
+	applyMap := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, applyMap)
 	var applyPayload struct {
 		Release ReleaseRecord `json:"release"`
 	}
@@ -56,6 +58,8 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("release status exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
+	statusMap := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, statusMap)
 	var statusPayload struct {
 		Release ReleaseRecord `json:"release"`
 		Status  string        `json:"status"`
@@ -71,6 +75,8 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("release rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
+	rollbackMap := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, rollbackMap)
 	var rollbackPayload struct {
 		Release ReleaseRecord `json:"release"`
 	}
@@ -135,6 +141,7 @@ func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
 		t.Fatalf("release events exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	eventsPayload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, eventsPayload)
 	if eventsPayload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || !strings.Contains(stdout, "\"action\": \"apply\"") || !strings.Contains(stdout, "\"action\": \"smoke\"") {
 		t.Fatalf("release events should expose typed release target and audit trail: %s", stdout)
 	}
@@ -143,6 +150,7 @@ func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("release logs exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
+	assertEvidenceShape(t, decodeJSONMap(t, stdout))
 	if !strings.Contains(stdout, "apply-output") || !strings.Contains(stdout, "smoke-output") {
 		t.Fatalf("release logs should include apply and smoke command output: %s", stdout)
 	}
@@ -152,6 +160,7 @@ func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
 		t.Fatalf("release smoke exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	smokePayload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, smokePayload)
 	if smokePayload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || smokePayload["smoke"].(map[string]any)["ok"] != true || !strings.Contains(stdout, "smoke-output") {
 		t.Fatalf("release smoke should rerun the configured smoke gate against current release: %s", stdout)
 	}
@@ -204,8 +213,12 @@ func TestRunReleaseSmokeFailureReturnsEvidenceJSON(t *testing.T) {
 		t.Fatalf("release smoke failure should return evidence JSON on stdout with exit 1, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	payload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, payload)
 	if payload["targetRef"].(map[string]any)["ref"] != "release:"+release.ID {
 		t.Fatalf("unexpected release target ref: %s", stdout)
+	}
+	if payload["ok"] != false || len(payload["nextSuggestedCommands"].([]any)) == 0 {
+		t.Fatalf("failed release smoke should expose ok=false and next suggested commands: %s", stdout)
 	}
 	smoke := payload["smoke"].(map[string]any)
 	if smoke["ok"] != false || !strings.Contains(smoke["output"].(string), "smoke-failed") || smoke["error"] == "" {
@@ -291,8 +304,12 @@ func TestRunReleaseSmokeMissingCommandReturnsActionableJSON(t *testing.T) {
 		t.Fatalf("missing release smoke command should return JSON stdout and exit 1, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	payload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, payload)
 	if payload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID {
 		t.Fatalf("unexpected release target ref: %s", stdout)
+	}
+	if payload["ok"] != false || len(payload["nextSuggestedCommands"].([]any)) == 0 {
+		t.Fatalf("missing release smoke command should expose ok=false and next suggested commands: %s", stdout)
 	}
 	smoke := payload["smoke"].(map[string]any)
 	if smoke["ok"] != false || !strings.Contains(smoke["error"].(string), "no smoke command") {

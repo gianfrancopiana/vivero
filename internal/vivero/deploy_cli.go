@@ -46,7 +46,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 			}
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release}, releaseTargetRef(release)), releaseHuman(release))
 		if !releaseStatusReapplySafe(release) {
 			return 1
 		}
@@ -75,7 +75,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 			}
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"release": release, "status": release.Status}, releaseHuman(release))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release, "status": release.Status}, releaseTargetRef(release)), releaseHuman(release))
 		return 0
 	case "events":
 		pos := positionalArgs(args[1:])
@@ -87,7 +87,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"release": release, "events": release.Audit, "targetRef": targetRef}, releaseEventsHuman(release))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release, "events": release.Audit}, targetRef), releaseEventsHuman(release))
 		return 0
 	case "logs":
 		pos := positionalArgs(args[1:])
@@ -100,7 +100,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 			return errOut(stderr, jsonOut, err)
 		}
 		logs := releaseLogs(release)
-		output(stdout, jsonOut, map[string]any{"release": release, "logs": logs, "targetRef": targetRef}, releaseLogsHuman(release, logs))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release, "logs": logs}, targetRef), releaseLogsHuman(release, logs))
 		return 0
 	case "smoke":
 		pos := positionalArgs(args[1:])
@@ -116,7 +116,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"release": release, "smoke": smoke, "targetRef": targetRef}, releaseSmokeHuman(release, smoke))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release, "smoke": smoke}, targetRef), releaseSmokeHuman(release, smoke))
 		if !smoke.OK {
 			return 1
 		}
@@ -135,7 +135,7 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 			}
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"release": release}, releaseHuman(release))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"release": release}, releaseTargetRef(release)), releaseHuman(release))
 		if release.Status != "rolled_back" {
 			return 1
 		}
@@ -194,5 +194,5 @@ func releaseSmokeHuman(release ReleaseRecord, smoke ReleaseSmokeResult) string {
 }
 
 func releaseFailurePayload(release ReleaseRecord, err error) map[string]any {
-	return map[string]any{"release": release, "error": cliErrorPayload(err).Error}
+	return attachEvidenceShape(map[string]any{"release": release, "error": cliErrorPayload(err).Error}, releaseTargetRef(release))
 }

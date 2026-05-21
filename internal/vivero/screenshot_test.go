@@ -94,6 +94,25 @@ func TestScreenshotOutputPathKeepsServiceUnderCustomOutputDir(t *testing.T) {
 	}
 }
 
+func TestScreenshotOutputPathDoesNotClobberExistingEvidence(t *testing.T) {
+	home := t.TempDir()
+	first := screenshotOutputPath(home, "", "preview", "web", "/", ScreenshotBreakpoint{}, false, "")
+	if err := ensureDir(filepath.Dir(first)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first, []byte("existing evidence"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second := screenshotOutputPath(home, "", "preview", "web", "/", ScreenshotBreakpoint{}, false, "")
+	if second == first {
+		t.Fatalf("second screenshot path should avoid overwriting %s", first)
+	}
+	if filepath.Ext(second) != ".png" || !strings.HasPrefix(filepath.Base(second), "web-_") {
+		t.Fatalf("collision path should preserve readable screenshot name and extension: %s", second)
+	}
+}
+
 func TestParseScreenshotBreakpoint(t *testing.T) {
 	bp, err := parseScreenshotBreakpoint("mobile=390x844")
 	if err != nil {

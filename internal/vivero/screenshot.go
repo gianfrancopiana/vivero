@@ -195,10 +195,31 @@ func screenshotFileBase(service, pagePath string, bp ScreenshotBreakpoint, multi
 }
 
 func screenshotOutputPath(home, outputDir, previewID, service, pagePath string, bp ScreenshotBreakpoint, multi bool, colorScheme string) string {
+	var path string
 	if outputDir != "" {
-		return filepath.Join(expandPath(outputDir), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
+		path = filepath.Join(expandPath(outputDir), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
+	} else {
+		path = filepath.Join(home, "screenshots", safePathComponent(previewID, "preview"), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
 	}
-	return filepath.Join(home, "screenshots", safePathComponent(previewID, "preview"), screenshotFileBase(service, pagePath, bp, multi, colorScheme))
+	return nextAvailableArtifactPath(path)
+}
+
+func nextAvailableArtifactPath(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	} else if err != nil {
+		return path
+	}
+	ext := filepath.Ext(path)
+	stem := strings.TrimSuffix(path, ext)
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		} else if err != nil {
+			return candidate
+		}
+	}
 }
 
 func sanitizeScreenshotName(name string) string {

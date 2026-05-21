@@ -289,7 +289,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"preview": p, "targetRef": targetRef}, previewHuman(p))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"preview": p}, targetRef), previewHuman(p))
 		return 0
 	case "events":
 		pos := positionalArgs(rest)
@@ -308,7 +308,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"events": ev, "targetRef": targetRef}, eventsHuman(ev))
+		output(stdout, jsonOut, attachEvidenceShape(map[string]any{"events": ev}, targetRef), eventsHuman(ev))
 		return 0
 	case "sync":
 		pos := positionalArgs(rest)
@@ -383,7 +383,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, strings.Join(v["lines"].([]string), "\n"))
 		return 0
 	case "smoke":
@@ -403,7 +403,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, fmt.Sprintf("smoke ok=%v", v["ok"]))
 		if v["ok"] != true {
 			return 1
@@ -468,7 +468,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, screenshotsHuman(v))
 		return 0
 	case "qa":
@@ -562,7 +562,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, qaPlanHuman(v))
 		return 0
 	case "run":
@@ -571,7 +571,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, qaRunHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -620,7 +620,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, qaRecordHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -666,7 +666,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, qaFinalHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -679,7 +679,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		attachTargetRef(v, targetRef)
+		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, fmt.Sprintf("qa report: %s", v["path"]))
 		return 0
 	default:
