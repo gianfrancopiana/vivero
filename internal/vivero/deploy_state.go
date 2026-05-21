@@ -178,10 +178,13 @@ func (a *App) findSuccessfulReleaseForPlan(plan DeployPlan) (ReleaseRecord, bool
 		}
 		return ReleaseRecord{}, false, err
 	}
-	if release.PlanID != plan.ID || !releaseStatusReapplySafe(release) {
+	if release.PlanID != plan.ID {
 		return ReleaseRecord{}, false, nil
 	}
-	return release, true, nil
+	if releaseStatusReapplySafe(release) {
+		return release, true, nil
+	}
+	return release, false, fmt.Errorf("deploy plan %s already has current release %s in unsafe status %s; inspect release events/logs or roll back before applying again", plan.ID, release.ID, release.Status)
 }
 
 func releaseStatusReapplySafe(release ReleaseRecord) bool {
@@ -220,7 +223,7 @@ func (a *App) saveDeployArtifact(releaseID, name, kind, content string) (DeployA
 	if err := ensureDir(dir); err != nil {
 		return artifact, err
 	}
-	path := filepath.Join(dir, statePathComponent(name)+".log")
+	path := filepath.Join(dir, newDeployID(statePathComponent(name))+".log")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return artifact, err
 	}

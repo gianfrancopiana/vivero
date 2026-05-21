@@ -16,6 +16,7 @@ func (p *DeployPlan) configureBlueGreenDeploy(environment string, cfg BlueGreenD
 	smokeCommand := strings.TrimSpace(cfg.SmokeCommand)
 	promoteCommand := strings.TrimSpace(cfg.PromoteCommand)
 	p.StatusCommand = strings.TrimSpace(cfg.StatusCommand)
+	p.SmokeCommand = smokeCommand
 	p.RollbackCommand = strings.TrimSpace(cfg.RollbackCommand)
 
 	if activeSlotCommand == "" {

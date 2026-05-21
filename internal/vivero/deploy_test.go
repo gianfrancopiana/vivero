@@ -102,6 +102,203 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	}
 }
 
+func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeReleaseEvidenceDeployFixture(t, false)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	plan := decodeJSONMap(t, stdout)["plan"].(map[string]any)
+	if plan["smokeCommand"] == "" {
+		t.Fatalf("deploy plan should expose command-strategy smoke gate: %#v", plan)
+	}
+
+	planID := plan["id"].(string)
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	applyRelease := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	releaseID := applyRelease["id"].(string)
+	if applyRelease["status"] != "applied" || !strings.Contains(stdout, "smoke-output") {
+		t.Fatalf("deploy apply should run smoke before marking release applied: %#v stdout=%s", applyRelease, stdout)
+	}
+	if smokeBytes, err := os.ReadFile(filepath.Join(projectDir, "deploy-smoke.txt")); err != nil || !strings.Contains(string(smokeBytes), releaseID) {
+		t.Fatalf("deploy apply should write smoke proof, err=%v proof=%s", err, smokeBytes)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "events", "release:"+releaseID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("release events exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	eventsPayload := decodeJSONMap(t, stdout)
+	if eventsPayload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || !strings.Contains(stdout, "\"action\": \"apply\"") || !strings.Contains(stdout, "\"action\": \"smoke\"") {
+		t.Fatalf("release events should expose typed release target and audit trail: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "logs", "release:"+releaseID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("release logs exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "apply-output") || !strings.Contains(stdout, "smoke-output") {
+		t.Fatalf("release logs should include apply and smoke command output: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "smoke", "demo-evidence", "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("release smoke exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	smokePayload := decodeJSONMap(t, stdout)
+	if smokePayload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || smokePayload["smoke"].(map[string]any)["ok"] != true || !strings.Contains(stdout, "smoke-output") {
+		t.Fatalf("release smoke should rerun the configured smoke gate against current release: %s", stdout)
+	}
+}
+
+func TestCommandDeploySmokeFailureDoesNotBecomeCurrentRelease(t *testing.T) {
+	a := &App{Home: t.TempDir()}
+	projectDir := writeReleaseEvidenceDeployFixture(t, true)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.ApplyDeployPlan(plan.ID)
+	if err == nil || !strings.Contains(err.Error(), "deploy smoke failed") {
+		t.Fatalf("expected smoke-gated apply failure, release=%#v err=%v", release, err)
+	}
+	if release.Status != "smoke_failed" || !hasAudit(release.Audit, "smoke", "failed") {
+		t.Fatalf("failed smoke should be audited and mark the candidate release failed: %#v", release)
+	}
+	if len(release.Artifacts) == 0 {
+		t.Fatalf("failed smoke should store command output artifacts: %#v", release)
+	}
+	_, err = a.CurrentRelease("demo-evidence", "production")
+	if err == nil || !strings.Contains(err.Error(), "no current release") {
+		t.Fatalf("smoke-failed deploy must not become current release, got %v", err)
+	}
+}
+
+func TestRunReleaseSmokeFailureReturnsEvidenceJSON(t *testing.T) {
+	home := t.TempDir()
+	a := &App{Home: home}
+	projectDir := writeReleaseEvidenceDeployFixture(t, false)
+
+	plan, err := a.DeployPlan(projectDir, "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.ApplyDeployPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.SmokeCommand = "printf smoke-failed; exit 12"
+	if err := a.saveDeployPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "release", "smoke", "demo-evidence", "--environment", "production", "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("release smoke failure should return evidence JSON on stdout with exit 1, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	if payload["targetRef"].(map[string]any)["ref"] != "release:"+release.ID {
+		t.Fatalf("unexpected release target ref: %s", stdout)
+	}
+	smoke := payload["smoke"].(map[string]any)
+	if smoke["ok"] != false || !strings.Contains(smoke["output"].(string), "smoke-failed") || smoke["error"] == "" {
+		t.Fatalf("release smoke failure should include output and error evidence: %s", stdout)
+	}
+	updated := payload["release"].(map[string]any)
+	if updated["status"] != "smoke_failed" || !strings.Contains(stdout, "\"action\": \"smoke\"") {
+		t.Fatalf("release smoke failure should update release evidence: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "unsafe status smoke_failed") {
+		t.Fatalf("reapplying a plan with unsafe current release should be blocked, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	countBytes, err := os.ReadFile(filepath.Join(projectDir, "deploy-count.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(countBytes)) != "1" {
+		t.Fatalf("blocked reapply should not rerun apply command, count=%s", countBytes)
+	}
+
+	failedSmokePaths := artifactPathsByName(updated, "smoke")
+	plan.SmokeCommand = "printf smoke-recovered"
+	if err := a.saveDeployPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "smoke", "demo-evidence", "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("release smoke recovery exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload = decodeJSONMap(t, stdout)
+	recovered := payload["release"].(map[string]any)
+	if recovered["status"] != "smoke_ok" || payload["smoke"].(map[string]any)["ok"] != true || !strings.Contains(stdout, "smoke-recovered") {
+		t.Fatalf("successful smoke rerun should recover smoke_failed current release: %s", stdout)
+	}
+	recoveredSmokePaths := artifactPathsByName(recovered, "smoke")
+	if len(recoveredSmokePaths) <= len(failedSmokePaths) {
+		t.Fatalf("smoke rerun should append a new artifact path, before=%v after=%v", failedSmokePaths, recoveredSmokePaths)
+	}
+	seenPaths := map[string]bool{}
+	for _, path := range recoveredSmokePaths {
+		if seenPaths[path] {
+			t.Fatalf("smoke artifact paths must be unique across reruns: %v", recoveredSmokePaths)
+		}
+		seenPaths[path] = true
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("reapplying recovered release should return existing release, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	reapplied := decodeJSONMap(t, stdout)["release"].(map[string]any)
+	if reapplied["id"] != release.ID {
+		t.Fatalf("reapply should return existing release after smoke recovery: %s", stdout)
+	}
+	countBytes, err = os.ReadFile(filepath.Join(projectDir, "deploy-count.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(countBytes)) != "1" {
+		t.Fatalf("reapplied should not rerun apply command, count=%s", countBytes)
+	}
+}
+
+func TestRunReleaseSmokeMissingCommandReturnsActionableJSON(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeDeployFixture(t, true)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	releaseID := decodeJSONMap(t, stdout)["release"].(map[string]any)["id"].(string)
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "smoke", "demo", "--environment", "production", "--json", "--no-input")
+	if code != 1 || stderr != "" {
+		t.Fatalf("missing release smoke command should return JSON stdout and exit 1, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	if payload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID {
+		t.Fatalf("unexpected release target ref: %s", stdout)
+	}
+	smoke := payload["smoke"].(map[string]any)
+	if smoke["ok"] != false || !strings.Contains(smoke["error"].(string), "no smoke command") {
+		t.Fatalf("missing release smoke command should expose actionable smoke error: %s", stdout)
+	}
+}
+
 func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	home := t.TempDir()
 	projectDir := writeBlueGreenDeployFixture(t, false)
@@ -545,6 +742,38 @@ func hasAudit(events []DeployAuditEvent, action, status string) bool {
 	return false
 }
 
+func writeReleaseEvidenceDeployFixture(t *testing.T, failingSmoke bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	smokeCommand := "printf smoke-output:$VIVERO_RELEASE_ID; printf smoke:$VIVERO_RELEASE_ID > deploy-smoke.txt"
+	if failingSmoke {
+		smokeCommand = "printf smoke-output:$VIVERO_RELEASE_ID; printf smoke:$VIVERO_RELEASE_ID > deploy-smoke.txt; exit 12"
+	}
+	config := "project:\n" +
+		"  name: demo-evidence\n" +
+		"services:\n" +
+		"  web:\n" +
+		"    image: registry.example.com/demo-evidence@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n" +
+		"    port: 3000\n" +
+		"    health:\n" +
+		"      path: /\n" +
+		"      timeout: 30s\n" +
+		"    resources:\n" +
+		"      cpus: '1'\n" +
+		"      memory: 512m\n" +
+		"deploy:\n" +
+		"  environments:\n" +
+		"    production:\n" +
+		"      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf \"%s\" \"$count\" > deploy-count.txt; printf apply-output; printf applied:$VIVERO_DEPLOY_PLAN_ID:$VIVERO_RELEASE_ID > deploy-applied.txt'\n" +
+		"      statusCommand: 'printf applied'\n" +
+		"      smokeCommand: '" + smokeCommand + "'\n" +
+		"      rollbackCommand: 'printf rollback:$VIVERO_ROLLBACK_RELEASE_ID > deploy-rollback.txt'\n"
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func writeDeployFixture(t *testing.T, immutable bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -643,4 +872,18 @@ func phaseRecordNames(phases []any) []string {
 		names = append(names, phase["name"].(string)+":"+phase["status"].(string))
 	}
 	return names
+}
+
+func artifactPathsByName(release map[string]any, name string) []string {
+	artifacts, _ := release["artifacts"].([]any)
+	paths := make([]string, 0, len(artifacts))
+	for _, raw := range artifacts {
+		artifact := raw.(map[string]any)
+		if artifact["name"] != name {
+			continue
+		}
+		path, _ := artifact["path"].(string)
+		paths = append(paths, path)
+	}
+	return paths
 }

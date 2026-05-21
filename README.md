@@ -138,20 +138,21 @@ The bundled skill tells coding agents how to use Vivero. It stays generic; proje
 
 ## Production and release
 
-Vivero stays preview-first, but it now has an explicit production/release command surface for app-owned deploy logic. `vivero doctor production` is the read-only gate: it blocks mutable preview inputs, quick tunnels, and other risky config before a deploy plan can be applied.
+Vivero has a separate deploy/release lane for app-owned production logic. `vivero doctor production` is the read-only gate: it blocks mutable preview inputs, quick tunnels, and other risky config before a deploy plan can be applied.
 
-Configure deploy commands in `vivero.yml` and keep the implementation in the app repo. The default `command` strategy delegates the deploy to one apply command:
+Configure deploy commands in `vivero.yml` and keep the implementation in the app repo. The default `command` strategy delegates to app-owned commands, with an optional smoke gate that must pass before the release becomes current:
 
 ```yaml
 deploy:
   environments:
     production:
       applyCommand: ./script/deploy production
+      smokeCommand: ./script/deploy-smoke production
       statusCommand: ./script/deploy-status production
       rollbackCommand: ./script/deploy-rollback production
 ```
 
-For first-class blue/green deploys, Vivero plans the active and target slots, applies the release to the inactive slot, runs a smoke gate, then promotes traffic. `smokeCommand` is required; Vivero stops before `promoteCommand` if smoke fails.
+For first-class blue/green deploys, Vivero plans the active and target slots, applies the release to the inactive slot, runs a smoke gate, then promotes traffic. `blueGreen.smokeCommand` is required; Vivero stops before `promoteCommand` if smoke fails.
 
 ```yaml
 deploy:
@@ -177,8 +178,13 @@ vivero doctor production --project <path> --json --no-input
 vivero deploy plan <path> --environment production --json --no-input
 vivero deploy apply <plan-id> --json --no-input
 vivero release status <project> --environment production --json --no-input
+vivero release events release:<release-id> --json --no-input
+vivero release logs release:<release-id> --json --no-input
+vivero release smoke <project> --environment production --json --no-input
 vivero release rollback <project> <release-id> --environment production --json --no-input
 ```
+
+Release records keep audit events and command-output artifacts for apply, smoke, status, phase, and rollback debugging. Target release-scoped evidence with `release:<release-id>`; target the current release by passing the project name plus `--environment`.
 
 Before release-facing changes, run the local confidence ladder:
 

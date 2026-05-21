@@ -55,7 +55,8 @@ services:
 deploy:
   environments:
     production:
-      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf "%s" "$count" > deploy-count.txt; printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt'
+      applyCommand: 'count=0; test -f deploy-count.txt && count=$(cat deploy-count.txt); count=$((count+1)); printf "%s" "$count" > deploy-count.txt; printf "applied:%s:%s\n" "$VIVERO_DEPLOY_PLAN_ID" "$VIVERO_RELEASE_ID" > deploy-applied.txt; printf apply-output'
+      smokeCommand: 'printf "smoked:%s\n" "$VIVERO_RELEASE_ID" > deploy-smoke.txt; printf smoke-output'
       statusCommand: 'printf "live-status:%s\n" "$VIVERO_RELEASE_ID" > deploy-status.txt; printf live-status'
       rollbackCommand: 'printf "rollback:%s\n" "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt'
 YAML
@@ -133,6 +134,7 @@ assert plan.get("verdict") == "ready", plan
 assert plan.get("project") == "deploy-ready", plan
 assert plan.get("environment") == "production", plan
 assert plan.get("applyCommand"), plan
+assert plan.get("smokeCommand"), plan
 assert plan.get("rollbackCommand"), plan
 changes = {change.get("kind") for change in plan.get("changes", [])}
 assert {"service-image", "deploy-strategy"}.issubset(changes), (changes, plan)
@@ -144,23 +146,66 @@ PY
 )"
 
 run_json apply bin/vivero deploy apply "$plan_id" --json --no-input
-release_id="$(python3 - "$out/apply.json" "$ready_project/deploy-applied.txt" "$plan_id" <<'PY'
+release_id="$(python3 - "$out/apply.json" "$ready_project/deploy-applied.txt" "$ready_project/deploy-smoke.txt" "$plan_id" <<'PY'
 import json
 import pathlib
 import sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 release = payload.get("release") or {}
-proof = pathlib.Path(sys.argv[2]).read_text()
-plan_id = sys.argv[3]
+apply_proof = pathlib.Path(sys.argv[2]).read_text()
+smoke_proof = pathlib.Path(sys.argv[3]).read_text()
+plan_id = sys.argv[4]
 assert release.get("stateVersion") == 1, release
 assert release.get("status") == "applied", release
 assert release.get("planId") == plan_id, release
 assert any(event.get("action") == "apply" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
-assert plan_id in proof, proof
-assert release.get("id") in proof, (release, proof)
+assert any(event.get("action") == "smoke" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
+assert "smoke-output" in release.get("output", ""), release
+assert plan_id in apply_proof, apply_proof
+assert release.get("id") in apply_proof, (release, apply_proof)
+assert release.get("id") in smoke_proof, (release, smoke_proof)
 print(release["id"])
 PY
 )"
+
+run_json release-events bin/vivero release events "release:$release_id" --json --no-input
+python3 - "$out/release-events.json" "$release_id" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release_id = sys.argv[2]
+assert payload.get("targetRef", {}).get("ref") == f"release:{release_id}", payload
+events = payload.get("events") or []
+actions = {(event.get("action"), event.get("status")) for event in events}
+assert ("apply", "succeeded") in actions, actions
+assert ("smoke", "succeeded") in actions, actions
+PY
+
+run_json release-logs bin/vivero release logs "release:$release_id" --json --no-input
+python3 - "$out/release-logs.json" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+logs = payload.get("logs") or []
+content = "\n".join(log.get("content", "") for log in logs)
+assert "apply-output" in content, content
+assert "smoke-output" in content, content
+PY
+
+run_json release-smoke bin/vivero release smoke deploy-ready --environment production --json --no-input
+python3 - "$out/release-smoke.json" "$release_id" "$ready_project/deploy-smoke.txt" <<'PY'
+import json
+import pathlib
+import sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+release_id = sys.argv[2]
+proof = pathlib.Path(sys.argv[3]).read_text()
+assert payload.get("targetRef", {}).get("ref") == f"release:{release_id}", payload
+assert payload.get("smoke", {}).get("ok") is True, payload
+assert release_id in proof, proof
+PY
 
 run_json apply-repeat bin/vivero deploy apply "$plan_id" --json --no-input
 python3 - "$out/apply-repeat.json" "$ready_project/deploy-count.txt" "$release_id" <<'PY'

@@ -91,6 +91,7 @@ type DeployEnvironmentConfig struct {
 	Strategy        string                `yaml:"strategy" json:"strategy,omitempty"`
 	ApplyCommand    string                `yaml:"applyCommand" json:"applyCommand,omitempty"`
 	StatusCommand   string                `yaml:"statusCommand" json:"statusCommand,omitempty"`
+	SmokeCommand    string                `yaml:"smokeCommand" json:"smokeCommand,omitempty"`
 	RollbackCommand string                `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
 	BlueGreen       BlueGreenDeployConfig `yaml:"blueGreen" json:"blueGreen,omitempty"`
 }

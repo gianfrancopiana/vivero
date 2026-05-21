@@ -5,7 +5,7 @@ vivero_cli: 0.1.0
 schema: 1
 license: MIT
 description: >
-  Use the `vivero` CLI to create, inspect, iterate on, verify, QA, and tear down local preview environments. Trigger when a task needs a running app preview, a URL that has passed health checks, Docker-compatible container exec/logs/screenshots, seed-backed app state, live source iteration through a Git worktree, or project-specific browser QA context. Do not trigger for general issue or PR management unless a running preview is also needed; Vivero owns the preview runtime, not PR, CI, or chat workflow.
+  Use the `vivero` CLI to create, inspect, iterate on, verify, QA, and tear down local preview environments, or to plan/apply app-owned deploys and inspect release evidence. Trigger when a task needs a running app preview, a URL that has passed health checks, Docker-compatible container exec/logs/screenshots, seed-backed app state, live source iteration through a Git worktree, project-specific browser QA context, or deploy/release plan/status/events/logs/smoke/rollback. Do not trigger for general issue or PR management unless a running preview or release operation is also needed; Vivero owns app runtime/release orchestration, not PR, CI, or chat workflow.
 ---
 
 # Vivero CLI
@@ -28,7 +28,7 @@ Vivero:
 
 Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are intentionally unsupported.
 
-Vivero is preview-first. Production operations must use the separate deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production. For `strategy: blue-green`, Vivero models slots and enforces prepare → smoke → promote before recording the new live slot.
+Vivero has separate preview and deploy/release lanes. Production operations must use the deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production. For `strategy: blue-green`, Vivero models slots and enforces prepare → smoke → promote before recording the new live slot.
 
 ## First checks
 
@@ -49,12 +49,13 @@ Use project inspection to learn the available sources, services, profiles, healt
 
 ## Production deploy strategy notes
 
-- Omitted `strategy` means the default app-owned command strategy: Vivero runs `applyCommand`, optional `statusCommand`, and `rollbackCommand` from `deploy.environments.<env>`.
+- Omitted `strategy` means the default app-owned command strategy: Vivero runs `applyCommand`, optional `smokeCommand`, optional `statusCommand`, and `rollbackCommand` from `deploy.environments.<env>`. If `smokeCommand` is set, deploy apply must pass smoke before the release becomes current.
 - `strategy: blue-green` expects `deploy.environments.<env>.blueGreen` with exactly two slots, `activeSlotCommand`, `prepareCommand`, required `smokeCommand`, `promoteCommand`, optional `statusCommand`, and `rollbackCommand`.
 - Blue/green apply runs `prepareCommand`, then `smokeCommand`, then `promoteCommand`. If smoke fails, Vivero exits before promote and records only release history, not a new current release.
+- Use `release events release:<id>` and `release logs release:<id>` for release-scoped debugging evidence; use `release smoke <project>` to rerun the configured current-release smoke gate.
 - Blue/green commands receive `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
-- Use `release status` after apply and `release rollback <project> <release-id>` for slot-aware rollback; do not manually edit Vivero release state.
-- Deploy/release state is versioned and audited. Treat `planId`, `releaseId`, `stateVersion`, and audit events as the durable contract for recovery/debugging.
+- Use `release status` after apply and `release rollback <project> <release-id>` for status checks and slot-aware rollback; do not manually edit Vivero release state.
+- Deploy/release state is versioned and audited. Treat `planId`, `releaseId`, `stateVersion`, audit events, and command-output artifacts as the durable contract for recovery/debugging.
 - Production apply/rollback is guarded by project/environment locks and idempotency checks. If an operation is already applied or rolled back, prefer re-reading status/history over rerunning app-owned commands manually.
 
 ## Repo quality gates

@@ -54,7 +54,7 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 
 func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	if len(args) == 0 {
-		return errOut(stderr, jsonOut, missingArgError("release", "status|rollback"))
+		return errOut(stderr, jsonOut, missingArgError("release", "status|events|logs|smoke|rollback"))
 	}
 	switch args[0] {
 	case "status":
@@ -68,6 +68,50 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 			return errOut(stderr, jsonOut, err)
 		}
 		output(stdout, jsonOut, map[string]any{"release": release, "status": release.Status}, releaseHuman(release))
+		return 0
+	case "events":
+		pos := positionalArgs(args[1:])
+		if len(pos) == 0 {
+			return errOut(stderr, jsonOut, missingArgError("release events", "project or release:<id>"))
+		}
+		environment, _ := flagValue(args[1:], "--environment")
+		release, targetRef, err := a.resolveReleaseTarget(pos[0], environment)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, map[string]any{"release": release, "events": release.Audit, "targetRef": targetRef}, releaseEventsHuman(release))
+		return 0
+	case "logs":
+		pos := positionalArgs(args[1:])
+		if len(pos) == 0 {
+			return errOut(stderr, jsonOut, missingArgError("release logs", "project or release:<id>"))
+		}
+		environment, _ := flagValue(args[1:], "--environment")
+		release, targetRef, err := a.resolveReleaseTarget(pos[0], environment)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		logs := releaseLogs(release)
+		output(stdout, jsonOut, map[string]any{"release": release, "logs": logs, "targetRef": targetRef}, releaseLogsHuman(release, logs))
+		return 0
+	case "smoke":
+		pos := positionalArgs(args[1:])
+		if len(pos) == 0 {
+			return errOut(stderr, jsonOut, missingArgError("release smoke", "project or release:<id>"))
+		}
+		environment, _ := flagValue(args[1:], "--environment")
+		release, targetRef, err := a.resolveReleaseTarget(pos[0], environment)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		release, smoke, err := a.SmokeRelease(release)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, map[string]any{"release": release, "smoke": smoke, "targetRef": targetRef}, releaseSmokeHuman(release, smoke))
+		if !smoke.OK {
+			return 1
+		}
 		return 0
 	case "rollback":
 		pos := positionalArgs(args[1:])
@@ -119,4 +163,20 @@ func releaseHuman(release ReleaseRecord) string {
 		return fmt.Sprintf("release %s %s rollbackOf=%s", release.ID, release.Status, release.RollbackOf)
 	}
 	return fmt.Sprintf("release %s %s", release.ID, release.Status)
+}
+
+func releaseEventsHuman(release ReleaseRecord) string {
+	return fmt.Sprintf("release %s events=%d", release.ID, len(release.Audit))
+}
+
+func releaseLogsHuman(release ReleaseRecord, logs []ReleaseLogEntry) string {
+	return fmt.Sprintf("release %s logs=%d", release.ID, len(logs))
+}
+
+func releaseSmokeHuman(release ReleaseRecord, smoke ReleaseSmokeResult) string {
+	status := "failed"
+	if smoke.OK {
+		status = "ok"
+	}
+	return fmt.Sprintf("release %s smoke %s", release.ID, status)
 }
