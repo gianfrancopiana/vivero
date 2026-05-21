@@ -358,7 +358,15 @@ Never attempt to print secret values. `vivero secrets list` returns keys only. P
 
 ## Verification gates
 
-Before claiming a Vivero runtime, evidence, skill, or release change is ready, run the focused gate for the surface touched and then the repo gate:
+Before claiming a Vivero runtime, evidence, skill, or release change is ready, run the focused gate for the surface touched and then the repo gate.
+
+For release-facing changes, use the deterministic certification target:
+
+```sh
+make certify
+```
+
+Focused surface gates:
 
 ```sh
 make verify
@@ -379,4 +387,4 @@ vivero skill doctor --json --no-input
 vivero skill install --target /tmp/vivero-skill --force --json --no-input
 ```
 
-`make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples.
+`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples. After a tag publishes, use `VERSION=vX.Y.Z make release-postflight` to verify release metadata, checksums, attestations, the installer, and the Homebrew tap formula.

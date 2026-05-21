@@ -178,16 +178,18 @@ The bundled skill tells coding agents how to use Vivero. It stays generic; proje
 Run the strongest local non-live ladder before release-facing changes:
 
 ```sh
-make audit
-make example-e2e
-make integration-fixtures
-make nasty-integration-fixtures
-make dogfood-configs
-make deploy-fixtures
-make release-smoke
+make certify
 ```
 
-CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. A scheduled/manual live smoke covers Docker + Cloudflare quick tunnels + Playwright evidence.
+`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. CI runs the same surfaces as split jobs. A scheduled/manual live smoke covers Docker + Cloudflare quick tunnels + Playwright evidence.
+
+After a tag publishes, run the install trust postflight against the exact release:
+
+```sh
+GH_CLI=gh VERSION=v0.1.1 make release-postflight
+```
+
+That verifies release metadata, required assets, checksums, GitHub artifact attestations, the checksum-verifying installer, and the Homebrew tap formula.
 
 ## Limits
 
