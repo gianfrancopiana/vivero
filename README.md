@@ -116,6 +116,14 @@ Add:
 
 Routes, selectors, QA flows, and restart commands belong in project config, not in the generic skill or Vivero core.
 
+## Local state doctor
+
+```sh
+vivero doctor --json --no-input
+```
+
+The default doctor checks local Vivero state in addition to installed tools. It fails with actionable findings when active previews point at missing project/source paths, dead PIDs, or missing containers, and suggests `vivero down <preview> --discard --json --no-input` as the safe reconciliation path before rerunning `vivero up`.
+
 ## Bundled skill
 
 ```sh

@@ -230,7 +230,11 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 	if mode == "discard" && safeDirtyErr == nil {
 		project, projectErr := a.getProject(p.Project)
 		if projectErr != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Sprintf("load project %s for volume cleanup: %v", p.Project, projectErr))
+			if strings.HasPrefix(projectErr.Error(), "project not found:") {
+				a.recordEvent(id, "warning", "dependency_volumes.skipped", "project record missing; skipped dependency volume cleanup", "", map[string]string{"project": p.Project})
+			} else {
+				cleanupErrs = append(cleanupErrs, fmt.Sprintf("load project %s for volume cleanup: %v", p.Project, projectErr))
+			}
 		} else if volumeErr := a.removePreviewDependencyVolumes(id, project.Config); volumeErr != nil {
 			cleanupErrs = append(cleanupErrs, volumeErr.Error())
 		}

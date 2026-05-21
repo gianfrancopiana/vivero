@@ -149,7 +149,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, v, "doctor ok")
+		output(stdout, jsonOut, v, doctorHuman(v))
+		if ok, _ := v["ok"].(bool); !ok {
+			return 1
+		}
 		return 0
 	case "deploy":
 		return a.runDeploy(rest, stdout, stderr, jsonOut)
@@ -755,11 +758,13 @@ func (a *App) Doctor() (map[string]any, error) {
 		_, err := execLook(bin)
 		checks[bin] = err == nil
 	}
-	projects, _ := a.listProjects()
-	previews, _ := a.listPreviews()
-	checks["projects"] = len(projects)
-	checks["previews"] = len(previews)
-	return map[string]any{"ok": true, "version": Version, "checks": checks}, nil
+	localState, err := a.LocalStateDoctor()
+	if err != nil {
+		return nil, err
+	}
+	checks["projects"] = localState.Projects
+	checks["previews"] = localState.Previews
+	return map[string]any{"ok": localState.OK, "version": Version, "checks": checks, "localState": localState}, nil
 }
 
 func execLook(bin string) (string, error) { return exec.LookPath(bin) }

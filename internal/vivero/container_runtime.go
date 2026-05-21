@@ -9,6 +9,7 @@ type containerRuntime interface {
 	RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error)
 	PublishedPorts(containerID string, ports []ServicePort) ([]PreviewPort, error)
 	WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error
+	ContainerExists(containerID string) bool
 	RemoveContainer(containerID string) (missing bool, output string, err error)
 	RemoveContainersForPreview(previewID string) error
 	RemoveNetwork(previewID string) error
@@ -49,6 +50,10 @@ func (dockerContainerRuntime) PublishedPorts(containerID string, ports []Service
 
 func (dockerContainerRuntime) WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error {
 	return waitDockerHealthCommand(containerID, h, timeout)
+}
+
+func (dockerContainerRuntime) ContainerExists(containerID string) bool {
+	return dockerContainerExists(containerID)
 }
 
 func (dockerContainerRuntime) RemoveContainer(containerID string) (bool, string, error) {

@@ -31,6 +31,7 @@ type fakeContainerRuntime struct {
 	ensuredVolumes    []string
 	removedVolumes    []string
 	copiedVolumes     []string
+	containers        map[string]bool
 	volumes           map[string]bool
 
 	startErr               error
@@ -59,8 +60,16 @@ func (f *fakeContainerRuntime) StartService(home, projectName, previewID, servic
 		return "", f.startErr
 	}
 	if f.containerID == "" {
+		if f.containers == nil {
+			f.containers = map[string]bool{}
+		}
+		f.containers["fake-container"] = true
 		return "fake-container", nil
 	}
+	if f.containers == nil {
+		f.containers = map[string]bool{}
+	}
+	f.containers[f.containerID] = true
 	return f.containerID, nil
 }
 
@@ -82,8 +91,15 @@ func (f *fakeContainerRuntime) WaitHealthCommand(containerID string, h HealthCon
 	return f.healthErr
 }
 
+func (f *fakeContainerRuntime) ContainerExists(containerID string) bool {
+	return f.containers != nil && f.containers[containerID]
+}
+
 func (f *fakeContainerRuntime) RemoveContainer(containerID string) (bool, string, error) {
 	f.removedContainers = append(f.removedContainers, containerID)
+	if f.containers != nil {
+		delete(f.containers, containerID)
+	}
 	return f.removeContainerMissing, f.removeContainerOutput, f.removeContainerErr
 }
 
