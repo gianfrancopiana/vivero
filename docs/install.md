@@ -40,9 +40,15 @@ vivero version --json --no-input
 
 On macOS, use `shasum -a 256` if `sha256sum` is unavailable.
 
-## Homebrew formula asset
+## Homebrew tap
 
-Each release uploads a generated `vivero.rb` formula asset with per-platform archive checksums.
+```sh
+brew install gianfrancopiana/tap/vivero
+```
+
+Homebrew maps `gianfrancopiana/tap` to the public GitHub repository `gianfrancopiana/homebrew-tap` and reads `Formula/vivero.rb` from that repo.
+
+The Vivero release workflow also uploads the generated `vivero.rb` formula as a release asset. That asset is useful for inspection or manual fallback installs:
 
 ```sh
 version=v0.1.0
@@ -50,7 +56,7 @@ curl -fsSLO "https://github.com/gianfrancopiana/vivero/releases/download/${versi
 brew install ./vivero.rb
 ```
 
-This keeps Homebrew installable without requiring a separate tap repo. If a tap is created later, this formula is the generated source for it.
+The tap is the normal user-facing install path; the release asset is the generated source of truth/fallback.
 
 ## Verify GitHub artifact attestations
 
