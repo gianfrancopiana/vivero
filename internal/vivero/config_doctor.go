@@ -17,21 +17,38 @@ type ConfigDoctorReport struct {
 }
 
 type ConfigDoctorFinding struct {
-	Severity string `json:"severity"`
-	Code     string `json:"code"`
-	Path     string `json:"path,omitempty"`
-	Message  string `json:"message"`
+	Severity   string `json:"severity"`
+	Code       string `json:"code"`
+	Path       string `json:"path,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Column     int    `json:"column,omitempty"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion,omitempty"`
+	Docs       string `json:"docs,omitempty"`
 }
 
 func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 	if strings.TrimSpace(path) == "" {
 		return ConfigDoctorReport{}, fmt.Errorf("doctor config requires <path>")
 	}
-	root, cfg, err := loadProjectConfig(path)
+	root, configPath, err := resolveProjectConfigPath(path)
 	report := ConfigDoctorReport{OK: true, Path: root, Findings: []ConfigDoctorFinding{}}
 	if root == "" {
 		report.Path = expandPath(path)
 	}
+	if err != nil {
+		report.addFinding("error", "config-load", "", err.Error())
+		report.finish()
+		return report, nil
+	}
+	node, err := readProjectConfigNode(configPath)
+	if err != nil {
+		report.addFinding("error", "config-load", "", err.Error())
+		report.finish()
+		return report, nil
+	}
+	report.Findings = append(report.Findings, configSchemaFindings(&node)...)
+	cfg, err := decodeProjectConfigNode(configPath, &node)
 	if err != nil {
 		report.addFinding("error", "config-load", "", err.Error())
 		report.finish()
@@ -74,13 +91,32 @@ func configDoctorHuman(report ConfigDoctorReport) string {
 	}
 	b.WriteString(fmt.Sprintf("config doctor %s: %s\n", status, report.Path))
 	for _, finding := range report.Findings {
-		if finding.Path != "" {
-			b.WriteString(fmt.Sprintf("%s %s %s: %s\n", finding.Severity, finding.Code, finding.Path, finding.Message))
+		location := configDoctorFindingLocation(finding)
+		if location != "" {
+			b.WriteString(fmt.Sprintf("%s %s %s: %s\n", finding.Severity, finding.Code, location, finding.Message))
 		} else {
 			b.WriteString(fmt.Sprintf("%s %s: %s\n", finding.Severity, finding.Code, finding.Message))
 		}
+		if finding.Suggestion != "" {
+			b.WriteString(fmt.Sprintf("  suggestion: %s\n", finding.Suggestion))
+		}
 	}
 	return b.String()
+}
+
+func configDoctorFindingLocation(finding ConfigDoctorFinding) string {
+	location := finding.Path
+	if finding.Line > 0 {
+		if location == "" {
+			location = fmt.Sprintf("line %d", finding.Line)
+		} else {
+			location = fmt.Sprintf("%s:%d", location, finding.Line)
+		}
+		if finding.Column > 0 {
+			location = fmt.Sprintf("%s:%d", location, finding.Column)
+		}
+	}
+	return location
 }
 
 func configDoctorCheckSources(report *ConfigDoctorReport, cfg ProjectConfig) {

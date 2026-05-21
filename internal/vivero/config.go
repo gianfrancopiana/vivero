@@ -10,10 +10,29 @@ import (
 )
 
 func loadProjectConfig(path string) (string, ProjectConfig, error) {
+	root, configPath, err := resolveProjectConfigPath(path)
+	if err != nil {
+		return "", ProjectConfig{}, err
+	}
+	node, err := readProjectConfigNode(configPath)
+	if err != nil {
+		return "", ProjectConfig{}, err
+	}
+	if finding, ok := firstUnsupportedConfigFinding(&node); ok {
+		return "", ProjectConfig{}, fmt.Errorf("%s %s: %s", configPath, finding.Path, finding.Message)
+	}
+	cfg, err := decodeProjectConfigNode(configPath, &node)
+	if err != nil {
+		return "", ProjectConfig{}, err
+	}
+	return root, cfg, nil
+}
+
+func resolveProjectConfigPath(path string) (string, string, error) {
 	path = expandPath(path)
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", ProjectConfig{}, err
+		return "", "", err
 	}
 	configPath := path
 	root := filepath.Dir(path)
@@ -21,23 +40,28 @@ func loadProjectConfig(path string) (string, ProjectConfig, error) {
 		root = path
 		configPath = filepath.Join(path, "vivero.yml")
 	}
+	return root, configPath, nil
+}
+
+func readProjectConfigNode(configPath string) (yaml.Node, error) {
 	b, err := os.ReadFile(configPath)
 	if err != nil {
-		return "", ProjectConfig{}, err
+		return yaml.Node{}, err
 	}
 	var node yaml.Node
 	if err := yaml.Unmarshal(b, &node); err != nil {
-		return "", ProjectConfig{}, err
+		return yaml.Node{}, err
 	}
-	if err := rejectConfigKey(configPath, &node, "dockerfileInline"); err != nil {
-		return "", ProjectConfig{}, err
-	}
+	return node, nil
+}
+
+func decodeProjectConfigNode(configPath string, node *yaml.Node) (ProjectConfig, error) {
 	var cfg ProjectConfig
 	if err := node.Decode(&cfg); err != nil {
-		return "", ProjectConfig{}, err
+		return ProjectConfig{}, err
 	}
 	if cfg.Project.Name == "" {
-		return "", ProjectConfig{}, fmt.Errorf("%s missing project.name", configPath)
+		return ProjectConfig{}, fmt.Errorf("%s missing project.name", configPath)
 	}
 	if cfg.Sources == nil {
 		cfg.Sources = map[string]SourceConfig{}
@@ -58,34 +82,9 @@ func loadProjectConfig(path string) (string, ProjectConfig, error) {
 		cfg.Profiles = map[string]ProfileConfig{}
 	}
 	if err := validateProjectConfig(configPath, cfg); err != nil {
-		return "", ProjectConfig{}, err
+		return ProjectConfig{}, err
 	}
-	return root, cfg, nil
-}
-
-func rejectConfigKey(configPath string, node *yaml.Node, key string) error {
-	if node == nil {
-		return nil
-	}
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			k := node.Content[i]
-			v := node.Content[i+1]
-			if k.Value == key {
-				return fmt.Errorf("%s uses unsupported %s; keep Dockerfiles in the app repo and reference build.dockerfile or prebuild/image instead", configPath, key)
-			}
-			if err := rejectConfigKey(configPath, v, key); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	for _, child := range node.Content {
-		if err := rejectConfigKey(configPath, child, key); err != nil {
-			return err
-		}
-	}
-	return nil
+	return cfg, nil
 }
 
 func validateProjectConfig(configPath string, cfg ProjectConfig) error {

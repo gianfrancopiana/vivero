@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -151,4 +152,93 @@ func TestRunDoctorConfigJSONExitCode(t *testing.T) {
 	if payload.Report.OK || payload.Report.Errors != 1 {
 		t.Fatalf("unexpected report: %#v", payload.Report)
 	}
+}
+
+func TestConfigDoctorReportsUnsupportedConfigKeyWithLocation(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+services:
+  web:
+    image: nginx:alpine
+    dockerfileInline: |
+      FROM nginx:alpine
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding, ok := configDoctorFinding(report, "unsupported-config-key")
+	if !ok {
+		t.Fatalf("missing unsupported-config-key finding: %#v", report.Findings)
+	}
+	if finding.Severity != "error" || finding.Path != "services.web.dockerfileInline" || finding.Line == 0 || finding.Column == 0 {
+		t.Fatalf("unsupported key should include severity/path/location: %#v", finding)
+	}
+	if !strings.Contains(finding.Suggestion, "build.dockerfile") {
+		t.Fatalf("unsupported key should point at replacement, got %#v", finding)
+	}
+}
+
+func TestConfigDoctorWarnsOnUnknownSchemaKeyWithLocation(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+services:
+  web:
+    image: nginx:alpine
+    port: 8080
+    portsTypo:
+      http:
+        container: 8080
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding, ok := configDoctorFinding(report, "unknown-config-key")
+	if !ok {
+		t.Fatalf("missing unknown-config-key finding: %#v", report.Findings)
+	}
+	if finding.Severity != "warning" || finding.Path != "services.web.portsTypo" || finding.Line == 0 || finding.Column == 0 {
+		t.Fatalf("unknown key should include severity/path/location: %#v", finding)
+	}
+	if !strings.Contains(finding.Suggestion, "ports") {
+		t.Fatalf("unknown key should suggest nearby schema key, got %#v", finding)
+	}
+}
+
+func TestSchemaDoctorConfigDescribesFindingContract(t *testing.T) {
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "schema", "doctor", "config", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("schema doctor config exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		Schema struct {
+			FindingFields []string `json:"findingFields"`
+			FindingCodes  []string `json:"findingCodes"`
+		} `json:"schema"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid schema JSON: %v stdout=%s", err, stdout)
+	}
+	for _, want := range []string{"severity", "code", "path", "line", "column", "message", "suggestion", "docs"} {
+		if !stringSliceContains(payload.Schema.FindingFields, want) {
+			t.Fatalf("doctor config schema missing finding field %q: %#v", want, payload.Schema.FindingFields)
+		}
+	}
+	for _, want := range []string{"unsupported-config-key", "unknown-config-key", "config-load"} {
+		if !stringSliceContains(payload.Schema.FindingCodes, want) {
+			t.Fatalf("doctor config schema missing finding code %q: %#v", want, payload.Schema.FindingCodes)
+		}
+	}
+}
+
+func configDoctorFinding(report ConfigDoctorReport, code string) (ConfigDoctorFinding, bool) {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return finding, true
+		}
+	}
+	return ConfigDoctorFinding{}, false
 }
