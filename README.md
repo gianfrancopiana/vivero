@@ -17,6 +17,16 @@ Vivero is local-first. The boundary is simple: **the app owns how it runs; Viver
 - Local URLs by default; public URLs only when `public:` is configured.
 - Local-only remote control unless `VIVERO_ALLOW_REMOTE_CONTROL=1`.
 
+## Install
+
+Install the latest release with checksum verification:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gianfrancopiana/vivero/main/scripts/install.sh | bash
+```
+
+Release assets also include a generated Homebrew formula and GitHub artifact attestations. See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`.
+
 ## Basic workflow
 
 Try the self-contained fixture first:
@@ -171,7 +181,7 @@ make release-smoke
 
 For external runtime confidence, `make live-cloud-browser-smoke` starts `examples/agent-demo` through Docker plus a real Cloudflare quick tunnel, verifies the public `trycloudflare.com` URL from outside the process, runs `qa final --public` with Playwright screenshot/video evidence, and tears the preview down. This target needs Docker, `cloudflared`, npm/Playwright, Chrome, and network access, so CI runs it as a scheduled/manual live smoke instead of on every PR.
 
-CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration matrix checks, dogfood config validation, deploy/release fixtures, and a snapshot release smoke. A separate scheduled/manual live cloud/browser workflow exercises Docker + Cloudflare quick tunnels + Playwright against the committed agent demo and uploads QA artifacts. Tag releases publish darwin/linux artifacts for amd64 and arm64 after the same archive smoke. Release artifacts include `checksums.txt`; smoke verification hashes every archive and checks the packaged binary's version provenance. Windows and Homebrew are intentionally out of scope for now.
+CI runs quality gates, Linux/macOS builds, canonical example E2E, Docker integration fixtures, nasty integration matrix checks, dogfood config validation, deploy/release fixtures, and a snapshot release smoke. A separate scheduled/manual live cloud/browser workflow exercises Docker + Cloudflare quick tunnels + Playwright against the committed agent demo and uploads QA artifacts. Tag releases publish darwin/linux artifacts for amd64 and arm64 after the same archive smoke. Release artifacts include `checksums.txt`, a generated `vivero.rb` Homebrew formula asset, and GitHub artifact attestations for the archives and release metadata. Smoke verification hashes every archive, checks the packaged binary's version provenance, renders the Homebrew formula, and exercises the checksum-verifying installer against local release artifacts. Windows is intentionally out of scope for now.
 
 ## License
 

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -19,21 +21,43 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      # actions/checkout v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      # actions/setup-go v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version-file: go.mod
       - run: make verify
-      - uses: goreleaser/goreleaser-action@v7
+      # goreleaser/goreleaser-action v7
+      - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89
         with:
           version: "~> v2"
           args: release --snapshot --clean
       - run: scripts/release-smoke.sh --skip-snapshot --dist dist
-      - uses: goreleaser/goreleaser-action@v7
+      # goreleaser/goreleaser-action v7
+      - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Render Homebrew formula asset
+        run: scripts/render-homebrew-formula.sh --version "${GITHUB_REF_NAME}" --dist dist --output dist/vivero.rb
+      - name: Upload Homebrew formula asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/vivero.rb --clobber
+      - name: Attest release archives
+        # actions/attest-build-provenance v4
+        uses: actions/attest-build-provenance@b3e506e8c389afc651c5bacf2b8f2a1ea0557215
+        with:
+          subject-checksums: dist/checksums.txt
+      - name: Attest release metadata
+        # actions/attest-build-provenance v4
+        uses: actions/attest-build-provenance@b3e506e8c389afc651c5bacf2b8f2a1ea0557215
+        with:
+          subject-path: |
+            dist/checksums.txt
+            dist/vivero.rb
