@@ -134,16 +134,3 @@ func minEditDistance(values ...int) int {
 	}
 	return m
 }
-
-func requireExplicitConfirmation(noInput, dangerous bool, confirm, expected string) error {
-	if !dangerous {
-		return nil
-	}
-	if confirm == expected {
-		return nil
-	}
-	if noInput {
-		return fmt.Errorf("dangerous operation requires --confirm %s under --no-input", expected)
-	}
-	return fmt.Errorf("dangerous operation requires confirmation %q", expected)
-}

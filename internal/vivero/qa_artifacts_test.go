@@ -17,7 +17,7 @@ func TestQAURLsDefaultToLocalProxyForFastEvidence(t *testing.T) {
 		},
 	}}
 
-	got, err := qaURLForServicePath(p, "web", "/login")
+	got, err := qaURLForServicePathWithTarget(p, "web", "/login", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,21 +290,21 @@ func TestQAPureHelperFallbacks(t *testing.T) {
 		SmokeTests: []SmokeTest{{Name: "health", Path: "/health"}},
 	}
 
-	page, err := resolveQAPage(p, agent, "login", "api")
+	page, err := resolveQAPageForTarget(p, agent, "login", "api", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page["path"] != "/login" || page["url"] != "http://127.0.0.1:3000/login" {
 		t.Fatalf("resolveQAPage should normalize paths and local URL: %#v", page)
 	}
-	if _, err := resolveQAPage(PreviewRecord{}, AgentConfig{}, "/missing", ""); err == nil || !strings.Contains(err.Error(), "no service") {
+	if _, err := resolveQAPageForTarget(PreviewRecord{}, AgentConfig{}, "/missing", "", ""); err == nil || !strings.Contains(err.Error(), "no service") {
 		t.Fatalf("expected no-service page error, got %v", err)
 	}
 
 	if got := qaCommandWithTarget("vivero screenshot pr web /", "origin"); got != "vivero screenshot pr web / --target origin" {
 		t.Fatalf("qaCommandWithTarget origin = %q", got)
 	}
-	if got := qaServiceMap(p)["api"].(map[string]any)["url"]; got != "http://127.0.0.1:3001" {
+	if got := qaServiceMapForTarget(p, "")["api"].(map[string]any)["url"]; got != "http://127.0.0.1:3001" {
 		t.Fatalf("qaServiceMap default url = %v", got)
 	}
 

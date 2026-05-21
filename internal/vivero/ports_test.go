@@ -21,9 +21,8 @@ func TestServicePortPlanSupportsNamedDynamicPortsAndLegacyFixedPort(t *testing.T
 	if len(named) != 2 {
 		t.Fatalf("expected two named ports, got %#v", named)
 	}
-	primary, ok := primaryServicePort(named)
-	if !ok || primary.Name != "http" || primary.Container != 3310 || primary.Host != 0 {
-		t.Fatalf("named primary should keep host dynamic and container fixed, got %#v", primary)
+	if !named[0].Primary || named[0].Name != "http" || named[0].Container != 3310 || named[0].Host != 0 {
+		t.Fatalf("named primary should keep host dynamic and container fixed, got %#v", named[0])
 	}
 	if named[1].Name != "metrics" || named[1].Container != 9394 || named[1].Host != 19394 {
 		t.Fatalf("named ports should be sorted and preserve explicit host port: %#v", named)
@@ -86,21 +85,13 @@ func TestDockerPublishedPortParsingSupportsIPv4IPv6AndZeroHostFallback(t *testin
 }
 
 func TestPreviewPortHelpersSelectAndMapPorts(t *testing.T) {
-	primary, ok := primaryServicePort([]ServicePort{{Name: "http"}, {Name: "metrics"}})
-	if ok || primary.Name != "" {
-		t.Fatalf("primaryServicePort should reject ambiguous ports, got %#v ok=%v", primary, ok)
-	}
-
 	ports := []PreviewPort{
 		{Name: "metrics", Host: 49154},
 		{Name: "http", Host: 49153, Primary: true},
 	}
-	byName := previewPortsByName(ports)
-	if byName["http"].Host != 49153 || byName["metrics"].Host != 49154 {
-		t.Fatalf("previewPortsByName = %#v", byName)
-	}
-	if got := previewPortsByName(nil); got != nil {
-		t.Fatalf("empty previewPortsByName = %#v, want nil", got)
+	byName := map[string]PreviewPort{
+		"http":    ports[1],
+		"metrics": ports[0],
 	}
 	if primary, ok := primaryPreviewPort(byName); !ok || primary.Name != "http" {
 		t.Fatalf("primaryPreviewPort = %#v ok=%v", primary, ok)

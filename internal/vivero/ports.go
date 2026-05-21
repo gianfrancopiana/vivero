@@ -86,18 +86,6 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 	return out, nil
 }
 
-func primaryServicePort(ports []ServicePort) (ServicePort, bool) {
-	for _, port := range ports {
-		if port.Primary {
-			return port, true
-		}
-	}
-	if len(ports) == 1 {
-		return ports[0], true
-	}
-	return ServicePort{}, false
-}
-
 func primaryPreviewPort(ports map[string]PreviewPort) (PreviewPort, bool) {
 	if len(ports) == 0 {
 		return PreviewPort{}, false
@@ -113,17 +101,6 @@ func primaryPreviewPort(ports map[string]PreviewPort) (PreviewPort, bool) {
 		return ports[keys[0]], true
 	}
 	return PreviewPort{}, false
-}
-
-func previewPortsByName(ports []PreviewPort) map[string]PreviewPort {
-	if len(ports) == 0 {
-		return nil
-	}
-	out := make(map[string]PreviewPort, len(ports))
-	for _, port := range ports {
-		out[port.Name] = port
-	}
-	return out
 }
 
 func originHostForService(svc ServiceConfig) string {

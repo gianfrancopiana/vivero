@@ -88,7 +88,7 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
-	warmState := warmRunState{Project: runtimeConfig.Project.Name, PreviewID: req.ID, Mode: warmModeNone}
+	var warmState warmRunState
 	runtimeConfig, warmState, err = a.prepareSmartWarmVolumes(project, req, runtimeConfig, p.Sources)
 	if err != nil {
 		a.recordEvent(req.ID, "error", "warm.failed", err.Error(), "", nil)

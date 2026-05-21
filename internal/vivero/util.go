@@ -230,26 +230,6 @@ func collectKV(args []string, flagName string) (map[string]string, error) {
 	return out, nil
 }
 
-func firstPositional(args []string) string {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-			return ""
-		}
-		if strings.HasPrefix(a, "--") {
-			if !strings.Contains(a, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				i++
-			}
-			continue
-		}
-		return a
-	}
-	return ""
-}
-
 func positionalArgs(args []string) []string {
 	out := []string{}
 	for i := 0; i < len(args); i++ {

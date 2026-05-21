@@ -3,7 +3,6 @@ package vivero
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -750,12 +749,7 @@ func (a *App) runSkill(args []string, stdout, stderr io.Writer, jsonOut bool) in
 func (a *App) Doctor() (map[string]any, error) {
 	checks := map[string]any{"home": a.Home, "database": filepath.Join(a.Home, "state.db")}
 	for _, bin := range []string{"git", "cloudflared", "docker"} {
-		_, err := os.Stat("/usr/bin/" + bin)
-		if bin == "cloudflared" {
-			_, err = execLook(bin)
-		} else {
-			_, err = execLook(bin)
-		}
+		_, err := execLook(bin)
 		checks[bin] = err == nil
 	}
 	projects, _ := a.listProjects()

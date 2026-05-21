@@ -723,7 +723,7 @@ func TestPublicURLRejectsPathComponents(t *testing.T) {
 }
 
 func TestValidateNamedPublicRoutesRejectsDuplicateHosts(t *testing.T) {
-	err := validateNamedPublicRoutes(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, ProjectConfig{
+	_, err := plannedNamedPublicHosts(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, ProjectConfig{
 		Public: PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
 		Services: map[string]ServiceConfig{
 			"api": {Image: "alpine:latest", Port: 3001, Public: true},
@@ -1453,8 +1453,7 @@ services:
 
 func TestDockerEnvFilePathStaysInsideRunDirectory(t *testing.T) {
 	home := t.TempDir()
-	a := &App{Home: home}
-	path := filepath.Clean(a.dockerEnvFile("../escape", "../../web"))
+	path := filepath.Clean(dockerEnvFilePath(home, "../escape", "../../web"))
 	base := filepath.Join(home, "run", "docker")
 	if !strings.HasPrefix(path, base+string(os.PathSeparator)) {
 		t.Fatalf("env-file path escaped run directory: %s not under %s", path, base)
@@ -1474,7 +1473,7 @@ func TestStartDockerServiceDoesNotMergeServiceEnvIntoDockerClientEnv(t *testing.
 		t.Fatal(err)
 	}
 	defer runCmd("", nil, "docker", "rm", "-f", id)
-	if _, err := os.Stat(a.dockerEnvFile("demo-pr-17", "web")); !os.IsNotExist(err) {
+	if _, err := os.Stat(dockerEnvFilePath(a.Home, "demo-pr-17", "web")); !os.IsNotExist(err) {
 		t.Fatalf("temporary service env-file should be removed after docker run, stat err=%v", err)
 	}
 }
