@@ -44,7 +44,7 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	for _, want := range []string{"Examples:", "vivero qa run", "vivero commands --json --no-input"} {
+	for _, want := range []string{"local-first app operations for agents", "Preview:", "Deploy/release:", "Evidence/debug:", "vivero up", "vivero deploy plan", "vivero commands --json --no-input"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout)
 		}

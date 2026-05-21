@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(readme)
+	for _, want := range []string{
+		"safe app-operations control plane",
+		"Preview lane",
+		"Deploy/release lane",
+		"Evidence/debug lane",
+		"the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("README should frame preview/deploy/evidence contract with %q", want)
+		}
+	}
+}
+
 func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 	skill, err := os.ReadFile("../../skills/vivero/SKILL.md")
 	if err != nil {

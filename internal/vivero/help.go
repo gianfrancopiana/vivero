@@ -7,14 +7,24 @@ import (
 
 func rootHelp() string {
 	var b strings.Builder
-	b.WriteString("vivero - local-first preview runtime\n\n")
+	b.WriteString("vivero - local-first app operations for agents\n\n")
 	b.WriteString("Examples:\n")
 	for _, line := range []string{
+		"  # Preview: start, inspect, prove, and tear down an isolated app runtime",
 		"  vivero projects sync . --json --no-input",
 		"  vivero up my-app --id my-app-local --wait --timeout 5m --json --no-input",
 		"  vivero events my-app-local --tail --json --no-input",
 		"  vivero qa run my-app-local --scope all --target local --json --no-input",
 		"  vivero down my-app-local --discard --json --no-input",
+		"",
+		"  # Deploy/release: plan, apply, inspect, and roll back app-owned production logic",
+		"  vivero deploy plan . --environment production --json --no-input",
+		"  vivero deploy apply <plan-id> --json --no-input",
+		"  vivero release status my-app --environment production --json --no-input",
+		"",
+		"  # Evidence/debug: reuse logs, events, smoke, screenshots, and QA commands",
+		"  vivero logs my-app-local web --json --no-input",
+		"  vivero screenshot my-app-local web / --json --no-input",
 	} {
 		b.WriteString(line + "\n")
 	}
@@ -131,6 +141,7 @@ func renderCommandHelp(cmd CommandManifest) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString(fmt.Sprintf("Category: %s\n", cmd.Category))
+	b.WriteString(fmt.Sprintf("Lane: %s\n", cmd.Lane))
 	b.WriteString(fmt.Sprintf("Visibility: %s\n", cmd.Visibility))
 	b.WriteString(fmt.Sprintf("JSON stability: %s\n", cmd.JSONStability))
 	if cmd.AgentSafe {
