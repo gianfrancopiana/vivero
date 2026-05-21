@@ -186,6 +186,41 @@ func TestPreviewNamespaceAliasesRootPreviewCommands(t *testing.T) {
 	}
 }
 
+func TestEvidenceNamespaceRoutesPreviewEvidenceCommands(t *testing.T) {
+	home := t.TempDir()
+	setupCLIQAPreview(t, home)
+
+	for _, tc := range []struct {
+		name     string
+		root     []string
+		evidence []string
+		exact    bool
+	}{
+		{name: "events", root: []string{"events", "preview:cli-pr", "--tail", "--json", "--no-input"}, evidence: []string{"evidence", "events", "preview:cli-pr", "--tail", "--json", "--no-input"}, exact: true},
+		{name: "logs", root: []string{"logs", "preview:cli-pr", "web", "--json", "--no-input"}, evidence: []string{"evidence", "logs", "preview:cli-pr", "web", "--json", "--no-input"}, exact: true},
+		{name: "qa run", root: []string{"qa", "run", "preview:cli-pr", "--scope", "auth", "--no-screenshots", "--json", "--no-input"}, evidence: []string{"evidence", "qa", "run", "preview:cli-pr", "--scope", "auth", "--no-screenshots", "--json", "--no-input"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rootCode, rootStdout, rootStderr := runCLITestCommand(t, home, tc.root...)
+			evidenceCode, evidenceStdout, evidenceStderr := runCLITestCommand(t, home, tc.evidence...)
+			if rootCode != 0 || rootStderr != "" {
+				t.Fatalf("root command failed exit=%d stdout=%s stderr=%s", rootCode, rootStdout, rootStderr)
+			}
+			if evidenceCode != 0 || evidenceStderr != "" {
+				t.Fatalf("evidence command failed exit=%d stdout=%s stderr=%s", evidenceCode, evidenceStdout, evidenceStderr)
+			}
+			if tc.exact && evidenceStdout != rootStdout {
+				t.Fatalf("evidence command should match root output\nroot=%s\nevidence=%s", rootStdout, evidenceStdout)
+			}
+			payload := decodeJSONMap(t, evidenceStdout)
+			assertEvidenceShape(t, payload)
+			if payload["targetRef"].(map[string]any)["ref"] != "preview:cli-pr" {
+				t.Fatalf("evidence command should preserve preview targetRef: %s", evidenceStdout)
+			}
+		})
+	}
+}
+
 func TestRunDiscoveryCommandsAreStateFree(t *testing.T) {
 	blockedHome := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(blockedHome, []byte("state should not be opened"), 0o644); err != nil {

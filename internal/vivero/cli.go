@@ -176,6 +176,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return a.runDeploy(rest, stdout, stderr, jsonOut)
 	case "release":
 		return a.runRelease(rest, stdout, stderr, jsonOut)
+	case "evidence":
+		return a.runEvidence(rest, stdout, stderr, jsonOut)
 	case "cache":
 		return a.runCache(rest, stdout, stderr, jsonOut)
 	case "projects":
@@ -524,7 +526,7 @@ func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
 	}
 	group := args[0]
 	switch group {
-	case "cache", "deploy", "diagnose", "preview", "project", "qa", "release", "secrets", "skill":
+	case "cache", "deploy", "diagnose", "evidence", "preview", "project", "qa", "release", "secrets", "skill":
 	default:
 		return "", "", false
 	}
