@@ -37,6 +37,7 @@ Before operating on an unfamiliar install or project, inspect the live contract:
 ```sh
 vivero capabilities --json --no-input
 vivero commands --json --no-input
+vivero doctor --json --no-input
 vivero doctor config <project-path> --json --no-input
 vivero doctor production --project <project-path> --json --no-input
 vivero deploy plan <project-path> --environment production --json --no-input

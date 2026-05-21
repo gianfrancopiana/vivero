@@ -467,6 +467,17 @@ func removeDockerNetwork(previewID string) error {
 	return nil
 }
 
+func dockerContainerExists(containerID string) bool {
+	if strings.TrimSpace(containerID) == "" {
+		return false
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false
+	}
+	_, err := runCmd("", nil, "docker", "container", "inspect", containerID)
+	return err == nil
+}
+
 func removeDockerContainersForPreview(previewID string) error {
 	if strings.TrimSpace(previewID) == "" {
 		return nil

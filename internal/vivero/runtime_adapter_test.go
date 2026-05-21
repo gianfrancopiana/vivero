@@ -33,6 +33,20 @@ mkdir -p "$state"
 cmd="${1:-}"
 if [ $# -gt 0 ]; then shift; fi
 case "$cmd" in
+  container)
+    sub="${1:-}"
+    if [ $# -gt 0 ]; then shift; fi
+    name="${1:-}"
+    case "$sub" in
+      inspect)
+        if [ -f "$state/$name.pid" ]; then echo "$name"; exit 0; fi
+        echo "No such container: $name" >&2
+        exit 1
+        ;;
+    esac
+    echo "unsupported docker container command $sub" >&2
+    exit 2
+    ;;
   network)
     sub="${1:-}"
     if [ $# -gt 0 ]; then shift; fi
