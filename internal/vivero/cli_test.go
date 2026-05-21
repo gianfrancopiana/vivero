@@ -436,6 +436,75 @@ func TestRunQASubcommandsJSONContract(t *testing.T) {
 	}
 }
 
+func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
+	home := t.TempDir()
+	setupCLIQAPreview(t, home)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "logs", "preview:cli-pr", "web", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("logs target ref exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var logs map[string]any
+	if err := json.Unmarshal([]byte(stdout), &logs); err != nil {
+		t.Fatalf("invalid logs JSON: %v stdout=%s", err, stdout)
+	}
+	assertPreviewTargetRef(t, logs, "cli-pr")
+	if logs["preview"] != "cli-pr" || logs["service"] != "web" || !strings.Contains(stdout, "fixture log line") {
+		t.Fatalf("logs should resolve preview target ref without changing payload: %#v", logs)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "events", "preview:cli-pr", "--tail", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("events target ref exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var events map[string]any
+	if err := json.Unmarshal([]byte(stdout), &events); err != nil {
+		t.Fatalf("invalid events JSON: %v stdout=%s", err, stdout)
+	}
+	assertPreviewTargetRef(t, events, "cli-pr")
+	if got := len(events["events"].([]any)); got == 0 {
+		t.Fatalf("events should resolve preview target ref and return recorded startup event: %#v", events)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "inspect", "preview:cli-pr", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("inspect target ref exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var inspect map[string]any
+	if err := json.Unmarshal([]byte(stdout), &inspect); err != nil {
+		t.Fatalf("invalid inspect JSON: %v stdout=%s", err, stdout)
+	}
+	assertPreviewTargetRef(t, inspect, "cli-pr")
+	previewRecord := inspect["preview"].(map[string]any)
+	if previewRecord["id"] != "cli-pr" {
+		t.Fatalf("inspect should resolve preview target ref: %#v", inspect)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "qa", "plan", "preview:cli-pr", "--scope", "auth", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("qa plan target ref exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
+		t.Fatalf("invalid qa plan JSON: %v stdout=%s", err, stdout)
+	}
+	assertPreviewTargetRef(t, plan, "cli-pr")
+	preview, _ := plan["preview"].(map[string]any)
+	if preview["id"] != "cli-pr" || plan["target"] != "local" {
+		t.Fatalf("qa plan should keep preview id and artifact target separate: %#v", plan)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "diagnose", "startup", "preview:cli-pr", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("diagnose startup target ref exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var diagnosis map[string]any
+	if err := json.Unmarshal([]byte(stdout), &diagnosis); err != nil {
+		t.Fatalf("invalid diagnose JSON: %v stdout=%s", err, stdout)
+	}
+	assertPreviewTargetRef(t, diagnosis, "cli-pr")
+}
+
 func TestRunSecretsAndSkillJSONContracts(t *testing.T) {
 	home := t.TempDir()
 	code, stdout, stderr := runCLITestCommand(t, home, "secrets", "set", "demo", "TOKEN=secret-value", "OTHER=1", "--json", "--no-input")
@@ -534,6 +603,17 @@ func runCLITestCommand(t *testing.T, home string, args ...string) (int, string, 
 	return code, stdout.String(), stderr.String()
 }
 
+func assertPreviewTargetRef(t *testing.T, payload map[string]any, previewID string) {
+	t.Helper()
+	targetRef, ok := payload["targetRef"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload missing targetRef: %#v", payload)
+	}
+	if targetRef["kind"] != "preview" || targetRef["id"] != previewID || targetRef["ref"] != "preview:"+previewID {
+		t.Fatalf("unexpected targetRef: %#v", targetRef)
+	}
+}
+
 func runCLITestJSONError(t *testing.T, args ...string) (int, cliErrorResponse) {
 	t.Helper()
 	jsonArgs := append([]string{}, args...)
@@ -570,6 +650,13 @@ func setupCLIQAPreview(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(storageState, []byte(`{"cookies":[],"origins":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(projectDir, ".vivero", "logs", "web.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("fixture log line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a, err := NewApp()
@@ -613,7 +700,7 @@ func setupCLIQAPreview(t *testing.T, home string) {
 	if err := a.upsertPreview(PreviewRecord{ID: "cli-pr", Project: "demo", Status: "running", CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.saveService("cli-pr", PreviewService{Name: "web", Source: "app", Status: "healthy", OriginURL: "http://127.0.0.1:3000", ProxyURL: "http://127.0.0.1:7777"}); err != nil {
+	if err := a.saveService("cli-pr", PreviewService{Name: "web", Source: "app", Status: "healthy", OriginURL: "http://127.0.0.1:3000", ProxyURL: "http://127.0.0.1:7777", LogPath: logPath}); err != nil {
 		t.Fatal(err)
 	}
 	insertStartupEvent(t, a, "cli-pr", created.Add(time.Second), "info", "service.healthy", "health check passed", "web", map[string]string{"durationMs": "1200"})

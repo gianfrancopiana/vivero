@@ -224,10 +224,14 @@ func (a *App) runDiagnose(args []string, stdout, stderr io.Writer, jsonOut bool)
 	if len(args) < 2 {
 		return errOut(stderr, jsonOut, missingArgError("diagnose startup", "preview"))
 	}
-	diag, err := a.DiagnoseStartup(args[1])
+	previewID, targetRef, err := resolvePreviewTargetRef(args[1])
 	if err != nil {
 		return errOut(stderr, jsonOut, err)
 	}
-	output(stdout, jsonOut, map[string]any{"diagnosis": diag}, startupDiagnosisHuman(diag))
+	diag, err := a.DiagnoseStartup(previewID)
+	if err != nil {
+		return errOut(stderr, jsonOut, err)
+	}
+	output(stdout, jsonOut, map[string]any{"diagnosis": diag, "targetRef": targetRef}, startupDiagnosisHuman(diag))
 	return 0
 }

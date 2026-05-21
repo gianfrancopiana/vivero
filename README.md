@@ -63,7 +63,7 @@ vivero qa run webapp-local --scope public --json --no-input --quiet
 vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-`vivero preview up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing.
+`vivero preview up` reloads the project's current `vivero.yml` before starting. Use `--discard` on teardown only when preview changes do not need saving. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases. Help, schemas, and command manifests classify commands into preview, deploy/release, and evidence/debug lanes so agents can choose the right surface without guessing. Evidence/debug commands accept typed preview targets like `preview:webapp-local`, while plain preview IDs remain supported.
 
 ## CLI contract
 
