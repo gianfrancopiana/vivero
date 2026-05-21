@@ -85,6 +85,7 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"help"}, "show examples-first help", "vivero help <command>", true, "stable", []CommandFlag{{Name: "<command>", Description: "optional command or command group"}}, nil, map[string]any{"returns": "human-readable help on stdout"}),
 		manifest([]string{"commands"}, "list public commands", "vivero commands --json --no-input", true, "stable", global, nil, map[string]any{"returns": "typed command manifest for public commands"}),
 		manifest([]string{"schema"}, "print command schema", "vivero schema up --json --no-input", true, "stable", append(global, CommandFlag{Name: "<command>", Description: "optional command name"}), nil, map[string]any{"returns": "schema for one command or all commands"}),
+		withSideEffects(manifest([]string{"init"}, "write a minimal vivero.yml", "vivero init . --name my-app --service web --port 3000 --json --no-input", true, "stable", append(global, CommandFlag{Name: "--name", ValueName: "NAME", Description: "project name; defaults to the directory name"}, CommandFlag{Name: "--service", ValueName: "NAME", Description: "preview service name", Default: "web"}, CommandFlag{Name: "--port", ValueName: "PORT", Description: "service port", Default: "3000"}, CommandFlag{Name: "--command", ValueName: "COMMAND", Description: "app-owned container command"}, CommandFlag{Name: "--build-context", ValueName: "PATH", Description: "Docker build context", Default: "."}, CommandFlag{Name: "--dockerfile", ValueName: "PATH", Description: "app-owned Dockerfile", Default: "Dockerfile"}, CommandFlag{Name: "--default-ref", ValueName: "REF", Description: "baseline source ref", Default: "main"}, CommandFlag{Name: "--health-path", ValueName: "PATH", Description: "HTTP health path", Default: "/"}, CommandFlag{Name: "--force", Description: "overwrite existing vivero.yml"}), []CommandArg{{Name: "path", Description: "project directory or config file path", Required: false}}, map[string]any{"returns": "written config path, project/service names, and next commands", "writes": "vivero.yml", "thinConfig": true}), true, false, true),
 		manifest([]string{"doctor"}, "check local Vivero environment", "vivero doctor --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "validate project config via ConfigDoctor instead of local environment checks"}), nil, map[string]any{"returns": "environment checks plus localState diagnostics, or configDoctor when --project is passed"}),
 		manifest([]string{"doctor", "config"}, "validate and lint vivero.yml", "vivero doctor config . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, configDoctorSchema()),
 		manifest([]string{"doctor", "production"}, "read-only production readiness assessment", "vivero doctor production --project . --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}), nil, map[string]any{"returns": "production readiness verdict and diagnostics", "readOnly": true, "doesNotDeploy": true}),
@@ -232,7 +233,7 @@ func commandCategory(path []string) string {
 		return "diagnostics"
 	case "deploy", "release":
 		return "release"
-	case "projects", "project":
+	case "projects", "project", "init":
 		return "projects"
 	case "cache":
 		return "cache"
@@ -265,7 +266,7 @@ func commandLane(path []string) string {
 	switch path[0] {
 	case "capabilities", "version", "help", "commands", "schema":
 		return CommandLaneDiscovery
-	case "projects", "project":
+	case "projects", "project", "init":
 		return CommandLaneProject
 	case "deploy", "release":
 		return CommandLaneDeploy

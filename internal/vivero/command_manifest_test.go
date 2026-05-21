@@ -43,7 +43,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"init", "up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing manifest for %s", name)
 		}
@@ -54,6 +54,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		visibility string
 		lane       string
 	}{
+		{name: "init", category: "projects", visibility: CommandVisibilityCommon, lane: CommandLaneProject},
 		{name: "up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
 		{name: "preview up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
 		{name: "preview events", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
@@ -206,7 +207,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 		t.Fatalf("capabilities should expose build provenance: %#v", caps["build"])
 	}
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "thin-config-init", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}

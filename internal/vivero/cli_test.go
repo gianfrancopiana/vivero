@@ -81,6 +81,79 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	}
 }
 
+func TestRunInitWritesThinConfigAndDoctorPasses(t *testing.T) {
+	home := t.TempDir()
+	projectDir := filepath.Join(t.TempDir(), "My App")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "init", projectDir, "--name", "My App", "--service", "web", "--port", "4173", "--command", "npm run dev -- --host 0.0.0.0", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("init exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload struct {
+		Init struct {
+			OK           bool     `json:"ok"`
+			Path         string   `json:"path"`
+			Project      string   `json:"project"`
+			Service      string   `json:"service"`
+			NextCommands []string `json:"nextCommands"`
+		} `json:"init"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("init stdout should be JSON: %v stdout=%s", err, stdout)
+	}
+	configPath := filepath.Join(projectDir, "vivero.yml")
+	if !payload.Init.OK || payload.Init.Path != configPath || payload.Init.Project != "my-app" || payload.Init.Service != "web" {
+		t.Fatalf("unexpected init payload: %#v", payload.Init)
+	}
+	if len(payload.Init.NextCommands) == 0 || !strings.Contains(strings.Join(payload.Init.NextCommands, "\n"), "vivero doctor config") {
+		t.Fatalf("init should return next commands for agents: %#v", payload.Init.NextCommands)
+	}
+	bodyBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	for _, want := range []string{"project:", "name: my-app", "sources:", "mode: external", "services:", "dockerfile: Dockerfile", "command: npm run dev -- --host 0.0.0.0", "port: 4173", "agent:", "defaultPreviewService: web", "smokeTests:"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, body)
+		}
+	}
+	_, cfg, err := loadProjectConfig(projectDir)
+	if err != nil {
+		t.Fatalf("generated config should load: %v\n%s", err, body)
+	}
+	if cfg.Project.Name != "my-app" || cfg.Agent.DefaultPreviewService != "web" || cfg.Services["web"].Port != 4173 {
+		t.Fatalf("unexpected generated config: %#v", cfg)
+	}
+	report, err := (&App{}).ConfigDoctor(projectDir)
+	if err != nil || !report.OK {
+		t.Fatalf("doctor config should pass err=%v report=%#v\n%s", err, report, body)
+	}
+}
+
+func TestRunInitRefusesToOverwriteWithoutForce(t *testing.T) {
+	projectDir := t.TempDir()
+	configPath := filepath.Join(projectDir, "vivero.yml")
+	if err := os.WriteFile(configPath, []byte("project:\n  name: existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "init", projectDir, "--json", "--no-input")
+	if code == 0 || stdout != "" {
+		t.Fatalf("init should fail without --force, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload cliErrorResponse
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
+	}
+	if payload.Error.Code != "config_exists" || !strings.Contains(payload.Error.Hint, "--force") {
+		t.Fatalf("unexpected overwrite error: %#v", payload.Error)
+	}
+}
+
 func TestPreviewNamespaceAliasesRootPreviewCommands(t *testing.T) {
 	home := t.TempDir()
 	setupCLIQAPreview(t, home)

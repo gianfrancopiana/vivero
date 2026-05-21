@@ -77,6 +77,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		return Run(args[1:], stdout, stderr)
 	}
+	if args[0] == "init" {
+		req, err := initConfigRequestFromArgs(args[1:])
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		result, err := InitConfig(req)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, map[string]any{"init": result}, initHuman(result))
+		return 0
+	}
 	a, err := NewApp()
 	if err != nil {
 		return errOut(stderr, jsonOut, err)
