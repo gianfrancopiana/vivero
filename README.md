@@ -31,7 +31,7 @@ Or install the latest release directly with checksum verification:
 curl -fsSL https://raw.githubusercontent.com/gianfrancopiana/vivero/main/scripts/install.sh | bash
 ```
 
-Tag releases publish the generated Homebrew formula to `gianfrancopiana/homebrew-tap` for `brew install gianfrancopiana/tap/vivero`; release assets also keep the formula and GitHub artifact attestations. See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`.
+Tag releases publish the generated Homebrew formula to `gianfrancopiana/homebrew-tap` for `brew install gianfrancopiana/tap/vivero`; release assets also keep the formula and GitHub artifact attestations. See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`. Maintainers should use [docs/releasing.md](docs/releasing.md) for tag, postflight, and upgrade-cadence checks.
 
 ## Basic workflow
 
@@ -181,9 +181,10 @@ make nasty-integration-fixtures
 make dogfood-configs
 make deploy-fixtures
 make release-smoke
+GH_CLI=gh VERSION=v0.1.0 make release-postflight
 ```
 
-`make example-e2e` is the fast canonical preview proof. `make cover` enforces the current repo-wide coverage floor (`COVER_MIN`, default 72.0) so test confidence ratchets upward instead of drifting. `make integration-fixtures` is the Docker lifecycle proof. `make nasty-integration-fixtures` exercises the messy config matrix: static app, app+database, monorepo app-owned Dockerfile, warm volumes, named public routes, invalid public route rejection, bad fingerprint paths, quick-tunnel/browser-path unit coverage, and cleanup/routing edge tests. `make dogfood-configs` validates committed examples plus any live Helper/Flexile/Chetear/self checkouts under `VIVERO_DOGFOOD_ROOT` (default `~/.hermes/workspace`). `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, verifies `checksums.txt`, extracts the host-compatible tarball, runs `vivero doctor`, checks version provenance plus command/schema JSON, and validates the example configs from the packaged binary path.
+`make example-e2e` is the fast canonical preview proof. `make cover` enforces the current repo-wide coverage floor (`COVER_MIN`, default 72.0) so test confidence ratchets upward instead of drifting. `make integration-fixtures` is the Docker lifecycle proof. `make nasty-integration-fixtures` exercises the messy config matrix: static app, app+database, monorepo app-owned Dockerfile, warm volumes, named public routes, invalid public route rejection, bad fingerprint paths, quick-tunnel/browser-path unit coverage, and cleanup/routing edge tests. `make dogfood-configs` validates committed examples plus any live Helper/Flexile/Chetear/self checkouts under `VIVERO_DOGFOOD_ROOT` (default `~/.hermes/workspace`). `make deploy-fixtures` proves the plan/apply/status/rollback production command surface, including blue/green prepare/smoke/promote/rollback, against temporary app-owned deploy commands. `make release-smoke` builds snapshot archives with GoReleaser, verifies `checksums.txt`, extracts the host-compatible tarball, runs `vivero doctor`, checks version provenance plus command/schema JSON, and validates the example configs from the packaged binary path. `make release-postflight` verifies a published tag through release metadata, checksums, attestations, the installer, and the Homebrew tap formula.
 
 For external runtime confidence, `make live-cloud-browser-smoke` starts `examples/agent-demo` through Docker plus a real Cloudflare quick tunnel, verifies the public `trycloudflare.com` URL from outside the process, runs `qa final --public` with Playwright screenshot/video evidence, and tears the preview down. This target needs Docker, `cloudflared`, npm/Playwright, Chrome, and network access, so CI runs it as a scheduled/manual live smoke instead of on every PR.
 

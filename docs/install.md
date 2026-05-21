@@ -44,6 +44,7 @@ On macOS, use `shasum -a 256` if `sha256sum` is unavailable.
 
 ```sh
 brew install gianfrancopiana/tap/vivero
+brew upgrade gianfrancopiana/tap/vivero
 ```
 
 Homebrew maps `gianfrancopiana/tap` to the public GitHub repository `gianfrancopiana/homebrew-tap` and reads `Formula/vivero.rb` from that repo.
