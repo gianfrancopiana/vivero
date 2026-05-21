@@ -90,7 +90,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 		return nil, err
 	}
 
-	stdout, stderr, err := runner.Run("npm", "exec", "--yes", "--package", "playwright", "--", "sh", "-lc", `NODE_PATH="$(dirname "$(dirname "$(command -v playwright)")")" exec node "$1" "$2"`, "vivero-playwright", scriptPath, inputPath)
+	stdout, stderr, err := runner.Run("npm", "exec", "--yes", "--package", playwrightPackage(), "--", "sh", "-lc", `NODE_PATH="$(dirname "$(dirname "$(command -v playwright)")")" exec node "$1" "$2"`, "vivero-playwright", scriptPath, inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("playwright qa record failed: %w: %s", err, strings.TrimSpace(string(stderr)+"\n"+string(stdout)))
 	}
