@@ -2,6 +2,7 @@ package vivero
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -235,6 +236,34 @@ func TestQAArtifactDirRejectsProjectRelativeRootEscape(t *testing.T) {
 	_, err := qaArtifactDir(t.TempDir(), t.TempDir(), "preview", "smoke", "../outside")
 	if err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("expected project-relative artifact root escape error, got %v", err)
+	}
+}
+
+func TestQAResultArtifactPathsDoNotClobberExistingEvidence(t *testing.T) {
+	dir := t.TempDir()
+	runPath := filepath.Join(dir, "run.json")
+	finalPath := filepath.Join(dir, "final.json")
+	if err := os.WriteFile(runPath, []byte(`{"old":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(finalPath, []byte(`{"old":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := map[string]any{"dir": dir, "runPath": runPath, "finalPath": finalPath}
+
+	gotRunPath, err := writeQARunResult(artifacts, map[string]any{"ok": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRunPath == runPath || filepath.Ext(gotRunPath) != ".json" {
+		t.Fatalf("run artifact should avoid overwriting %s, got %s", runPath, gotRunPath)
+	}
+	gotFinalPath, err := writeQAFinalResult(artifacts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFinalPath == finalPath || filepath.Ext(gotFinalPath) != ".json" {
+		t.Fatalf("final artifact should avoid overwriting %s, got %s", finalPath, gotFinalPath)
 	}
 }
 

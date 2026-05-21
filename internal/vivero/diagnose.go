@@ -232,6 +232,6 @@ func (a *App) runDiagnose(args []string, stdout, stderr io.Writer, jsonOut bool)
 	if err != nil {
 		return errOut(stderr, jsonOut, err)
 	}
-	output(stdout, jsonOut, map[string]any{"diagnosis": diag, "targetRef": targetRef}, startupDiagnosisHuman(diag))
+	output(stdout, jsonOut, attachEvidenceShape(map[string]any{"diagnosis": diag}, targetRef), startupDiagnosisHuman(diag))
 	return 0
 }

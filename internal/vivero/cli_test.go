@@ -449,6 +449,10 @@ func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
 		t.Fatalf("invalid logs JSON: %v stdout=%s", err, stdout)
 	}
 	assertPreviewTargetRef(t, logs, "cli-pr")
+	assertEvidenceShape(t, logs)
+	if _, ok := logs["logPath"].(string); !ok {
+		t.Fatalf("logs evidence should expose logPath: %#v", logs)
+	}
 	if logs["preview"] != "cli-pr" || logs["service"] != "web" || !strings.Contains(stdout, "fixture log line") {
 		t.Fatalf("logs should resolve preview target ref without changing payload: %#v", logs)
 	}
@@ -462,6 +466,7 @@ func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
 		t.Fatalf("invalid events JSON: %v stdout=%s", err, stdout)
 	}
 	assertPreviewTargetRef(t, events, "cli-pr")
+	assertEvidenceShape(t, events)
 	if got := len(events["events"].([]any)); got == 0 {
 		t.Fatalf("events should resolve preview target ref and return recorded startup event: %#v", events)
 	}
@@ -475,6 +480,7 @@ func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
 		t.Fatalf("invalid inspect JSON: %v stdout=%s", err, stdout)
 	}
 	assertPreviewTargetRef(t, inspect, "cli-pr")
+	assertEvidenceShape(t, inspect)
 	previewRecord := inspect["preview"].(map[string]any)
 	if previewRecord["id"] != "cli-pr" {
 		t.Fatalf("inspect should resolve preview target ref: %#v", inspect)
@@ -489,6 +495,7 @@ func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
 		t.Fatalf("invalid qa plan JSON: %v stdout=%s", err, stdout)
 	}
 	assertPreviewTargetRef(t, plan, "cli-pr")
+	assertEvidenceShape(t, plan)
 	preview, _ := plan["preview"].(map[string]any)
 	if preview["id"] != "cli-pr" || plan["target"] != "local" {
 		t.Fatalf("qa plan should keep preview id and artifact target separate: %#v", plan)
@@ -503,6 +510,7 @@ func TestEvidenceCommandsAcceptPreviewTargetRefs(t *testing.T) {
 		t.Fatalf("invalid diagnose JSON: %v stdout=%s", err, stdout)
 	}
 	assertPreviewTargetRef(t, diagnosis, "cli-pr")
+	assertEvidenceShape(t, diagnosis)
 }
 
 func TestRunSecretsAndSkillJSONContracts(t *testing.T) {
@@ -611,6 +619,19 @@ func assertPreviewTargetRef(t *testing.T, payload map[string]any, previewID stri
 	}
 	if targetRef["kind"] != "preview" || targetRef["id"] != previewID || targetRef["ref"] != "preview:"+previewID {
 		t.Fatalf("unexpected targetRef: %#v", targetRef)
+	}
+}
+
+func assertEvidenceShape(t *testing.T, payload map[string]any) {
+	t.Helper()
+	if _, ok := payload["targetRef"].(map[string]any); !ok {
+		t.Fatalf("evidence payload missing targetRef: %#v", payload)
+	}
+	if _, ok := payload["ok"].(bool); !ok {
+		t.Fatalf("evidence payload missing ok boolean: %#v", payload)
+	}
+	if _, ok := payload["artifacts"].(map[string]any); !ok {
+		t.Fatalf("evidence payload missing artifacts object: %#v", payload)
 	}
 }
 

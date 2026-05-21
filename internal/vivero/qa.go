@@ -133,6 +133,7 @@ func (a *App) QAReportWithTarget(previewID, scopeName, target, outPath string) (
 			outPath = filepath.Join(dir, outPath)
 		}
 	}
+	outPath = nextAvailableArtifactPath(outPath)
 	if err := ensureDir(filepath.Dir(outPath)); err != nil {
 		return nil, err
 	}
@@ -421,6 +422,7 @@ func writeQAFinalResult(artifacts map[string]any) (string, error) {
 			finalPath = filepath.Join(dir, finalPath)
 		}
 	}
+	finalPath = nextAvailableArtifactPath(finalPath)
 	if err := ensureDir(filepath.Dir(finalPath)); err != nil {
 		return "", err
 	}
@@ -517,6 +519,7 @@ func writeQARunResult(artifacts map[string]any, result map[string]any) (string, 
 			runPath = filepath.Join(dir, runPath)
 		}
 	}
+	runPath = nextAvailableArtifactPath(runPath)
 	if err := ensureDir(filepath.Dir(runPath)); err != nil {
 		return "", err
 	}
