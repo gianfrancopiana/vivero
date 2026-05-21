@@ -26,6 +26,13 @@ const (
 	screenshotMinimumUsefulCropPixels = 16
 )
 
+func playwrightPackage() string {
+	if pkg := strings.TrimSpace(os.Getenv("VIVERO_PLAYWRIGHT_PACKAGE")); pkg != "" {
+		return pkg
+	}
+	return "playwright"
+}
+
 type screenshotCropResult struct {
 	Cropped        bool
 	OriginalWidth  int
@@ -448,7 +455,7 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 		if err := ensureDir(filepath.Dir(out)); err != nil {
 			return nil, err
 		}
-		args := []string{"--yes", "playwright", "screenshot", "--viewport-size", fmt.Sprintf("%d,%d", bp.Width, bp.Height)}
+		args := []string{"--yes", playwrightPackage(), "screenshot", "--viewport-size", fmt.Sprintf("%d,%d", bp.Width, bp.Height)}
 		args = append(args, "--channel", "chrome")
 		if opts.FullPage {
 			args = append(args, "--full-page")

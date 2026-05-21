@@ -378,22 +378,29 @@ func qaFinalRecordPath(record, artifacts map[string]any) string {
 
 func qaFinalScreenshotPaths(raw any) []string {
 	paths := []string{}
-	switch screenshots := raw.(type) {
-	case []map[string]any:
-		for _, screenshot := range screenshots {
-			if path := stringValue(screenshot["path"]); path != "" {
+	seen := map[string]bool{}
+	var collect func(any)
+	collect = func(value any) {
+		switch screenshots := value.(type) {
+		case []map[string]any:
+			for _, screenshot := range screenshots {
+				collect(screenshot)
+			}
+		case []any:
+			for _, item := range screenshots {
+				collect(item)
+			}
+		case map[string]any:
+			if path := stringValue(screenshots["path"]); path != "" && !seen[path] {
+				seen[path] = true
 				paths = append(paths, path)
 			}
-		}
-	case []any:
-		for _, item := range screenshots {
-			if screenshot, ok := item.(map[string]any); ok {
-				if path := stringValue(screenshot["path"]); path != "" {
-					paths = append(paths, path)
-				}
+			if nested := screenshots["screenshots"]; nested != nil {
+				collect(nested)
 			}
 		}
 	}
+	collect(raw)
 	return paths
 }
 

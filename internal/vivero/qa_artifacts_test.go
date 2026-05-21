@@ -348,6 +348,14 @@ func TestQAPureHelperFallbacks(t *testing.T) {
 	if got := qaFinalScreenshotPaths([]any{map[string]any{"path": "/tmp/b.png"}, "skip"}); !reflect.DeepEqual(got, []string{"/tmp/b.png"}) {
 		t.Fatalf("qaFinalScreenshotPaths any slice = %#v", got)
 	}
+	grouped := []any{map[string]any{"screenshots": []any{map[string]any{"path": "/tmp/grouped-desktop.png"}, map[string]any{"path": "/tmp/grouped-mobile.png"}}}}
+	if got := qaFinalScreenshotPaths(grouped); !reflect.DeepEqual(got, []string{"/tmp/grouped-desktop.png", "/tmp/grouped-mobile.png"}) {
+		t.Fatalf("qaFinalScreenshotPaths grouped results = %#v", got)
+	}
+	duplicated := []any{map[string]any{"path": "/tmp/single.png", "screenshots": []any{map[string]any{"path": "/tmp/single.png"}}}}
+	if got := qaFinalScreenshotPaths(duplicated); !reflect.DeepEqual(got, []string{"/tmp/single.png"}) {
+		t.Fatalf("qaFinalScreenshotPaths should dedupe flattened+grouped results = %#v", got)
+	}
 }
 
 func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {

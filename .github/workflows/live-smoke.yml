@@ -1,0 +1,53 @@
+name: Live cloud/browser smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARED_VERSION: "2026.5.0"
+  CLOUDFLARED_LINUX_AMD64_SHA256: "0095e46fdc88855d801c4d304cb1f5dd4bd656116c47ab94c2ad0ae7cda1c7ec"
+  PLAYWRIGHT_VERSION: "1.60.0"
+
+jobs:
+  live-cloud-browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # actions/checkout v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      # actions/setup-go v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: go.mod
+      - name: Install cloudflared
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /tmp/cloudflared
+          echo "${CLOUDFLARED_LINUX_AMD64_SHA256}  /tmp/cloudflared" | sha256sum -c -
+          sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+      - name: Verify browser tooling
+        run: |
+          set -euo pipefail
+          google-chrome --version
+          npm --version
+          npx --yes "playwright@${PLAYWRIGHT_VERSION}" --version
+      - name: Run live cloud/browser smoke
+        env:
+          VIVERO_LIVE_ARTIFACT_DIR: ${{ github.workspace }}/.tmp/live-cloud-browser-smoke
+        run: make live-cloud-browser-smoke
+      - name: Upload live smoke artifacts
+        if: always()
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: live-cloud-browser-smoke
+          path: .tmp/live-cloud-browser-smoke
+          if-no-files-found: ignore
+          retention-days: 3
