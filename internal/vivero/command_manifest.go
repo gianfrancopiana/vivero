@@ -73,7 +73,7 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"commands"}, "list public commands", "vivero commands --json --no-input", true, "stable", global, nil, map[string]any{"returns": "typed command manifest for public commands"}),
 		manifest([]string{"schema"}, "print command schema", "vivero schema up --json --no-input", true, "stable", append(global, CommandFlag{Name: "<command>", Description: "optional command name"}), nil, map[string]any{"returns": "schema for one command or all commands"}),
 		manifest([]string{"doctor"}, "check local Vivero environment", "vivero doctor --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "validate project config via ConfigDoctor instead of local environment checks"}), nil, map[string]any{"returns": "environment checks, or configDoctor when --project is passed"}),
-		manifest([]string{"doctor", "config"}, "validate and lint vivero.yml", "vivero doctor config . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "config validation findings with cross-reference checks"}),
+		manifest([]string{"doctor", "config"}, "validate and lint vivero.yml", "vivero doctor config . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, configDoctorSchema()),
 		manifest([]string{"doctor", "production"}, "read-only production readiness assessment", "vivero doctor production --project . --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}), nil, map[string]any{"returns": "production readiness verdict and diagnostics", "readOnly": true, "doesNotDeploy": true}),
 		withSideEffects(manifest([]string{"deploy", "plan"}, "plan a production deploy", "vivero deploy plan . --environment production --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml"}, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "deploy plan gated by production doctor diagnostics", "doesNotDeploy": true, "strategies": []string{"command", "blue-green"}, "blueGreen": "strategy blue-green plans active and target slots before apply"}), true, false, false),
 		withSideEffects(manifest([]string{"deploy", "apply"}, "apply an approved deploy plan", "vivero deploy apply <plan-id> --json --no-input", false, "stable", global, []CommandArg{{Name: "plan-id", Description: "deploy plan id", Required: true}}, map[string]any{"returns": "release record", "runsAppOwnedCommand": true, "blueGreen": "runs prepare, smoke, then promote; stops before promote when smoke fails"}), true, true, true),
@@ -232,6 +232,28 @@ func schemaBody(cmd CommandManifest) map[string]any {
 		body[k] = v
 	}
 	return body
+}
+
+func configDoctorSchema() map[string]any {
+	return map[string]any{
+		"returns":       "config validation findings with schema, deprecation, and cross-reference checks",
+		"findingFields": []string{"severity", "code", "path", "line", "column", "message", "suggestion", "docs"},
+		"findingCodes": []string{
+			"config-load",
+			"unsupported-config-key",
+			"unknown-config-key",
+			"unknown-source",
+			"unknown-service",
+			"unknown-page",
+			"unknown-qa-scope",
+			"unknown-qa-auth-session",
+			"setup-policy-invalid",
+			"setup-persistent-volume-missing",
+			"setup-fingerprint-paths-missing",
+			"setup-fingerprint-path-missing",
+		},
+		"unknownKeys": "reported as warnings because YAML decoding ignores them; unsupported/retired keys are errors",
+	}
 }
 
 func qaSchema() map[string]any {
