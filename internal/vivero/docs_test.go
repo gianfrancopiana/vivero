@@ -13,20 +13,61 @@ func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
 	}
 	body := string(readme)
 	for _, want := range []string{
-		"safe app-operations control plane",
+		"agent app-ops runtime",
 		"Preview lane",
 		"Deploy/release lane",
-		"Evidence/debug lane",
+		"Evidence/cache lane",
 		"the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
-		"Golden path: preview, prove, deploy",
+		"Golden paths: preview fast, prove, deploy fast",
 		"vivero preview up",
 		"vivero deploy plan",
 		"vivero release events",
+		"## Fast paths",
+		"Docker build cache",
+		"deploy prepare/cache hints",
 		"docs/certified-examples.md",
 		"## Limits",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("README should frame preview/deploy/evidence contract with %q", want)
+		}
+	}
+}
+
+func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
+	files := map[string]string{
+		"readme":            "../../README.md",
+		"skill":             "../../skills/vivero/SKILL.md",
+		"certifiedExamples": "../../docs/certified-examples.md",
+		"releasing":         "../../docs/releasing.md",
+	}
+	bodies := map[string]string{}
+	for name, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		bodies[name] = string(body)
+	}
+
+	for _, want := range []string{"Preview lane", "Deploy/release lane", "Evidence/cache lane"} {
+		if !strings.Contains(bodies["readme"], want) {
+			t.Fatalf("README should teach lane %q", want)
+		}
+	}
+	for _, want := range []string{"## Speed model", "stable preview IDs", "--metadata branch=", "build cache config", "cache inspect", "deploy prepare/cache evidence"} {
+		if !strings.Contains(bodies["skill"], want) {
+			t.Fatalf("bundled skill should document speed model with %q", want)
+		}
+	}
+	for _, want := range []string{"Fast-path signals", "image build duration", "cache enabled/disabled", "warm baseline/derived events", "deploy phase durations", "artifact paths"} {
+		if !strings.Contains(bodies["certifiedExamples"], want) {
+			t.Fatalf("certified examples docs should document fast-path signal %q", want)
+		}
+	}
+	for _, want := range []string{"preview/deploy lane contract", "build cache config", "cache commands", "deploy prepare/cache evidence"} {
+		if !strings.Contains(bodies["releasing"], want) {
+			t.Fatalf("releasing docs should mention release-note surface %q", want)
 		}
 	}
 }
@@ -145,6 +186,48 @@ func TestCertifiedDeployExamplesUseAppOwnedScripts(t *testing.T) {
 				t.Fatalf("strategy = %q, want %q", normalizeDeployStrategy(env.Strategy), tc.strategy)
 			}
 		})
+	}
+}
+
+func TestCertifiedFastPathExamplesExposeCacheContracts(t *testing.T) {
+	_, previewCfg, err := loadProjectConfig("../../examples/nasty-integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monorepo := previewCfg.Services["monorepo-web"]
+	if len(monorepo.Build.Cache.From) == 0 || len(monorepo.Build.Cache.To) == 0 {
+		t.Fatalf("nasty integration monorepo preview should expose explicit build cache config: %#v", monorepo.Build.Cache)
+	}
+	if len(monorepo.DependencyVolumes) == 0 {
+		t.Fatalf("nasty integration monorepo preview should keep runtime dependency volumes alongside build cache: %#v", monorepo.DependencyVolumes)
+	}
+
+	_, deployCfg, err := loadProjectConfig("../../examples/deploy-command")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := deployCfg.Deploy.Environments["production"]
+	if env.PrepareCommand == "" {
+		t.Fatal("deploy-command example should include a prepareCommand fast path")
+	}
+	if env.Cache.Dir == "" || len(env.Cache.Build.From) == 0 || len(env.Cache.Build.To) == 0 {
+		t.Fatalf("deploy-command example should expose cache dir and build cache hints: %#v", env.Cache)
+	}
+
+	for path, wants := range map[string][]string{
+		"../../docs/certified-examples.md":        {"prepareCommand", "build cache specs", "cache inspect"},
+		"../../examples/deploy-command/README.md": {"prepareCommand", "VIVERO_BUILD_CACHE_FROM", "VIVERO_CACHE_DIR"},
+	} {
+		bodyBytes, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		body := string(bodyBytes)
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s should document fast-path contract %q", path, want)
+			}
+		}
 	}
 }
 

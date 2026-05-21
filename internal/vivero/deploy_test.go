@@ -317,6 +317,85 @@ func TestRunReleaseSmokeMissingCommandReturnsActionableJSON(t *testing.T) {
 	}
 }
 
+func TestCommandDeployPrepareCachePhasesAndEvidence(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeFastDeployFixture(t)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	planMap := decodeJSONMap(t, stdout)["plan"].(map[string]any)
+	if planMap["prepareCommand"] == "" || planMap["applyCommand"] == "" {
+		t.Fatalf("command deploy plan should expose prepare/apply commands: %#v", planMap)
+	}
+	if got := phaseNames(planMap["phases"].([]any)); strings.Join(got, ",") != "prepare,apply,smoke,status" {
+		t.Fatalf("command deploy plan should expose phase order, got %v", got)
+	}
+	cache := planMap["cache"].(map[string]any)
+	if cache["dir"] != filepath.Join(projectDir, ".vivero", "cache", "deploy") {
+		t.Fatalf("deploy cache dir should be resolved relative to project root: %#v", cache)
+	}
+	buildCache := cache["build"].(map[string]any)
+	if buildCache["enabled"] != true || len(buildCache["from"].([]any)) != 1 || len(buildCache["to"].([]any)) != 1 {
+		t.Fatalf("deploy plan should expose build cache hints: %#v", cache)
+	}
+
+	planID := planMap["id"].(string)
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	applyPayload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, applyPayload)
+	release := applyPayload["release"].(map[string]any)
+	if release["status"] != "applied" {
+		t.Fatalf("successful command deploy should finish applied, got %#v", release)
+	}
+	if got := phaseRecordNames(release["phases"].([]any)); strings.Join(got, ",") != "prepare:succeeded,apply:succeeded,smoke:succeeded,status:succeeded" {
+		t.Fatalf("unexpected command deploy phase records: %v", got)
+	}
+	for _, raw := range release["phases"].([]any) {
+		phase := raw.(map[string]any)
+		if _, ok := phase["durationMs"].(float64); !ok {
+			t.Fatalf("phase missing durationMs evidence: %#v", phase)
+		}
+		artifact, ok := phase["artifact"].(map[string]any)
+		if !ok || artifact["path"] == "" {
+			t.Fatalf("phase missing command-output artifact path: %#v", phase)
+		}
+	}
+	orderBytes, err := os.ReadFile(filepath.Join(projectDir, "deploy-order.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(orderBytes)); got != "prepare:prepare\napply:apply\nsmoke:smoke\nstatus:status" {
+		t.Fatalf("unexpected command phase order/actions:\n%s", got)
+	}
+	cacheEnvBytes, err := os.ReadFile(filepath.Join(projectDir, "deploy-cache-env.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheEnv := string(cacheEnvBytes)
+	for _, want := range []string{"cache-dir=" + filepath.Join(projectDir, ".vivero", "cache", "deploy"), "VIVERO_BUILD_CACHE_FROM", "type=local,src=", "VIVERO_BUILD_CACHE_TO", "type=local,dest="} {
+		if !strings.Contains(cacheEnv, want) {
+			t.Fatalf("deploy cache env proof missing %q:\n%s", want, cacheEnv)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "logs", "release:"+release["id"].(string), "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("release logs exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	logs := decodeJSONMap(t, stdout)["logs"].([]any)
+	content := stdout
+	for _, want := range []string{"prepare-output", "apply-output", "smoke-output", "live-status", "\"path\":"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("release logs should include phase output and artifact paths, missing %q: %#v", want, logs)
+		}
+	}
+}
+
 func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	home := t.TempDir()
 	projectDir := writeBlueGreenDeployFixture(t, false)
@@ -985,6 +1064,83 @@ func writeReleaseEvidenceDeployFixture(t *testing.T, failingSmoke bool) string {
 		"      statusCommand: 'printf applied'\n" +
 		"      smokeCommand: '" + smokeCommand + "'\n" +
 		"      rollbackCommand: 'printf rollback:$VIVERO_ROLLBACK_RELEASE_ID > deploy-rollback.txt'\n"
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeFastDeployFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/usr/bin/env sh
+set -eu
+action="${1:-}"
+case "$action" in
+  prepare)
+    mkdir -p "$VIVERO_CACHE_DIR"
+    printf 'prepare:%s\n' "$VIVERO_RELEASE_ACTION" >> deploy-order.txt
+    {
+      printf 'cache-dir=%s\n' "$VIVERO_CACHE_DIR"
+      printf 'VIVERO_BUILD_CACHE_FROM=%s\n' "${VIVERO_BUILD_CACHE_FROM:-}"
+      printf 'VIVERO_BUILD_CACHE_TO=%s\n' "${VIVERO_BUILD_CACHE_TO:-}"
+    } > deploy-cache-env.txt
+    printf 'prepare-output'
+    ;;
+  apply)
+    printf 'apply:%s\n' "$VIVERO_RELEASE_ACTION" >> deploy-order.txt
+    printf 'apply-output'
+    ;;
+  smoke)
+    printf 'smoke:%s\n' "$VIVERO_RELEASE_ACTION" >> deploy-order.txt
+    printf 'smoke-output'
+    ;;
+  status)
+    printf 'status:%s\n' "$VIVERO_RELEASE_ACTION" >> deploy-order.txt
+    printf 'live-status'
+    ;;
+  rollback)
+    printf 'rollback:%s\n' "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "scripts", "deploy.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `project:
+  name: demo-fast-deploy
+services:
+  web:
+    image: registry.example.com/demo-fast-deploy@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+deploy:
+  environments:
+    production:
+      prepareCommand: 'sh scripts/deploy.sh prepare'
+      applyCommand: 'sh scripts/deploy.sh apply'
+      smokeCommand: 'sh scripts/deploy.sh smoke'
+      statusCommand: 'sh scripts/deploy.sh status'
+      rollbackCommand: 'sh scripts/deploy.sh rollback'
+      cache:
+        dir: .vivero/cache/deploy
+        build:
+          from:
+            - type=local,src=.vivero/cache/build/web
+          to:
+            - type=local,dest=.vivero/cache/build/web,mode=max
+`
 	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -98,6 +98,9 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if _, err := servicePortPlan(svc); err != nil {
 			return fmt.Errorf("%s service %s has invalid port configuration: %w", configPath, name, err)
 		}
+		if err := validateImageBuildCacheConfig(configPath, name, svc.Build.Cache); err != nil {
+			return err
+		}
 		if err := validateRuntimeEnv(configPath, "service", name, svc.Env); err != nil {
 			return err
 		}
@@ -205,10 +208,19 @@ func validateDeployConfig(configPath string, deploy DeployConfig) error {
 			return fmt.Errorf("%s deploy.environments has an empty environment name", configPath)
 		}
 		env := deploy.Environments[name]
-		for field, value := range map[string]string{"strategy": env.Strategy, "applyCommand": env.ApplyCommand, "statusCommand": env.StatusCommand, "smokeCommand": env.SmokeCommand, "rollbackCommand": env.RollbackCommand} {
+		for field, value := range map[string]string{"strategy": env.Strategy, "prepareCommand": env.PrepareCommand, "applyCommand": env.ApplyCommand, "statusCommand": env.StatusCommand, "smokeCommand": env.SmokeCommand, "rollbackCommand": env.RollbackCommand} {
 			if strings.ContainsAny(value, "\x00") {
 				return fmt.Errorf("%s deploy.environments.%s.%s contains unsupported NUL", configPath, name, field)
 			}
+		}
+		if strings.ContainsAny(env.Cache.Dir, "\x00\n\r") {
+			return fmt.Errorf("%s deploy.environments.%s.cache.dir contains unsupported newline or NUL", configPath, name)
+		}
+		if err := validateImageBuildCacheSpecs(configPath, fmt.Sprintf("deploy.environments.%s.cache.build.from", name), env.Cache.Build.From); err != nil {
+			return err
+		}
+		if err := validateImageBuildCacheSpecs(configPath, fmt.Sprintf("deploy.environments.%s.cache.build.to", name), env.Cache.Build.To); err != nil {
+			return err
 		}
 		for field, value := range map[string]string{"activeSlotCommand": env.BlueGreen.ActiveSlotCommand, "prepareCommand": env.BlueGreen.PrepareCommand, "smokeCommand": env.BlueGreen.SmokeCommand, "promoteCommand": env.BlueGreen.PromoteCommand, "statusCommand": env.BlueGreen.StatusCommand, "rollbackCommand": env.BlueGreen.RollbackCommand} {
 			if strings.ContainsAny(value, "\x00") {
@@ -220,7 +232,7 @@ func validateDeployConfig(configPath string, deploy DeployConfig) error {
 }
 
 func imageBuildConfigured(build ImageBuildConfig) bool {
-	return strings.TrimSpace(build.Context) != "" || strings.TrimSpace(build.Dockerfile) != "" || strings.TrimSpace(build.Tag) != "" || len(build.Args) > 0
+	return strings.TrimSpace(build.Context) != "" || strings.TrimSpace(build.Dockerfile) != "" || strings.TrimSpace(build.Tag) != "" || len(build.Args) > 0 || imageBuildCacheConfigured(build.Cache)
 }
 
 func (a *App) SyncProject(path string) (ProjectRecord, error) {

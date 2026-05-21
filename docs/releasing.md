@@ -97,6 +97,8 @@ make example-e2e
 - Minor release: new CLI surface, config schema addition, or behavior that needs release notes.
 - Major release: breaking CLI/config/schema behavior.
 
+For minor releases that touch app-operations behavior, include release notes for the preview/deploy lane contract, build cache config, cache commands, deploy prepare/cache evidence, and compatibility aliases. Keep the notes clear that app repos still own Dockerfiles, deploy scripts, secrets, and provider-specific production infrastructure.
+
 Every release should leave these true:
 
 - `brew install gianfrancopiana/tap/vivero` installs the tagged version.

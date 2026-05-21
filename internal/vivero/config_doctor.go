@@ -59,6 +59,7 @@ func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 		report.Path = abs
 	}
 	configDoctorCheckSources(&report, cfg)
+	configDoctorCheckBuildCache(&report, cfg)
 	configDoctorCheckSetup(&report, root, cfg)
 	configDoctorCheckAgent(&report, root, cfg)
 	report.finish()
@@ -128,6 +129,18 @@ func configDoctorCheckSources(report *ConfigDoctorReport, cfg ProjectConfig) {
 		}
 		if _, ok := cfg.Sources[source]; !ok {
 			report.addFinding("error", "unknown-source", "services."+name+".source", fmt.Sprintf("service %s references unknown source %s", name, source))
+		}
+	}
+}
+
+func configDoctorCheckBuildCache(report *ConfigDoctorReport, cfg ProjectConfig) {
+	for _, name := range sortedMapKeys(cfg.Services) {
+		svc := cfg.Services[name]
+		if !imageBuildCacheEnabled(svc.Build.Cache) {
+			continue
+		}
+		if err := ensureDockerBuildxAvailable(); err != nil {
+			report.addFinding("error", "build-cache-buildx-unavailable", "services."+name+".build.cache", fmt.Sprintf("service %s build cache requires Docker buildx: %v", name, err))
 		}
 	}
 }

@@ -26,8 +26,8 @@ vivero preview down agent-demo-local --discard --json --no-input
 - Gate: `make integration-fixtures`
 
 - Path: `examples/nasty-integration`
-- Shapes: static-only, app + database, monorepo app-owned Dockerfile, named public route planning, invalid route rejection, warm volumes, and cleanup/routing edge cases
-- Proves: messy preview config patterns that tend to break before real users do
+- Shapes: static-only, app + database, monorepo app-owned Dockerfile with explicit BuildKit build cache specs, named public route planning, invalid route rejection, warm volumes, and cleanup/routing edge cases
+- Proves: messy preview config patterns that tend to break before real users do, including build cache config next to runtime dependency volumes
 - Gate: `make nasty-integration-fixtures`
 
 The `examples/nasty-integration` profiles are intentionally explicit:
@@ -41,7 +41,7 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 
 - Path: `examples/deploy-command`
 - Shape: command deploy
-- Proves: `deploy plan`, `deploy apply`, smoke gating, idempotent reapply, `release status`, `release events`, `release logs`, `release smoke`, and rollback
+- Proves: `deploy plan`, `deploy apply`, `prepareCommand`, deploy cache hints, smoke gating, idempotent reapply, `release status`, `release events`, `release logs`, `release smoke`, and rollback
 - Gate: `make deploy-fixtures`
 
 - Path: `examples/deploy-blue-green`
@@ -50,6 +50,19 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 - Gate: `make deploy-fixtures`
 
 Both deploy examples use fake registry images and app-owned shell scripts. They do not provision production infrastructure; they exercise Vivero's release state machine and command contract.
+
+## Fast-path signals
+
+Certified examples prove cache and evidence contracts by asserting deterministic state, not brittle wall-clock wins. When reading fixture output, look for:
+
+- image build duration and whether the build used Docker's default cache or configured BuildKit cache specs;
+- cache enabled/disabled fields for build cache, warm volumes, and app-owned setup/prebuild phases;
+- `cache inspect` output showing configured build cache dirs, warm volumes, project volumes, and Vivero-tagged images;
+- warm baseline/derived events that show when a baseline volume was reused or copied for a branch/ref;
+- deploy phase durations for prepare, apply, smoke, status, promote, and rollback;
+- artifact paths for logs, screenshots, QA reports, recordings, release command output, and final handoff JSON.
+
+Fixture gates should assert those fields and paths directly. They should not claim a precise speedup unless the test controls the environment tightly enough to make timing meaningful.
 
 ## Dogfood examples
 

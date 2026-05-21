@@ -71,6 +71,18 @@ vivero deploy plan <project-path> --environment production --json --no-input
 
 Prefer namespaced preview commands for new guidance. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases.
 
+## Speed model
+
+Treat fast repeat operations as part of the runtime contract:
+
+- Use stable preview IDs such as `<project>-pr<id>` or `<project>-local` so Vivero can reuse local state, smart volumes, and evidence paths predictably.
+- Pass `--metadata branch=<name>` or `--metadata ref=<sha-or-ref>` on preview starts when smart warm volumes need baseline-vs-branch behavior.
+- Prefer explicit build cache config under `services.<name>.build.cache` when repeat image builds matter; app-owned Dockerfiles still control layer ordering and BuildKit cache mounts.
+- Use `vivero cache inspect <project> --json --no-input` before guessing about Docker layers, warm volumes, or image state. Use `vivero cache warm` and `vivero cache prune` only when those commands are available in `vivero commands --json --no-input` for the installed CLI.
+- For deploys, look for deploy prepare/cache evidence: prepare phases, cache env hints, per-phase durations, command-output artifacts, release logs, and release events.
+
+Do not promise wall-clock speed. Report concrete cache state, timing fields, and artifact paths from JSON output.
+
 ## Preview flow
 
 Start with a stable preview ID, exact source refs or explicit local source paths, and readiness waiting:

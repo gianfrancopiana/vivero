@@ -57,10 +57,17 @@ type PortConfig struct {
 }
 
 type ImageBuildConfig struct {
-	Context    string            `yaml:"context" json:"context,omitempty"`
-	Dockerfile string            `yaml:"dockerfile" json:"dockerfile,omitempty"`
-	Tag        string            `yaml:"tag" json:"tag,omitempty"`
-	Args       map[string]string `yaml:"args" json:"args,omitempty"`
+	Context    string                `yaml:"context" json:"context,omitempty"`
+	Dockerfile string                `yaml:"dockerfile" json:"dockerfile,omitempty"`
+	Tag        string                `yaml:"tag" json:"tag,omitempty"`
+	Args       map[string]string     `yaml:"args" json:"args,omitempty"`
+	Cache      ImageBuildCacheConfig `yaml:"cache" json:"cache,omitempty"`
+}
+
+type ImageBuildCacheConfig struct {
+	Enabled *bool    `yaml:"enabled" json:"enabled,omitempty"`
+	From    []string `yaml:"from" json:"from,omitempty"`
+	To      []string `yaml:"to" json:"to,omitempty"`
 }
 
 type PublicRewriteConfig struct {
@@ -89,11 +96,18 @@ type DeployConfig struct {
 
 type DeployEnvironmentConfig struct {
 	Strategy        string                `yaml:"strategy" json:"strategy,omitempty"`
+	PrepareCommand  string                `yaml:"prepareCommand" json:"prepareCommand,omitempty"`
 	ApplyCommand    string                `yaml:"applyCommand" json:"applyCommand,omitempty"`
 	StatusCommand   string                `yaml:"statusCommand" json:"statusCommand,omitempty"`
 	SmokeCommand    string                `yaml:"smokeCommand" json:"smokeCommand,omitempty"`
 	RollbackCommand string                `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
+	Cache           DeployCacheConfig     `yaml:"cache" json:"cache,omitempty"`
 	BlueGreen       BlueGreenDeployConfig `yaml:"blueGreen" json:"blueGreen,omitempty"`
+}
+
+type DeployCacheConfig struct {
+	Dir   string                `yaml:"dir" json:"dir,omitempty"`
+	Build ImageBuildCacheConfig `yaml:"build" json:"build,omitempty"`
 }
 
 type BlueGreenDeployConfig struct {

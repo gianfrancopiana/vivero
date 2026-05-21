@@ -19,7 +19,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$workdir/home" "$workdir/out" "$workdir/cases"
+mkdir -p "$workdir/home" "$workdir/out" "$workdir/cases" "$workdir/bin"
+real_docker="$(command -v docker || true)"
+export REAL_DOCKER="$real_docker"
+cat > "$workdir/bin/docker" <<'SH'
+#!/usr/bin/env sh
+set -eu
+if [ "${1:-}" = "buildx" ] && [ "${2:-}" = "version" ]; then
+  printf 'github.com/docker/buildx v0.12.0\n'
+  exit 0
+fi
+if [ -n "${REAL_DOCKER:-}" ] && [ "$REAL_DOCKER" != "$0" ]; then
+  exec "$REAL_DOCKER" "$@"
+fi
+echo "fake docker only supports buildx version in nasty integration fixtures" >&2
+exit 127
+SH
+chmod +x "$workdir/bin/docker"
+export PATH="$workdir/bin:$PATH"
 export HOME="$workdir/home"
 export VIVERO_HOME="$workdir/vivero-home"
 export GOMODCACHE="$original_gomodcache"
@@ -128,6 +145,11 @@ for profile in ["static-only", "app-with-db", "monorepo", "full"]:
     assert profile in (config.get("profiles") or {}), (profile, config.get("profiles"))
 assert "db" in (config.get("backingServices") or {}), config
 assert (config.get("public") or {}).get("mode") == "named-tunnel", config.get("public")
+monorepo = (config.get("services") or {}).get("monorepo-web") or {}
+build_cache = ((monorepo.get("build") or {}).get("cache") or {})
+assert build_cache.get("enabled") is True, build_cache
+assert build_cache.get("from") and build_cache.get("to"), build_cache
+assert monorepo.get("dependencyVolumes"), monorepo
 for case in ["duplicate-public-hosts", "bad-public-domain", "bad-fingerprint-path"]:
     payload = json.loads((out / f"{case}.json").read_text())
     doctor = payload.get("configDoctor") or payload.get("productionDoctor") or payload.get("doctor") or {}

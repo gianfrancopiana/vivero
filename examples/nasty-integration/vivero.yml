@@ -107,6 +107,12 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         APP_ENV: preview
+      cache:
+        enabled: true
+        from:
+          - type=local,src=.vivero/cache/build/monorepo-web
+        to:
+          - type=local,dest=.vivero/cache/build/monorepo-web,mode=max
     workingDir: apps/web
     command: pnpm dev --host 0.0.0.0 --port 3200
     dependencyVolumes:

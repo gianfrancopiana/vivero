@@ -164,6 +164,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return a.runDeploy(rest, stdout, stderr, jsonOut)
 	case "release":
 		return a.runRelease(rest, stdout, stderr, jsonOut)
+	case "cache":
+		return a.runCache(rest, stdout, stderr, jsonOut)
 	case "projects":
 		if len(rest) > 0 && rest[0] == "sync" {
 			pos := positionalArgs(rest[1:])
@@ -510,7 +512,7 @@ func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
 	}
 	group := args[0]
 	switch group {
-	case "deploy", "diagnose", "preview", "project", "qa", "release", "secrets", "skill":
+	case "cache", "deploy", "diagnose", "preview", "project", "qa", "release", "secrets", "skill":
 	default:
 		return "", "", false
 	}
@@ -822,9 +824,13 @@ func (a *App) Prebuild(project string) (map[string]any, error) {
 		if !ok {
 			continue
 		}
-		path := expandPath(srcCfg.Path)
-		if path == "" {
-			path = rec.Path
+		path := rec.Path
+		if strings.TrimSpace(srcCfg.Path) != "" {
+			resolved, err := resolveSourcePath(rec.Path, srcCfg.Path)
+			if err != nil {
+				return nil, err
+			}
+			path = resolved
 		}
 		for _, step := range pb.Steps {
 			out, err := runCmd(path, nil, "/bin/sh", "-lc", step)

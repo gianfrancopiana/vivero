@@ -114,6 +114,42 @@ case "$cmd" in
     echo "built ${tag:-untagged}"
     exit 0
     ;;
+  buildx)
+    sub="${1:-}"
+    if [ $# -gt 0 ]; then shift; fi
+    case "$sub" in
+      version)
+        if [ "${FAKE_DOCKER_BUILDX_FAIL:-}" != "" ]; then echo "$FAKE_DOCKER_BUILDX_FAIL" >&2; exit 7; fi
+        echo "github.com/docker/buildx v0.12.0"
+        exit 0
+        ;;
+      build)
+        tag=""
+        dockerfile=""
+        context=""
+        cache_from=""
+        cache_to=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --load) shift ;;
+            --tag|-t) tag="$2"; shift 2 ;;
+            --file|-f) dockerfile="$2"; shift 2 ;;
+            --build-arg) shift 2 ;;
+            --cache-from) cache_from="${cache_from}${cache_from:+,}$2"; shift 2 ;;
+            --cache-to) cache_to="${cache_to}${cache_to:+,}$2"; shift 2 ;;
+            --) shift; break ;;
+            -*) echo "unsupported docker buildx build flag $1" >&2; exit 2 ;;
+            *) context="$1"; shift ;;
+          esac
+        done
+        printf 'buildx|%s|%s|%s|%s|%s\n' "${tag:-untagged}" "$dockerfile" "$context" "$cache_from" "$cache_to" >> "$state/builds"
+        echo "built ${tag:-untagged}"
+        exit 0
+        ;;
+    esac
+    echo "unsupported docker buildx command $sub" >&2
+    exit 2
+    ;;
   ps)
     preview_filter=""
     while [ $# -gt 0 ]; do
@@ -352,6 +388,43 @@ services:
 	}
 }
 
+func TestLoadProjectConfigRejectsInvalidBuildCacheSpecs(t *testing.T) {
+	tests := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{name: "empty", spec: `""`, want: "must not be empty"},
+		{name: "absolute local source", spec: `type=local,src=/tmp/vivero-build-cache`, want: "must be relative"},
+		{name: "escaping local destination", spec: `type=local,dest=../cache`, want: "escapes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfg := []byte(`project:
+  name: cached-app
+services:
+  web:
+    image: alpine:latest
+    build:
+      cache:
+        from:
+          - ` + tt.spec + `
+`)
+			if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := loadProjectConfig(root)
+			if err == nil {
+				t.Fatal("expected invalid build cache spec to be rejected")
+			}
+			if !strings.Contains(err.Error(), "services.web.build.cache.from[0]") || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("invalid cache spec error should include config path and reason %q: %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestLoadProjectConfigRejectsBackingServiceWithoutImage(t *testing.T) {
 	root := t.TempDir()
 	cfg := []byte(`project:
@@ -448,17 +521,70 @@ func TestDockerBuildArgsUsesContextDockerfileTagAndArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(args, " ")
-	for _, want := range []string{
+	want := []string{
 		"build",
-		"--tag vivero/demo-web:test",
-		"--file /tmp/vivero-example/Dockerfile.runtime",
-		"--build-arg RUBY_VERSION=3.4.3",
+		"--tag", "vivero/demo-web:test",
+		"--file", "/tmp/vivero-example/Dockerfile.runtime",
+		"--build-arg", "RUBY_VERSION=3.4.3",
 		"/tmp/vivero-example",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("docker build args missing %q: %v", want, args)
-		}
+	}
+	if got, want := strings.Join(args, "\n"), strings.Join(want, "\n"); got != want {
+		t.Fatalf("docker build args changed\ngot:  %v\nwant: %v", args, want)
+	}
+}
+
+func TestDockerBuildArgsUsesBuildxForConfiguredCache(t *testing.T) {
+	args, err := dockerBuildArgs(dockerBuildSpec{
+		Tag:          "vivero/demo-web:test",
+		Context:      "/tmp/vivero-example",
+		Dockerfile:   "/tmp/vivero-example/Dockerfile.runtime",
+		CacheEnabled: true,
+		CacheFrom:    []string{"type=local,src=/tmp/vivero-example/.vivero/cache/build/web"},
+		CacheTo:      []string{"type=local,dest=/tmp/vivero-example/.vivero/cache/build/web,mode=max"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"buildx", "build", "--load",
+		"--tag", "vivero/demo-web:test",
+		"--file", "/tmp/vivero-example/Dockerfile.runtime",
+		"--cache-from", "type=local,src=/tmp/vivero-example/.vivero/cache/build/web",
+		"--cache-to", "type=local,dest=/tmp/vivero-example/.vivero/cache/build/web,mode=max",
+		"/tmp/vivero-example",
+	}
+	if got, want := strings.Join(args, "\n"), strings.Join(want, "\n"); got != want {
+		t.Fatalf("buildx cache args mismatch\ngot:  %v\nwant: %v", args, want)
+	}
+}
+
+func TestDockerBuildSpecForServiceResolvesLocalCachePathsUnderContext(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "app", "docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheEnabled := true
+	spec, err := dockerBuildSpecForService(root, "demo", "preview-1", "web", ImageBuildConfig{
+		Context:    "app",
+		Dockerfile: "docker/Dockerfile",
+		Cache: ImageBuildCacheConfig{
+			Enabled: &cacheEnabled,
+			From:    []string{"type=local,src=.vivero/cache/build/web"},
+			To:      []string{"type=local,dest=.vivero/cache/build/web,mode=max"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCachePath := filepath.Join(root, "app", ".vivero", "cache", "build", "web")
+	if spec.Engine != dockerBuildEngineBuildx || !spec.CacheEnabled {
+		t.Fatalf("cache-enabled spec should use buildx: %#v", spec)
+	}
+	if got, want := spec.CacheFrom, []string{"type=local,src=" + wantCachePath}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("cache-from mismatch: got %#v want %#v", got, want)
+	}
+	if got, want := spec.CacheTo, []string{"type=local,dest=" + wantCachePath + ",mode=max"}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("cache-to mismatch: got %#v want %#v", got, want)
 	}
 }
 

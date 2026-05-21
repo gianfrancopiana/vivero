@@ -3,6 +3,17 @@ set -eu
 
 action="${1:-}"
 case "$action" in
+  prepare)
+    cache_dir="${VIVERO_CACHE_DIR:-.vivero/cache/deploy}"
+    mkdir -p "$cache_dir"
+    {
+      printf 'cache-dir=%s\n' "$cache_dir"
+      printf 'release-action=%s\n' "${VIVERO_RELEASE_ACTION:-}"
+      printf 'VIVERO_BUILD_CACHE_FROM=%s\n' "${VIVERO_BUILD_CACHE_FROM:-}"
+      printf 'VIVERO_BUILD_CACHE_TO=%s\n' "${VIVERO_BUILD_CACHE_TO:-}"
+    } > deploy-prepare.txt
+    printf 'prepare-output'
+    ;;
   apply)
     count=0
     if [ -f deploy-count.txt ]; then
@@ -26,7 +37,7 @@ case "$action" in
     printf 'rollback:%s\n' "$VIVERO_ROLLBACK_RELEASE_ID" > deploy-rollback.txt
     ;;
   *)
-    echo "usage: $0 apply|smoke|status|rollback" >&2
+    echo "usage: $0 prepare|apply|smoke|status|rollback" >&2
     exit 64
     ;;
 esac
