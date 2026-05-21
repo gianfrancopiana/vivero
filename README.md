@@ -118,6 +118,16 @@ Certified examples are real committed fixtures, not aspirational snippets. See [
 - `examples/deploy-command`: command deploy; proven by `make deploy-fixtures`.
 - `examples/deploy-blue-green`: blue/green deploy; proven by `make deploy-fixtures`.
 
+## Tiny invariant fixture matrix
+
+The fixture set stays intentionally small. Each fixture exists because it proves an invariant class that frontier agents can reuse without memorizing project-specific behavior.
+
+- **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, and cleanup. Prove the boring path with `make example-e2e`; prove messy preview shapes with `make nasty-integration-fixtures`.
+- **Deploy/release invariants:** production doctor, read-only plan, app-owned prepare/apply/smoke/status/rollback commands, locks, idempotency, release history, and blue/green slot transitions. Prove them with `make deploy-fixtures`.
+- **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
+
+Add a new fixture only when it proves a new invariant class. Do not grow a framework zoo of example apps that all prove the same thing.
+
 ## `vivero.yml` at a glance
 
 Keep the file small. It should select sources, services, health checks, profiles, warm volume rules, smoke tests, QA flows, and optional public URL policy. It should reference app-owned runtime assets instead of copying them.

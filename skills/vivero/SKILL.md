@@ -71,6 +71,73 @@ vivero deploy plan <project-path> --environment production --json --no-input
 
 Prefer namespaced preview commands for new guidance. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases.
 
+## Tiny invariant fixture matrix
+
+Keep Vivero proof small and invariant-led. The bundled examples are not a framework zoo; they are a tiny matrix of behaviors frontier agents can trust across unfamiliar repos.
+
+- **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
+- **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs and cache hints; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent. Prove this with `make deploy-fixtures`.
+- **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --json --no-input` when collecting cross-lane evidence.
+
+Add or document a fixture only when it proves a distinct invariant failure mode. Otherwise extend the smallest existing fixture.
+
+## Frontier-agent recipes
+
+Use these recipes when you are a coding agent operating a repo you do not already know.
+
+### Discover the live contract
+
+```sh
+vivero capabilities --json --no-input
+vivero commands --json --no-input
+vivero schema preview up --json --no-input
+vivero schema evidence logs --json --no-input
+vivero schema deploy plan --json --no-input
+```
+
+Trust the installed CLI contract over stale memory. If a command is missing, do not invent it; fall back to the closest manifest-listed command.
+
+### Start from a thin config
+
+```sh
+vivero init /path/to/project --name <project-name> --json --no-input
+vivero doctor config /path/to/project --json --no-input
+vivero projects sync /path/to/project --json --no-input
+```
+
+Keep Dockerfiles, compose files, migrations, deploy scripts, secrets, selectors, and app-specific QA behavior app-owned. `vivero.yml` should point at those assets and declare the agent contract.
+
+### Collect target-aware evidence
+
+```sh
+vivero preview up <project> --id <project>-local --wait --timeout 5m --json --no-input --quiet
+vivero evidence logs preview:<project>-local --json --no-input
+vivero evidence qa run preview:<project>-local --scope smoke --json --no-input --quiet
+vivero evidence screenshot preview:<project>-local web / --target local --json --no-input --quiet
+```
+
+Report the target ref, command, status, and artifact paths. Do not replace evidence with manual notes.
+
+### Plan before applying deploys
+
+```sh
+vivero doctor production --project /path/to/project --json --no-input
+vivero deploy plan /path/to/project --environment production --json --no-input --quiet
+vivero release status <project> --environment production --json --no-input
+```
+
+Stop at the plan unless the operator explicitly approves side-effect-capable production commands such as `deploy apply`, `release smoke`, or `release rollback`.
+
+### Leave a handoff
+
+```sh
+vivero evidence events preview:<project>-local --tail --json --no-input
+vivero qa report preview:<project>-local --out qa/report.md --json --no-input --quiet
+vivero preview down <project>-local --archive-patch --json --no-input --quiet
+```
+
+End with what changed, which target was tested, exact evidence paths, whether deploy was only planned or applied, and the teardown/rollback state.
+
 ## Speed model
 
 Treat fast repeat operations as part of the runtime contract:

@@ -37,6 +37,16 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 - `monorepo`: monorepo app-owned Dockerfile
 - `full`: combined matrix
 
+## Tiny invariant fixture matrix
+
+Keep the matrix tiny and invariant-led. A fixture earns its place only when it proves a behavior class that a frontier agent must be able to rely on in unfamiliar repos.
+
+- **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, and teardown preserves or discards work intentionally. Covered by `make example-e2e`, `make integration-fixtures`, and `make nasty-integration-fixtures`.
+- **Deploy/release invariants:** production doctor runs before plan/apply, plans are reviewable before side effects, app-owned prepare/apply/smoke/status/rollback commands get the expected environment, release state is locked and auditable, failed smoke does not promote, and rollback keeps history consistent. Covered by `make deploy-fixtures`.
+- **Evidence invariants:** every lane returns target-aware JSON with artifact paths for events, logs, screenshots, QA reports, recordings, and release command output. Preview evidence should work through `preview:<id>` targets, and release evidence should work through `release:<id>` targets.
+
+Do not add a parallel example just because a framework is popular. Extend the smallest existing fixture unless the new case creates a distinct invariant failure mode.
+
 ## Deploy/release fixtures
 
 - Path: `examples/deploy-command`
