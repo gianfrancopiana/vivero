@@ -23,8 +23,8 @@ func rootHelp() string {
 		"  vivero release status my-app --environment production --json --no-input",
 		"",
 		"  # Evidence/debug: reuse logs, events, smoke, screenshots, and QA commands",
-		"  vivero logs my-app-local web --json --no-input",
-		"  vivero screenshot my-app-local web / --json --no-input",
+		"  vivero logs preview:my-app-local web --json --no-input",
+		"  vivero screenshot preview:my-app-local web / --json --no-input",
 	} {
 		b.WriteString(line + "\n")
 	}

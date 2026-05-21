@@ -281,11 +281,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(pos) == 0 {
 			return errOut(stderr, jsonOut, missingArgError("inspect", "preview"))
 		}
-		p, err := a.getPreview(pos[0])
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"preview": p}, previewHuman(p))
+		p, err := a.getPreview(previewID)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, map[string]any{"preview": p, "targetRef": targetRef}, previewHuman(p))
 		return 0
 	case "events":
 		pos := positionalArgs(rest)
@@ -296,11 +300,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if hasArg(rest, "--tail") {
 			limit = 50
 		}
-		ev, err := a.events(pos[0], limit)
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		output(stdout, jsonOut, map[string]any{"events": ev}, eventsHuman(ev))
+		ev, err := a.events(previewID, limit)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		output(stdout, jsonOut, map[string]any{"events": ev, "targetRef": targetRef}, eventsHuman(ev))
 		return 0
 	case "sync":
 		pos := positionalArgs(rest)
@@ -348,10 +356,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(cmdArgs) == 0 {
 			return errOut(stderr, jsonOut, missingRequiredError("exec", "command after --", "vivero help exec"))
 		}
-		v, err := a.Exec(pos[0], pos[1], cmdArgs)
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		v, err := a.Exec(previewID, pos[1], cmdArgs)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, fmt.Sprint(v["stdout"])+fmt.Sprint(v["stderr"]))
 		if v["exitCode"].(int) != 0 {
 			return v["exitCode"].(int)
@@ -362,10 +375,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(pos) < 2 {
 			return errOut(stderr, jsonOut, missingRequiredError("logs", "preview and service", "vivero help logs"))
 		}
-		v, err := a.Logs(pos[0], pos[1], 200)
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		v, err := a.Logs(previewID, pos[1], 200)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, strings.Join(v["lines"].([]string), "\n"))
 		return 0
 	case "smoke":
@@ -373,14 +391,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(pos) < 1 {
 			return errOut(stderr, jsonOut, missingArgError("smoke", "preview"))
 		}
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
 		name := ""
 		if len(pos) > 1 {
 			name = pos[1]
 		}
-		v, err := a.Smoke(pos[0], name)
+		v, err := a.Smoke(previewID, name)
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, fmt.Sprintf("smoke ok=%v", v["ok"]))
 		if v["ok"] != true {
 			return 1
@@ -390,6 +413,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		pos := positionalArgs(rest)
 		if len(pos) < 2 {
 			return errOut(stderr, jsonOut, missingRequiredError("screenshot", "preview and service", "vivero help screenshot"))
+		}
+		previewID, targetRef, err := resolvePreviewTargetRef(pos[0])
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
 		}
 		path := "/"
 		if flagPath, ok := flagValue(rest, "--path"); ok {
@@ -437,10 +464,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			opts.Breakpoints = append(opts.Breakpoints, bp)
 		}
-		v, err := a.ScreenshotWithOptions(pos[0], pos[1], opts)
+		v, err := a.ScreenshotWithOptions(previewID, pos[1], opts)
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, screenshotsHuman(v))
 		return 0
 	case "qa":
@@ -521,7 +549,10 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		return errOut(stderr, jsonOut, missingRequiredError("qa", "subcommand and preview", "vivero help qa"))
 	}
 	action := pos[0]
-	previewID := pos[1]
+	previewID, targetRef, err := resolvePreviewTargetRef(pos[1])
+	if err != nil {
+		return errOut(stderr, jsonOut, err)
+	}
 	actionArgs := args[2:]
 	scope, _ := flagValue(actionArgs, "--scope")
 	switch action {
@@ -531,6 +562,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, qaPlanHuman(v))
 		return 0
 	case "run":
@@ -539,6 +571,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, qaRunHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -587,6 +620,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, qaRecordHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -632,6 +666,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, qaFinalHuman(v))
 		if v["ok"] != true {
 			return 1
@@ -644,6 +679,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
+		attachTargetRef(v, targetRef)
 		output(stdout, jsonOut, v, fmt.Sprintf("qa report: %s", v["path"]))
 		return 0
 	default:
