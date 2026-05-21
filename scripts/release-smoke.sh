@@ -29,6 +29,10 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required for release smoke JSON assertions" >&2
   exit 127
 fi
+if ! command -v ruby >/dev/null 2>&1; then
+  echo "ruby is required for Homebrew formula syntax validation" >&2
+  exit 127
+fi
 
 if [ "$snapshot" -eq 1 ]; then
   if ! command -v goreleaser >/dev/null 2>&1; then
@@ -87,6 +91,15 @@ case "$(uname -m)" in
   arm64|aarch64) host_goarch="arm64" ;;
   *) host_goarch="" ;;
 esac
+
+dist_abs="$(cd "$dist_dir" && pwd)"
+scripts/render-homebrew-formula.sh --version v0.0.0 --dist "$dist_dir" --output "$dist_dir/vivero.rb" >/dev/null
+install_tmp="$(mktemp -d)"
+trap 'rm -rf "$install_tmp"' EXIT
+scripts/install.sh --version v0.0.0 --base-url "file://$dist_abs" --bin-dir "$install_tmp/bin" >/dev/null
+"$install_tmp/bin/vivero" version --json --no-input >/dev/null
+rm -rf "$install_tmp"
+trap - EXIT
 
 cleanup() {
   if [ "${tmp:-}" != "" ]; then
