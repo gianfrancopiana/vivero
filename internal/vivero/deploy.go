@@ -281,7 +281,15 @@ func (a *App) CurrentRelease(project, environment string) (ReleaseRecord, error)
 	if strings.TrimSpace(plan.StatusCommand) != "" {
 		out, runErr := runDeployShell(plan, release, plan.StatusCommand, map[string]string{"VIVERO_RELEASE_ACTION": "status"})
 		if runErr != nil {
-			return release, fmt.Errorf("release status failed: %w: %s", runErr, strings.TrimSpace(string(out)))
+			trimmed := strings.TrimSpace(string(out))
+			release.Status = "status_failed"
+			release.Output = appendReleaseOutput(release.Output, trimmed)
+			release.addAudit("status", "failed", trimmed)
+			if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", string(out)); artifactErr == nil {
+				release.Artifacts = append(release.Artifacts, artifact)
+			}
+			_ = a.saveRelease(release)
+			return release, fmt.Errorf("release status failed: %w: %s", runErr, trimmed)
 		}
 		if status := strings.TrimSpace(string(out)); status != "" {
 			release.Status = status
