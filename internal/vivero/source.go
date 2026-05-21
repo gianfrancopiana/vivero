@@ -112,11 +112,3 @@ func resolveProjectPath(projectPath, value string) (string, error) {
 	}
 	return resolved, nil
 }
-
-func pathWithinRoot(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
