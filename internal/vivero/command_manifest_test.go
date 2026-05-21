@@ -1,6 +1,10 @@
 package vivero
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestCommandManifestCoversPublicCommands(t *testing.T) {
 	manifests := commandManifests()
@@ -68,6 +72,89 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 	}
 }
 
+func TestCommandManifestExposesAgentSafetyMetadataForEveryCommand(t *testing.T) {
+	requiredKeys := []string{
+		"readsLocal",
+		"writesLocal",
+		"readsRemote",
+		"writesRemote",
+		"requiresAuth",
+		"requiresNetwork",
+		"dangerous",
+		"agentSafe",
+	}
+	for _, cmd := range commandManifests() {
+		encoded, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", cmd.Name(), err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(encoded, &raw); err != nil {
+			t.Fatalf("unmarshal %s: %v", cmd.Name(), err)
+		}
+		for _, key := range requiredKeys {
+			if _, ok := raw[key]; !ok {
+				t.Fatalf("%s command manifest should explicitly expose %s for agents: %s", cmd.Name(), key, string(encoded))
+			}
+		}
+	}
+}
+
+func TestCommandManifestPromotesTargetRefsAndApprovalToTopLevel(t *testing.T) {
+	commands := commandManifests()
+	for _, name := range []string{"inspect", "events", "logs", "smoke", "screenshot", "qa plan", "qa run", "qa final", "release events", "release logs", "release smoke"} {
+		cmd := mustManifestForTest(t, commands, name)
+		raw := manifestJSONForTest(t, cmd)
+		if _, ok := raw["targetRefs"]; !ok {
+			t.Fatalf("%s should expose targetRefs as first-class manifest metadata: %#v", name, raw)
+		}
+	}
+
+	for _, name := range []string{"deploy apply", "release smoke", "release rollback"} {
+		cmd := mustManifestForTest(t, commands, name)
+		raw := manifestJSONForTest(t, cmd)
+		if raw["approvalRequired"] != "human" {
+			t.Fatalf("%s should require human approval in the manifest, got %#v", name, raw["approvalRequired"])
+		}
+		if raw["agentSafe"] != false || raw["dangerous"] != true {
+			t.Fatalf("%s approval metadata should align with agentSafe=false and dangerous=true: %#v", name, raw)
+		}
+	}
+}
+
+func TestCommandManifestProductionCommandsDiscloseRemoteEffects(t *testing.T) {
+	commands := commandManifests()
+	for _, name := range []string{"deploy apply", "release rollback"} {
+		cmd := mustManifestForTest(t, commands, name)
+		if !cmd.RequiresNet || !cmd.ReadsRemote || !cmd.WritesRemote {
+			t.Fatalf("%s should disclose production remote read/write effects: %#v", name, cmd)
+		}
+	}
+	for _, name := range []string{"release status", "release smoke"} {
+		cmd := mustManifestForTest(t, commands, name)
+		if !cmd.RequiresNet || !cmd.ReadsRemote || cmd.WritesRemote {
+			t.Fatalf("%s should disclose production remote read-only effects: %#v", name, cmd)
+		}
+	}
+}
+
+func TestCommandManifestExamplesResolveToManifestCommands(t *testing.T) {
+	commands := commandManifests()
+	for _, cmd := range commands {
+		for _, example := range cmd.Examples {
+			invocation := strings.Join(example.Command, " ")
+			if !manifestMatchesInvocation(commands, invocation) {
+				t.Fatalf("%s example %q should resolve to a command manifest", cmd.Name(), invocation)
+			}
+			if cmd.AgentSafe && cmd.JSONStability == "stable" && commandSupportsJSONForAgents(cmd) {
+				if !commandFieldsContain(example.Command, "--json") || !commandFieldsContain(example.Command, "--no-input") {
+					t.Fatalf("agent-safe stable example for %s should include --json --no-input: %q", cmd.Name(), invocation)
+				}
+			}
+		}
+	}
+}
+
 func TestCommandCatalogUsesManifestMetadata(t *testing.T) {
 	catalog := commandCatalog()
 	if len(catalog) != len(commandManifests()) {
@@ -125,6 +212,48 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 			t.Fatalf("capabilities missing invariant %s: %#v", want, caps["invariants"])
 		}
 	}
+}
+
+func mustManifestForTest(t *testing.T, commands []CommandManifest, name string) CommandManifest {
+	t.Helper()
+	for _, cmd := range commands {
+		if cmd.Name() == name {
+			return cmd
+		}
+	}
+	t.Fatalf("missing manifest for %s", name)
+	return CommandManifest{}
+}
+
+func manifestJSONForTest(t *testing.T, cmd CommandManifest) map[string]any {
+	t.Helper()
+	encoded, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", cmd.Name(), err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("unmarshal %s: %v", cmd.Name(), err)
+	}
+	return raw
+}
+
+func commandSupportsJSONForAgents(cmd CommandManifest) bool {
+	switch cmd.Name() {
+	case "help", "serve":
+		return false
+	default:
+		return true
+	}
+}
+
+func commandFieldsContain(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }
 
 func stringSet(values []string) map[string]bool {
