@@ -20,10 +20,7 @@ func rootHelp() string {
 	}
 	b.WriteString("\nCommon commands:\n")
 	for _, cmd := range commandCatalog() {
-		if len(cmd.Path) > 2 {
-			continue
-		}
-		if cmd.Name() == "serve" {
+		if cmd.Visibility != CommandVisibilityCommon {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("  %-22s %s\n", "vivero "+cmd.Name(), cmd.Summary))
@@ -133,6 +130,8 @@ func renderCommandHelp(cmd CommandManifest) string {
 		}
 		b.WriteByte('\n')
 	}
+	b.WriteString(fmt.Sprintf("Category: %s\n", cmd.Category))
+	b.WriteString(fmt.Sprintf("Visibility: %s\n", cmd.Visibility))
 	b.WriteString(fmt.Sprintf("JSON stability: %s\n", cmd.JSONStability))
 	if cmd.AgentSafe {
 		b.WriteString("Agent safety: safe for unattended agent use.\n")
@@ -170,11 +169,37 @@ func helpPathFromArgs(args []string) []string {
 	return path
 }
 
+func commandVisibilityHeading(visibility string) string {
+	switch visibility {
+	case CommandVisibilityCommon:
+		return "Common"
+	case CommandVisibilityAdvanced:
+		return "Advanced"
+	case CommandVisibilityInternal:
+		return "Internal"
+	default:
+		return visibility
+	}
+}
+
 func commandsHuman() string {
 	var b strings.Builder
-	for _, c := range commandCatalog() {
-		b.WriteString(c.Name())
-		b.WriteByte('\n')
+	for _, visibility := range []string{CommandVisibilityCommon, CommandVisibilityAdvanced, CommandVisibilityInternal} {
+		wroteHeader := false
+		for _, c := range commandCatalog() {
+			if c.Visibility != visibility {
+				continue
+			}
+			if !wroteHeader {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(commandVisibilityHeading(visibility) + " commands:\n")
+				wroteHeader = true
+			}
+			b.WriteString(c.Name())
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }

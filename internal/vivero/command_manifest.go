@@ -2,6 +2,12 @@ package vivero
 
 import "strings"
 
+const (
+	CommandVisibilityCommon   = "common"
+	CommandVisibilityAdvanced = "advanced"
+	CommandVisibilityInternal = "internal"
+)
+
 type CommandManifest struct {
 	Command       string           `json:"name"`
 	Path          []string         `json:"path"`
@@ -11,6 +17,8 @@ type CommandManifest struct {
 	Examples      []CommandExample `json:"examples,omitempty"`
 	Flags         []CommandFlag    `json:"flags,omitempty"`
 	Args          []CommandArg     `json:"args,omitempty"`
+	Category      string           `json:"category"`
+	Visibility    string           `json:"visibility"`
 	JSONStability string           `json:"jsonStability"`
 	ReadsLocal    bool             `json:"readsLocal,omitempty"`
 	WritesLocal   bool             `json:"writesLocal,omitempty"`
@@ -107,8 +115,67 @@ func commandManifests() []CommandManifest {
 }
 
 func manifest(path []string, summary, usage string, agentSafe bool, stability string, flags []CommandFlag, args []CommandArg, schema map[string]any) CommandManifest {
-	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, Schema: schema}
+	visibility := commandVisibility(path)
+	if !validCommandVisibility(visibility) {
+		visibility = CommandVisibilityAdvanced
+	}
+	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, Schema: schema}
 	return m
+}
+
+func commandVisibility(path []string) string {
+	name := strings.Join(path, " ")
+	switch name {
+	case "deploy plan", "deploy apply", "release status", "release rollback", "sync", "rm", "diff", "exec", "logs", "screenshot", "qa context", "qa record", "qa report", "prebuild", "secrets set", "secrets list", "secrets unset", "skill install", "skill print", "skill path", "skill doctor", "diagnose startup":
+		return CommandVisibilityAdvanced
+	case "serve":
+		return CommandVisibilityInternal
+	default:
+		return CommandVisibilityCommon
+	}
+}
+
+func commandCategory(path []string) string {
+	if len(path) == 0 {
+		return "unknown"
+	}
+	switch path[0] {
+	case "capabilities", "version", "help", "commands", "schema":
+		return "discovery"
+	case "doctor":
+		return "diagnostics"
+	case "deploy", "release":
+		return "release"
+	case "projects", "project":
+		return "projects"
+	case "up", "wait", "down", "list", "inspect", "events", "logs", "smoke":
+		return "runtime"
+	case "sync", "rm", "diff", "exec":
+		return "source"
+	case "screenshot", "qa":
+		return "qa"
+	case "prebuild":
+		return "build"
+	case "secrets":
+		return "secrets"
+	case "skill":
+		return "skills"
+	case "diagnose":
+		return "diagnostics"
+	case "serve":
+		return "control-plane"
+	default:
+		return "other"
+	}
+}
+
+func validCommandVisibility(visibility string) bool {
+	switch visibility {
+	case CommandVisibilityCommon, CommandVisibilityAdvanced, CommandVisibilityInternal:
+		return true
+	default:
+		return false
+	}
 }
 
 func withSideEffects(m CommandManifest, writesLocal, requiresNet, dangerous bool) CommandManifest {
@@ -145,7 +212,22 @@ func schemaFor(command string) map[string]any {
 }
 
 func schemaBody(cmd CommandManifest) map[string]any {
-	body := map[string]any{"usage": cmd.Usage, "jsonStability": cmd.JSONStability, "agentSafe": cmd.AgentSafe, "flags": cmd.Flags, "args": cmd.Args}
+	body := map[string]any{
+		"usage":           cmd.Usage,
+		"category":        cmd.Category,
+		"visibility":      cmd.Visibility,
+		"jsonStability":   cmd.JSONStability,
+		"agentSafe":       cmd.AgentSafe,
+		"readsLocal":      cmd.ReadsLocal,
+		"writesLocal":     cmd.WritesLocal,
+		"readsRemote":     cmd.ReadsRemote,
+		"writesRemote":    cmd.WritesRemote,
+		"requiresAuth":    cmd.RequiresAuth,
+		"requiresNetwork": cmd.RequiresNet,
+		"dangerous":       cmd.Dangerous,
+		"flags":           cmd.Flags,
+		"args":            cmd.Args,
+	}
 	for k, v := range cmd.Schema {
 		body[k] = v
 	}

@@ -44,9 +44,14 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	for _, want := range []string{"Examples:", "vivero diagnose startup", "vivero commands --json --no-input"} {
+	for _, want := range []string{"Examples:", "vivero qa run", "vivero commands --json --no-input"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout)
+		}
+	}
+	for _, hidden := range []string{"vivero serve", "vivero diagnose startup"} {
+		if strings.Contains(stdout, hidden) {
+			t.Fatalf("root help should not show %q because manifest visibility is not common:\n%s", hidden, stdout)
 		}
 	}
 
@@ -59,7 +64,7 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	if examples == -1 || flags == -1 || examples > flags {
 		t.Fatalf("subcommand help should be examples-first:\n%s", stdout)
 	}
-	for _, want := range []string{"Usage:", "vivero qa run", "JSON stability: stable"} {
+	for _, want := range []string{"Usage:", "vivero qa run", "Category: qa", "Visibility: common", "JSON stability: stable"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("qa run help missing %q:\n%s", want, stdout)
 		}
@@ -267,6 +272,11 @@ func TestRunCommandsJSONCoversREADMEInvocations(t *testing.T) {
 	}
 	if len(payload.Commands) == 0 {
 		t.Fatal("commands JSON should include command manifests")
+	}
+	for _, cmd := range payload.Commands {
+		if cmd.Category == "" || !validCommandVisibility(cmd.Visibility) {
+			t.Fatalf("commands JSON missing category/visibility metadata: %#v", cmd)
+		}
 	}
 	readmeBytes, err := os.ReadFile("../../README.md")
 	if err != nil {
