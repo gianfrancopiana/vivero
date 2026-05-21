@@ -173,6 +173,7 @@ vivero release rollback <project> <release-id> --environment production --json -
 Before release-facing changes, run the local confidence ladder:
 
 ```sh
+make audit
 make verify
 make cover
 make example-e2e

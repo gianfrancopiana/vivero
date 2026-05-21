@@ -22,9 +22,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: make verify
-      - run: make test-race
-      - run: make cover
+      - run: make audit
 
   cross-platform:
     name: Cross-platform verification (${{ matrix.os }})
