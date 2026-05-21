@@ -231,6 +231,40 @@ func TestCertifiedFastPathExamplesExposeCacheContracts(t *testing.T) {
 	}
 }
 
+func TestDocsFrameTinyInvariantMatrixAndFrontierAgentRecipes(t *testing.T) {
+	files := map[string]string{
+		"readme":            "../../README.md",
+		"certifiedExamples": "../../docs/certified-examples.md",
+		"skill":             "../../skills/vivero/SKILL.md",
+	}
+	bodies := map[string]string{}
+	for name, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		bodies[name] = string(body)
+	}
+
+	for _, doc := range []string{"readme", "certifiedExamples", "skill"} {
+		for _, want := range []string{"Tiny invariant fixture matrix", "Preview invariants", "Deploy/release invariants", "Evidence invariants"} {
+			if !strings.Contains(bodies[doc], want) {
+				t.Fatalf("%s should frame the tiny invariant matrix with %q", doc, want)
+			}
+		}
+	}
+	for _, want := range []string{"Frontier-agent recipes", "Discover the live contract", "Start from a thin config", "Collect target-aware evidence", "Plan before applying deploys", "Leave a handoff"} {
+		if !strings.Contains(bodies["skill"], want) {
+			t.Fatalf("bundled skill should include frontier-agent recipe %q", want)
+		}
+	}
+	for _, want := range []string{"make example-e2e", "make nasty-integration-fixtures", "make deploy-fixtures", "vivero evidence logs", "vivero evidence qa"} {
+		if !strings.Contains(bodies["readme"], want) || !strings.Contains(bodies["skill"], want) {
+			t.Fatalf("README and skill should ground matrix/recipes in %q", want)
+		}
+	}
+}
+
 func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 	skill, err := os.ReadFile("../../skills/vivero/SKILL.md")
 	if err != nil {
