@@ -39,7 +39,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "preview up", "preview inspect", "preview down", "preview events", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing manifest for %s", name)
 		}
@@ -51,6 +51,8 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		lane       string
 	}{
 		{name: "up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
+		{name: "preview up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
+		{name: "preview events", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "qa run", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "deploy apply", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
 		{name: "release rollback", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},

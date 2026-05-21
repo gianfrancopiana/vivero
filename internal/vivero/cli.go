@@ -71,6 +71,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		output(stdout, jsonOut, schema, "schema: "+command)
 		return 0
 	}
+	if args[0] == "preview" {
+		if len(args) < 2 {
+			return errOut(stderr, jsonOut, missingRequiredError("preview", "subcommand", "vivero help preview"))
+		}
+		return Run(args[1:], stdout, stderr)
+	}
 	a, err := NewApp()
 	if err != nil {
 		return errOut(stderr, jsonOut, err)
@@ -476,7 +482,7 @@ func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
 	}
 	group := args[0]
 	switch group {
-	case "deploy", "diagnose", "project", "qa", "release", "secrets", "skill":
+	case "deploy", "diagnose", "preview", "project", "qa", "release", "secrets", "skill":
 	default:
 		return "", "", false
 	}

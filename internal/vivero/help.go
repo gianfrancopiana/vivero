@@ -12,10 +12,10 @@ func rootHelp() string {
 	for _, line := range []string{
 		"  # Preview: start, inspect, prove, and tear down an isolated app runtime",
 		"  vivero projects sync . --json --no-input",
-		"  vivero up my-app --id my-app-local --wait --timeout 5m --json --no-input",
-		"  vivero events my-app-local --tail --json --no-input",
+		"  vivero preview up my-app --id my-app-local --wait --timeout 5m --json --no-input",
+		"  vivero preview events my-app-local --tail --json --no-input",
 		"  vivero qa run my-app-local --scope all --target local --json --no-input",
-		"  vivero down my-app-local --discard --json --no-input",
+		"  vivero preview down my-app-local --discard --json --no-input",
 		"",
 		"  # Deploy/release: plan, apply, inspect, and roll back app-owned production logic",
 		"  vivero deploy plan . --environment production --json --no-input",

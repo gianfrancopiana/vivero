@@ -44,7 +44,7 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	for _, want := range []string{"local-first app operations for agents", "Preview:", "Deploy/release:", "Evidence/debug:", "vivero up", "vivero deploy plan", "vivero commands --json --no-input"} {
+	for _, want := range []string{"local-first app operations for agents", "Preview:", "Deploy/release:", "Evidence/debug:", "vivero preview up", "vivero deploy plan", "vivero commands --json --no-input"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout)
 		}
@@ -52,6 +52,16 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 	for _, hidden := range []string{"vivero serve", "vivero diagnose startup"} {
 		if strings.Contains(stdout, hidden) {
 			t.Fatalf("root help should not show %q because manifest visibility is not common:\n%s", hidden, stdout)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "help", "preview")
+	if code != 0 || stderr != "" {
+		t.Fatalf("preview help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, want := range []string{"vivero preview - command group", "vivero preview up", "vivero preview inspect", "vivero preview down"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("preview help missing %q:\n%s", want, stdout)
 		}
 	}
 
@@ -68,6 +78,35 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("qa run help missing %q:\n%s", want, stdout)
 		}
+	}
+}
+
+func TestPreviewNamespaceAliasesRootPreviewCommands(t *testing.T) {
+	home := t.TempDir()
+	setupCLIQAPreview(t, home)
+
+	for _, tc := range []struct {
+		name  string
+		root  []string
+		alias []string
+	}{
+		{name: "list", root: []string{"list", "--json", "--no-input"}, alias: []string{"preview", "list", "--json", "--no-input"}},
+		{name: "inspect", root: []string{"inspect", "cli-pr", "--json", "--no-input"}, alias: []string{"preview", "inspect", "cli-pr", "--json", "--no-input"}},
+		{name: "events", root: []string{"events", "cli-pr", "--tail", "--json", "--no-input"}, alias: []string{"preview", "events", "cli-pr", "--tail", "--json", "--no-input"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rootCode, rootStdout, rootStderr := runCLITestCommand(t, home, tc.root...)
+			aliasCode, aliasStdout, aliasStderr := runCLITestCommand(t, home, tc.alias...)
+			if rootCode != 0 || rootStderr != "" {
+				t.Fatalf("root command failed exit=%d stdout=%s stderr=%s", rootCode, rootStdout, rootStderr)
+			}
+			if aliasCode != 0 || aliasStderr != "" {
+				t.Fatalf("preview alias failed exit=%d stdout=%s stderr=%s", aliasCode, aliasStdout, aliasStderr)
+			}
+			if aliasStdout != rootStdout {
+				t.Fatalf("preview alias should match root output\nroot=%s\nalias=%s", rootStdout, aliasStdout)
+			}
+		})
 	}
 }
 
