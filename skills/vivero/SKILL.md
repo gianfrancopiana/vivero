@@ -5,34 +5,41 @@ vivero_cli: 0.1.0
 schema: 1
 license: MIT
 description: >
-  Use the `vivero` CLI to create, inspect, iterate on, verify, QA, and tear down local preview environments, or to plan/apply app-owned deploys and inspect release evidence. Trigger when a task needs a running app preview, a URL that has passed health checks, Docker-compatible container exec/logs/screenshots, seed-backed app state, live source iteration through a Git worktree, project-specific browser QA context, or deploy/release plan/status/events/logs/smoke/rollback. Do not trigger for general issue or PR management unless a running preview or release operation is also needed; Vivero owns app runtime/release orchestration, not PR, CI, or chat workflow.
+  Use the `vivero` CLI for agent-safe app operations: preview, evidence, deploy, verify, and rollback. Trigger when a task needs a running local preview, health-checked URLs, Docker-compatible exec/logs/screenshots, QA artifacts, source iteration through worktrees, app-owned deploy plans/applies, or release evidence and rollback. Vivero owns orchestration, safety gates, state, and evidence; app repos own Dockerfiles, deploy scripts, migrations, secrets, and infra behavior.
 ---
 
 # Vivero CLI
 
-Use `vivero` as a local-first runtime for preview environments. It runs services through a Docker-compatible engine such as Docker Desktop or OrbStack.
+Vivero is a local-first app-operations runtime for agents. It has two separate operating lanes:
+
+- preview: safe, disposable environments for development and QA;
+- deploy/release: app-owned production operations with Vivero plans, locks, audit records, evidence, and rollback handles.
+
+Do not treat deploy as “preview, but public.” Production work must use the deploy/release commands and the app-owned deploy config in `vivero.yml`.
 
 ## Mental model
 
-An agent supplies intent. Vivero prepares the preview.
+The agent chooses intent and reports evidence. Vivero executes the repeatable runtime contract.
 
 ```text
 Agent:
-  Chooses project, source refs or paths, checks, and teardown policy.
+  Chooses project, source ref/path, lane, checks, evidence target, and teardown policy.
 
 Vivero:
-  Loads project config, prepares sources, starts services through the container
-  engine, injects secrets, waits for health, exposes URLs, records events,
-  captures evidence, and tears down safely.
+  Loads thin project config, prepares sources, starts preview services, injects
+  secret keys without printing values, waits for health, records events, captures
+  evidence, runs app-owned deploy commands, records releases, and tears down safely.
+
+App repo:
+  Owns Dockerfiles, compose/build scripts, migrations, seed data, deploy scripts,
+  secrets, provider behavior, and production infrastructure.
 ```
 
-Vivero is project-agnostic. Project-specific routes, selectors, restart commands, QA scopes, and browser flows belong in `vivero.yml`, not in this generic skill. Keep `vivero.yml` as thin orchestration metadata: do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Reference app-owned images, Dockerfiles, or prebuild commands instead. Inline Dockerfiles are intentionally unsupported.
-
-Vivero has separate preview and deploy/release lanes. Production operations must use the deploy/release namespace: run `vivero doctor production` first, then `vivero deploy plan`, and only apply a non-blocked plan. Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`; do not overload preview `up`/`down` or quick tunnels for production. For `strategy: blue-green`, Vivero models slots and enforces prepare → smoke → promote before recording the new live slot.
+Keep `vivero.yml` as thin orchestration metadata. Put project-specific routes, selectors, restart commands, QA scopes, browser flows, deploy commands, and release smoke checks there. Reference app-owned images, Dockerfiles, or prebuild commands instead; do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Inline Dockerfiles are intentionally unsupported.
 
 ## First checks
 
-Before operating on an unfamiliar install or project, inspect the live contract:
+Before operating on an unfamiliar install or project, inspect the live contract and config health:
 
 ```sh
 vivero capabilities --json --no-input
@@ -40,66 +47,36 @@ vivero commands --json --no-input
 vivero doctor --json --no-input
 vivero doctor config <project-path> --json --no-input
 vivero doctor production --project <project-path> --json --no-input
-vivero deploy plan <project-path> --environment production --json --no-input
 vivero project inspect <project> --json --no-input
 vivero skill doctor --json --no-input
 ```
 
-Use project inspection to learn the available sources, services, profiles, health checks, smoke tests, useful routes, QA scopes, screenshot breakpoints, artifact paths, restart commands, dependency volume lifetimes, and setup-step policies.
+Use `vivero commands --json --no-input` as the source of truth for command paths, flags, lanes, side effects, and examples. Use `vivero project inspect <project> --json --no-input` to learn sources, services, profiles, health checks, smoke tests, public routes, QA scopes, screenshot breakpoints, artifact paths, restart commands, dependency volume lifetimes, and setup policies.
 
-## Production deploy strategy notes
-
-- Omitted `strategy` means the default app-owned command strategy: Vivero runs `applyCommand`, optional `smokeCommand`, optional `statusCommand`, and `rollbackCommand` from `deploy.environments.<env>`. If `smokeCommand` is set, deploy apply must pass smoke before the release becomes current.
-- `strategy: blue-green` expects `deploy.environments.<env>.blueGreen` with exactly two slots, `activeSlotCommand`, `prepareCommand`, required `smokeCommand`, `promoteCommand`, optional `statusCommand`, and `rollbackCommand`.
-- Blue/green apply runs `prepareCommand`, then `smokeCommand`, then `promoteCommand`. If smoke fails, Vivero exits before promote and records only release history, not a new current release.
-- Use `release events release:<id>` and `release logs release:<id>` for release-scoped debugging evidence; use `release smoke <project>` to rerun the configured current-release smoke gate.
-- Blue/green commands receive `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
-- Use `release status` after apply and `release rollback <project> <release-id>` for status checks and slot-aware rollback; do not manually edit Vivero release state.
-- Deploy/release state is versioned and audited. Treat `planId`, `releaseId`, `stateVersion`, audit events, and command-output artifacts as the durable contract for recovery/debugging.
-- Production apply/rollback is guarded by project/environment locks and idempotency checks. If an operation is already applied or rolled back, prefer re-reading status/history over rerunning app-owned commands manually.
-
-## Repo quality gates
-
-Before claiming a Vivero runtime/release change is ready, run the focused gate for the surface you touched and then the repo gate:
+For deploy work, always run production doctor before planning:
 
 ```sh
-make verify
-make cover
-make example-e2e
-make integration-fixtures
-make nasty-integration-fixtures
-make dogfood-configs
-make deploy-fixtures
-make release-smoke
+vivero doctor production --project <project-path> --json --no-input
+vivero deploy plan <project-path> --environment production --json --no-input
 ```
 
-- `make cover` enforces the coverage ratchet (`COVER_MIN`, default 72.0).
-- `make nasty-integration-fixtures` covers messy project shapes: static-only, app+database, monorepo Dockerfile, warm volumes, profiles, named tunnels, invalid public routes, and fingerprint-path failures.
-- `make dogfood-configs` validates committed examples plus live Helper/Flexile/Chetear/self checkouts when present under `VIVERO_DOGFOOD_ROOT`.
-- `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback.
-- `make release-smoke` builds snapshot artifacts, verifies `checksums.txt`, extracts the host archive, checks `vivero version --json` provenance, and validates packaged config examples.
+## Choose the lane
 
-## Agent invariants
+| Lane | Use when | Primary commands | Safety rule |
+| --- | --- | --- | --- |
+| Preview lane | You need a running local app, live source iteration, service exec, diffs, or teardown. | `vivero preview up`, `vivero preview inspect`, `vivero preview wait`, `vivero preview exec`, `vivero preview sync`, `vivero preview diff`, `vivero preview down` | URL means healthy. Never announce a preview URL until inspect/up reports the service healthy. |
+| Evidence/QA lane | You need logs, events, smoke, screenshots, recordings, QA reports, or startup diagnosis. | `vivero logs`, `vivero smoke`, `vivero screenshot`, `vivero qa plan`, `vivero qa run`, `vivero qa record`, `vivero qa final`, `vivero diagnose startup` | Report exact artifact paths and target refs. Do not substitute screenshots or manual browser notes for declared QA evidence. |
+| Deploy/release lane | You need production readiness checks, deploy planning/apply, release status, release evidence, smoke, or rollback. | `vivero doctor production`, `vivero deploy plan`, `vivero deploy apply`, `vivero release status`, `vivero release events`, `vivero release logs`, `vivero release smoke`, `vivero release rollback` | Plan first. Apply/smoke/rollback can run app-owned commands and normally require human approval. |
+| Support lane | You need CLI discovery, schema, project sync/inspect, skill freshness, or secret-key management. | `vivero capabilities`, `vivero commands`, `vivero schema`, `vivero doctor`, `vivero projects sync`, `vivero project inspect`, `vivero skill doctor`, `vivero secrets list` | Treat secrets as write-only. Use schema/doctor output before guessing. |
 
-- Pass `--json` when consuming command output programmatically.
-- Pass `--no-input` so commands fail instead of blocking for prompts.
-- Use `--quiet` when progress text is not needed.
-- Use `--wait --timeout <duration>` when readiness matters.
-- Prefer exact commit SHAs or explicit local source paths.
-- Use stable preview IDs, usually `<project>-<purpose>` or `<project>-pr<id>`.
-- Use `--metadata branch=<name>` or `--metadata ref=<sha-or-ref>` when smart warm volumes need baseline-vs-branch behavior.
-- Use `--label KEY=VALUE` for caller-owned bookkeeping only; do not put secrets in labels.
-- Pass `--profile <name>` when the project has profiles and the task needs a non-default service set. If `profiles.default` exists, omitted `--profile` uses it.
-- Never announce a preview URL until `vivero up` or `vivero inspect` reports the relevant service healthy. The contract is **URL = works**.
-- Mutate source through Vivero-managed host worktrees or explicit external paths, not by editing container files.
-- Use `vivero inspect`, `vivero events`, and `vivero logs` before guessing why a preview failed.
-- Before tearing down, check whether managed worktrees are dirty. Do not destroy dirty work unless committing, archiving a patch, keeping the worktree, or explicitly discarding.
-- Treat secret values as write-only. Keep them out of logs, events, URLs, labels, comments, and command history where possible.
+Prefer namespaced preview commands for new guidance. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases.
 
-## Common flow: run a preview
+## Preview flow
+
+Start with a stable preview ID, exact source refs or explicit local source paths, and readiness waiting:
 
 ```sh
-vivero up webapp \
+vivero preview up webapp \
   --id webapp-pr42 \
   --source app.ref=<exact-source-sha> \
   --wait --timeout 5m \
@@ -109,17 +86,17 @@ vivero up webapp \
 For an existing checkout, override the source path:
 
 ```sh
-vivero up webapp \
+vivero preview up webapp \
   --id webapp-local \
   --source app.path=/path/to/webapp \
   --wait --timeout 5m \
   --json --no-input --quiet
 ```
 
-For a non-default profile, add `--profile`:
+For a non-default profile, pass it explicitly:
 
 ```sh
-vivero up helper-host-products \
+vivero preview up helper-host-products \
   --id helper-gumroad \
   --profile gumroad \
   --source helper.path=/path/to/helper \
@@ -128,84 +105,32 @@ vivero up helper-host-products \
   --json --no-input --quiet
 ```
 
-Profiles should keep the default boring. For a helper-style app, make `profiles.default` run only the app's local clone shape, then add explicit host-product profiles such as `gumroad` or `flexile`. Use `serviceEnv` to point the helper service at the selected host product service by Docker service name, for example `GUMROAD_URL=http://gumroad-web:3310`.
-
-Expected shape:
-
-```json
-{
-  "preview": {
-    "id": "webapp-local",
-    "project": "webapp",
-    "profile": "default",
-    "status": "running",
-    "services": {
-      "web": {
-        "status": "healthy",
-        "url": "http://127.0.0.1:3000"
-      }
-    }
-  }
-}
-```
-
-If the preview is not running, inspect before retrying:
+Inspect before reporting a URL or retrying a failed start:
 
 ```sh
-vivero inspect webapp-local --json --no-input
-vivero events webapp-local --tail --json --no-input
-vivero logs webapp-local <service> --since 10m --json --no-input
+vivero preview inspect webapp-local --json --no-input
+vivero preview wait webapp-local --timeout 5m --json --no-input --quiet
+vivero diagnose startup webapp-local --json --no-input
+vivero preview events webapp-local --tail --json --no-input
+vivero logs webapp-local web --since 10m --json --no-input
 ```
 
-## Warm dependency volumes and setup policy
+Live iteration should mutate source through Vivero-managed worktrees or explicit external paths, not by editing container files:
 
-Project config can make expensive container volumes reusable:
-
-```yaml
-warm:
-  baselineRefs: [main]
-  fingerprint:
-    paths:
-      - Gemfile.lock
-      - package-lock.json
-      - db/migrate
-services:
-  web:
-    dependencyVolumes:
-      - name: bundle_path
-        target: /bundle_path
-        lifetime: smart
-      - name: node_modules
-        target: /app/node_modules
-        lifetime: smart
-setup:
-  afterSeeds:
-    - service: web
-      policy: once-per-fingerprint
-      command: bundle install && npm install
-      fingerprint:
-        paths:
-          - Gemfile.lock
-          - package-lock.json
-    - service: web
-      policy: once-per-project
-      command: bundle exec rails db:seed
-resources:
-  maxStartupConcurrency: 4
+```sh
+vivero preview sync webapp-local app src/components/Header.tsx \
+  --from ./src/components/Header.tsx \
+  --json --no-input --quiet
+vivero preview diff webapp-local app --json --no-input
+vivero preview exec webapp-local web --json --no-input -- npm test -- --runInBand
+vivero preview rm webapp-local app src/old-file.ts --json --no-input --quiet
 ```
 
-- `lifetime: preview` is the default and is removed by `vivero down --discard`.
-- `lifetime: project` survives preview teardown and is shared by all previews of the project.
-- `lifetime: smart` lets baseline refs update a canonical warm volume while branch previews receive copied preview-local volumes. Use this for branch-sensitive DB/index/cache state.
-- `warm.fingerprint.paths` should list project-relative lockfiles, migrations, schemas, and seed files that invalidate smart warm setup markers and can also be reused by `once-per-fingerprint` setup steps.
-- `policy: once-per-project` skips a setup command after it has succeeded once for the matching project/config step. With smart volumes, markers are fingerprint-aware so changed migrations or lockfiles rerun setup on the affected warm volume.
-- `policy: once-per-fingerprint` skips only when the same service, command, selected fingerprint paths, and selected path contents already succeeded. Put explicit paths under `setup.afterSeeds[].fingerprint.paths`, or let it fall back to `warm.fingerprint.paths`. Use it only when the target service writes durable setup output to a `project` or `smart` dependency volume; runtime rejects it otherwise.
-- Set `resources.maxStartupConcurrency` to bound service startup parallelism. `0` means Vivero's conservative default (`4`), `1` keeps sequential startup, and larger values are capped by service count. Vivero starts backing services in a bounded batch, runs setup sequentially, then starts app services in a bounded batch.
-- Avoid running two baseline previews for the same project at once; they use the same canonical smart volumes. For throwaway checks against a local path while a baseline preview is already running, pass a non-baseline `--metadata ref=<check-name>` or a branch `--source <source>.ref=...` so Vivero creates preview-local derived volumes.
+Profiles should keep the default boring. For helper-style apps, make `profiles.default` run the app's local clone shape, then add explicit host-product profiles such as `gumroad` or `flexile`. Use `serviceEnv` to point one service at another by Docker service name, for example `GUMROAD_URL=http://gumroad-web:3310`.
 
-## Project-local configs from examples
+Project config can make expensive container volumes reusable. Use `lifetime: project` for shared durable dependency volumes and `lifetime: smart` for baseline-vs-branch copied volumes. Put fingerprint paths on lockfiles, migrations, schemas, and seed files. Avoid running two baseline previews for the same project at once because they share canonical smart volumes.
 
-When the caller wants to run a real local checkout from a bundled example, copy the example to a local config directory, rewrite only project/source identity, then sync that directory:
+When adapting a bundled example for a real checkout, copy the example config, rewrite only project/source identity and local paths, then sync:
 
 ```sh
 mkdir -p ~/.vivero/configs/<preview-project>
@@ -221,158 +146,237 @@ PY
 vivero projects sync ~/.vivero/configs/<preview-project> --json --no-input
 ```
 
-Keep the example's service graph, profiles, dependency volume lifetimes, setup policies, health checks, smoke tests, and QA routes intact. Rewrite only project/source identity and other local path/ref values. Do not copy runtime facts from an app-owned Dockerfile, compose file, Makefile, or env contract into long-lived YAML just to make an agent-generated config feel complete. For real app previews, prefer `build.dockerfile` pointing at an existing app Dockerfile when it can build the preview image directly, or `image`/`prebuild` pointing at an app-owned build output. Inline Dockerfiles are unsupported; move that content into the app repo first. For coupled previews, put each app under `services`, use `profiles:` to choose which services/backing services/smoke tests are active, apply profile-specific service env through `serviceEnv`, and use service names, such as `http://app-web:3000`, for container-to-container URLs. Use `--source <source>.path=...` or `--source <source>.ref=...` at `vivero up` time when only the checkout/ref changes.
+Keep the example's service graph, profiles, dependency volume lifetimes, setup policies, health checks, smoke tests, QA routes, and evidence settings intact. Rewrite only local identity and path/ref values.
 
-## Live iteration
+## Evidence/QA flow
 
-Sync a changed file into the source used by the running preview:
+Evidence commands operate against target refs and artifact targets:
 
-```sh
-vivero sync webapp-local app src/components/Header.tsx \
-  --from ./src/components/Header.tsx \
-  --json --no-input --quiet
-```
+- Preview target refs identify a running preview, for example `preview:<id>` or the bare preview ID where the command expects a preview.
+- Release target refs identify recorded release evidence, for example `release:<id>`.
+- QA/screenshot `--target local` uses the local/proxy preview URL and is fastest.
+- `--target public` uses a public tunnel and should be reserved for public-route proof.
+- `--target origin` proves the service origin directly when proxy behavior is not under test.
 
-Remove a file explicitly:
-
-```sh
-vivero rm webapp-local app src/old-file.ts \
-  --json --no-input --quiet
-```
-
-Inspect the preview worktree diff:
-
-```sh
-vivero diff webapp-local app --json --no-input
-```
-
-Commit with Git from the source path returned by `vivero inspect` or `vivero up`.
-
-## Verification
-
-Run a command in a service:
-
-```sh
-vivero exec webapp-local web --json --no-input -- npm test -- --runInBand
-```
-
-View logs:
-
-```sh
-vivero logs webapp-local web --since 10m --json --no-input
-```
-
-Take a viewport screenshot:
-
-```sh
-vivero screenshot webapp-local web / \
-  --width 1280 --height 800 \
-  --json --no-input --quiet
-```
-
-Capture declared breakpoints from project config:
-
-```sh
-vivero screenshot webapp-local web /dashboard \
-  --breakpoints \
-  --json --no-input --quiet
-```
-
-Screenshots default to exact viewport capture. Add `--crop` only when whitespace trimming is more useful than true viewport evidence. Screenshots default to the local/proxy preview URL for speed; add `--public` or `--target public` only when public tunnel screenshot evidence is required. Recordings use the local/proxy preview URL.
-
-Run project-declared smoke tests:
+Run smoke and collect basic evidence first:
 
 ```sh
 vivero smoke webapp-local --json --no-input --quiet
+vivero screenshot webapp-local web /dashboard \
+  --target local \
+  --breakpoints \
+  --json --no-input --quiet
+vivero events webapp-local --tail --json --no-input
+vivero logs webapp-local web --since 10m --json --no-input
 ```
 
-## QA flow
-
-Ask Vivero for the QA plan first:
+Ask Vivero for the QA plan before choosing browser work manually:
 
 ```sh
-vivero qa plan webapp-local --scope public --json --no-input --quiet
+vivero qa plan webapp-local --scope public --target local --json --no-input --quiet
 ```
 
-Treat the plan JSON as the source of truth for:
+Treat the plan JSON as the source of truth for services and URLs, pages and flows, checks and severities, browser driver preference, artifact paths, screenshot commands, recording commands, and optional authenticated storage-state context.
 
-- services and URLs;
-- pages and flows;
-- checks and severities;
-- browser driver preference;
-- artifact paths;
-- screenshot and recording commands derived from `agent.qa.evidence`;
-- optional authenticated QA context from `agent.qa.auth.sessions`, including generated `--storage-state` flags for scoped evidence commands.
-
-Run deterministic Vivero-owned QA:
+Run deterministic Vivero-owned QA and recordings:
 
 ```sh
-vivero qa run webapp-local --scope public --json --no-input --quiet
-```
-
-This runs smoke tests, captures declared page screenshots at project breakpoints and configured color schemes, and writes a report scaffold.
-
-Record declared QA flows as browser video evidence through the local/proxy preview URL:
-
-```sh
+vivero qa run webapp-local --scope public --target local --json --no-input --quiet
 vivero qa record webapp-local --scope public --json --no-input --quiet
-```
-
-For reproducible evidence, use the Playwright-backed commands and driver metadata from `vivero qa plan`; use `evidence.recordings.commands` for recordings. Use Chrome MCP or another live browser driver only for exploratory debugging. Do not hardcode project-specific routes, selectors, breakpoints, color schemes, or flows in this generic skill.
-
-For authenticated QA, the app/operator provides a project-relative Playwright storage-state file under `agent.qa.auth.sessions.<name>.storageState` and attaches it to scopes with either `scopes: [...]` on the session or `authSession: <name>` on the QA scope. Vivero includes the resolved storage state in `qa plan` and generated screenshot/recording commands, but it does not store credentials or run app-specific login flows unless the app declares those commands in its own `vivero.yml`.
-
-After QA, generate or refresh the report scaffold:
-
-```sh
 vivero qa report webapp-local --out qa/report.md --json --no-input --quiet
+vivero qa final webapp-local --scope public --target local --json --no-input --quiet
 ```
 
-For handoff or release evidence, run the final proof command:
+For authenticated QA, the app/operator provides a project-relative Playwright storage-state file under `agent.qa.auth.sessions.<name>.storageState` and attaches it to scopes with `scopes: [...]` on the session or `authSession: <name>` on the QA scope. Vivero includes resolved storage-state flags in `qa plan`; it does not store credentials or run app-specific login flows unless the app declares those commands in its own config.
+
+When reporting evidence, include the target ref, command, pass/fail status, and exact artifact paths. Do not say “screenshots taken” without paths.
+
+## Deploy/release flow
+
+Deploy implementation belongs to app-owned commands configured under `deploy.environments` in `vivero.yml`. Vivero provides the safety wrapper: production doctor, plan, locks, idempotency checks, audit events, command-output artifacts, release records, current-release pointers, smoke gates, and rollback handles.
+
+Plan is the safe entry point. It is read-only with respect to production, but it writes a local Vivero deploy plan artifact:
 
 ```sh
-vivero qa final webapp-local --scope public --json --no-input --quiet
+vivero doctor production --project <project-path> --json --no-input
+vivero deploy plan <project-path> --environment production --json --no-input --quiet
 ```
 
-Use the produced artifacts as evidence wherever the calling workflow needs them.
-
-## Teardown
-
-Clean teardown when no live edits need saving:
+Only apply a non-blocked plan after reviewing diagnostics, app-owned commands, target environment, and expected release behavior. In normal agent workflows, ask for human approval before `vivero deploy apply` because it can run app-owned production commands:
 
 ```sh
-vivero down webapp-local --discard --json --no-input --quiet
+vivero deploy apply deploy-plan-123 --json --no-input --quiet
+```
+
+Check release status and release-scoped evidence after apply:
+
+```sh
+vivero release status webapp --environment production --json --no-input
+vivero release events release:release-123 --environment production --json --no-input
+vivero release logs release:release-123 --environment production --json --no-input
+vivero release smoke webapp --environment production --json --no-input --quiet
+```
+
+`vivero release smoke` can run app-owned smoke commands against the current release. Treat it as side-effect-capable and normally approval-gated when operating production.
+
+Rollback is also approval-gated. Prefer Vivero rollback over manual state edits so release history, current pointers, locks, and audit records remain consistent:
+
+```sh
+vivero release rollback webapp release:release-123 --environment production --json --no-input --quiet
+```
+
+Default deploy strategy means Vivero runs `applyCommand`, optional `smokeCommand`, optional `statusCommand`, and `rollbackCommand`. If `smokeCommand` is set, deploy apply must pass smoke before the release becomes current. For `strategy: blue-green`, Vivero models two slots and enforces prepare → smoke → promote before recording the new live slot. If smoke fails, Vivero exits before promote and records release history without moving current release.
+
+Blue/green app-owned commands receive `VIVERO_BLUE_GREEN_ACTIVE_SLOT`, `VIVERO_BLUE_GREEN_TARGET_SLOT`, `VIVERO_BLUE_GREEN_PREVIOUS_SLOT`, `VIVERO_BLUE_GREEN_SLOTS`, `VIVERO_DEPLOY_PLAN_ID`, and `VIVERO_RELEASE_ID`.
+
+## Failure playbooks
+
+Preview startup failure:
+
+1. Inspect the preview record and service health.
+2. Diagnose startup to find the slow phase or first failure.
+3. Read tail events and service logs.
+4. Confirm source paths, refs, profile selection, and secret keys.
+5. Re-run smoke or QA only after the runtime issue is understood.
+
+```sh
+vivero preview inspect webapp-local --json --no-input
+vivero diagnose startup webapp-local --json --no-input
+vivero preview events webapp-local --tail --json --no-input
+vivero logs webapp-local web --since 10m --json --no-input
+vivero secrets list webapp --json --no-input
+```
+
+Evidence/QA failure:
+
+- Re-read `vivero qa plan` and verify the scope, target, pages, flows, storage state, and generated commands.
+- If public screenshots fail, retry `--target local` to separate app health from tunnel/public-route behavior.
+- If recordings fail, check the browser driver from the plan and preserve partial artifact paths.
+
+```sh
+vivero qa plan webapp-local --scope public --target local --json --no-input --quiet
+vivero qa run webapp-local --scope public --target local --json --no-input --quiet
+vivero diagnose startup webapp-local --json --no-input
+```
+
+Deploy plan blocked:
+
+- Read production doctor diagnostics first.
+- Fix config, missing app-owned commands, health/smoke definitions, route conflicts, or secret-key references in the app repo/config.
+- Generate a new plan instead of editing plan state manually.
+
+```sh
+vivero doctor production --project <project-path> --json --no-input
+vivero deploy plan <project-path> --environment production --json --no-input --quiet
+```
+
+Deploy apply or smoke failure:
+
+- Do not promote manually.
+- Inspect release events and logs.
+- Read current release status.
+- If the failed release never became current, prefer fixing and applying a new plan.
+- If current production is bad, request approval and use Vivero rollback.
+
+```sh
+vivero release events release:release-123 --environment production --json --no-input
+vivero release logs release:release-123 --environment production --json --no-input
+vivero release status webapp --environment production --json --no-input
+vivero release rollback webapp release:release-123 --environment production --json --no-input --quiet
+```
+
+Rollback failure:
+
+- Keep the failed rollback evidence.
+- Re-read release status, events, and logs.
+- Do not edit Vivero release state by hand unless doing explicit emergency recovery with operator approval.
+
+```sh
+vivero release status webapp --environment production --json --no-input
+vivero release events release:release-123 --environment production --json --no-input
+vivero release logs release:release-123 --environment production --json --no-input
+```
+
+Stale state or command confusion:
+
+```sh
+vivero commands --json --no-input
+vivero schema deploy apply --json --no-input
+vivero schema qa final --json --no-input
+vivero skill doctor --json --no-input
+```
+
+## Teardown and safety
+
+Before teardown, check whether managed worktrees are dirty. Do not destroy dirty work unless committing, archiving a patch, keeping the worktree, or explicitly discarding it.
+
+Clean teardown for throwaway previews:
+
+```sh
+vivero preview down webapp-local --discard --json --no-input --quiet
 ```
 
 Safer teardown when edits might exist:
 
 ```sh
-vivero inspect webapp-local --json --no-input
-vivero down webapp-local --archive-patch --json --no-input --quiet
+vivero preview inspect webapp-local --json --no-input
+vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-Use `--keep-worktree` when source should remain available after containers are gone.
-
-## Secrets
-
-Set or unset secrets only when required for the project to run:
+Keep source available after containers are gone:
 
 ```sh
-vivero secrets set webapp API_TOKEN=<value> --json --no-input --quiet
+vivero preview down webapp-local --keep-worktree --json --no-input --quiet
+```
+
+Agent invariants:
+
+- Pass `--json` when consuming output programmatically.
+- Pass `--no-input` so commands fail instead of blocking for prompts.
+- Use `--quiet` when progress text is not needed.
+- Use `--wait --timeout <duration>` when readiness matters.
+- Prefer exact commit SHAs or explicit local source paths.
+- Use stable preview IDs such as `<project>-<purpose>` or `<project>-pr<id>`.
+- Use `--metadata branch=<name>` or `--metadata ref=<sha-or-ref>` when smart warm volumes need baseline-vs-branch behavior.
+- Use `--label KEY=VALUE` for caller-owned bookkeeping only; do not put secrets in labels.
+- Pass `--profile <name>` when the project has profiles and the task needs a non-default service set.
+- Never announce a preview URL until `vivero preview up` or `vivero preview inspect` reports the service healthy.
+
+## Secrets rules
+
+Treat secret values as write-only. Keep them out of logs, events, URLs, labels, comments, screenshots, command history, and PR text.
+
+List keys, set values, and remove keys only when required for the project to run:
+
+```sh
 vivero secrets list webapp --json --no-input
+vivero secrets set webapp API_TOKEN=<value> --json --no-input --quiet
 vivero secrets unset webapp API_TOKEN --json --no-input --quiet
 ```
 
-Never attempt to print secret values. `vivero secrets list` returns keys only.
+Never attempt to print secret values. `vivero secrets list` returns keys only. Prefer project/operator secret stores for production credentials; Vivero should receive references or runtime-injection commands through app-owned config.
 
-## Failure checklist
+## Verification gates
 
-When a preview fails:
+Before claiming a Vivero runtime, evidence, skill, or release change is ready, run the focused gate for the surface touched and then the repo gate:
 
-1. Run `vivero inspect <preview-id> --json --no-input`.
-2. Run `vivero diagnose startup <preview-id> --json --no-input` to identify slow startup phases and the first failure without exposing secret-looking metadata.
-3. Run `vivero events <preview-id> --tail --json --no-input` for the raw event stream.
-4. Check service logs with `vivero logs`.
-5. Confirm source paths and refs in the preview record.
-6. Confirm secrets are present by key, not by value.
-7. Re-run smoke or QA only after the underlying runtime issue is clear.
+```sh
+make verify
+make cover
+make example-e2e
+make integration-fixtures
+make nasty-integration-fixtures
+make dogfood-configs
+make deploy-fixtures
+make release-smoke
+```
+
+For skill changes, also verify print, doctor, and install behavior:
+
+```sh
+vivero skill print --json --no-input
+vivero skill doctor --json --no-input
+vivero skill install --target /tmp/vivero-skill --force --json --no-input
+```
+
+`make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples.

@@ -16,16 +16,16 @@ import (
 const maxSkillDescriptionLength = 800
 
 var requiredSkillSections = []string{
+	"Mental model",
 	"First checks",
-	"Production deploy strategy notes",
-	"Repo quality gates",
-	"Agent invariants",
-	"Common flow: run a preview",
-	"Verification",
-	"QA flow",
-	"Teardown",
-	"Secrets",
-	"Failure checklist",
+	"Choose the lane",
+	"Preview flow",
+	"Evidence/QA flow",
+	"Deploy/release flow",
+	"Failure playbooks",
+	"Teardown and safety",
+	"Secrets rules",
+	"Verification gates",
 }
 
 type skillFrontmatter struct {
