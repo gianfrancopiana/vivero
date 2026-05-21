@@ -18,27 +18,29 @@ const (
 )
 
 type CommandManifest struct {
-	Command       string           `json:"name"`
-	Path          []string         `json:"path"`
-	Summary       string           `json:"summary"`
-	Description   string           `json:"description,omitempty"`
-	Usage         string           `json:"usage,omitempty"`
-	Examples      []CommandExample `json:"examples,omitempty"`
-	Flags         []CommandFlag    `json:"flags,omitempty"`
-	Args          []CommandArg     `json:"args,omitempty"`
-	Category      string           `json:"category"`
-	Lane          string           `json:"lane"`
-	Visibility    string           `json:"visibility"`
-	JSONStability string           `json:"jsonStability"`
-	ReadsLocal    bool             `json:"readsLocal,omitempty"`
-	WritesLocal   bool             `json:"writesLocal,omitempty"`
-	ReadsRemote   bool             `json:"readsRemote,omitempty"`
-	WritesRemote  bool             `json:"writesRemote,omitempty"`
-	RequiresAuth  bool             `json:"requiresAuth,omitempty"`
-	RequiresNet   bool             `json:"requiresNetwork,omitempty"`
-	Dangerous     bool             `json:"dangerous,omitempty"`
-	AgentSafe     bool             `json:"agentSafe"`
-	Schema        map[string]any   `json:"schema,omitempty"`
+	Command          string           `json:"name"`
+	Path             []string         `json:"path"`
+	Summary          string           `json:"summary"`
+	Description      string           `json:"description,omitempty"`
+	Usage            string           `json:"usage,omitempty"`
+	Examples         []CommandExample `json:"examples,omitempty"`
+	Flags            []CommandFlag    `json:"flags,omitempty"`
+	Args             []CommandArg     `json:"args,omitempty"`
+	Category         string           `json:"category"`
+	Lane             string           `json:"lane"`
+	Visibility       string           `json:"visibility"`
+	JSONStability    string           `json:"jsonStability"`
+	ReadsLocal       bool             `json:"readsLocal"`
+	WritesLocal      bool             `json:"writesLocal"`
+	ReadsRemote      bool             `json:"readsRemote"`
+	WritesRemote     bool             `json:"writesRemote"`
+	RequiresAuth     bool             `json:"requiresAuth"`
+	RequiresNet      bool             `json:"requiresNetwork"`
+	Dangerous        bool             `json:"dangerous"`
+	AgentSafe        bool             `json:"agentSafe"`
+	TargetRefs       []string         `json:"targetRefs,omitempty"`
+	ApprovalRequired string           `json:"approvalRequired,omitempty"`
+	Schema           map[string]any   `json:"schema,omitempty"`
 }
 
 type CommandExample struct {
@@ -87,12 +89,12 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"doctor", "config"}, "validate and lint vivero.yml", "vivero doctor config . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, configDoctorSchema()),
 		manifest([]string{"doctor", "production"}, "read-only production readiness assessment", "vivero doctor production --project . --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}), nil, map[string]any{"returns": "production readiness verdict and diagnostics", "readOnly": true, "doesNotDeploy": true}),
 		withSideEffects(manifest([]string{"deploy", "plan"}, "plan a production deploy", "vivero deploy plan . --environment production --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml"}, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "deploy plan gated by production doctor diagnostics", "doesNotDeploy": true, "strategies": []string{"command", "blue-green"}, "blueGreen": "strategy blue-green plans active and target slots before apply"}), true, false, false),
-		withSideEffects(manifest([]string{"deploy", "apply"}, "apply an approved deploy plan", "vivero deploy apply <plan-id> --json --no-input", false, "stable", global, []CommandArg{{Name: "plan-id", Description: "deploy plan id", Required: true}}, map[string]any{"returns": "release record", "runsAppOwnedCommand": true, "blueGreen": "runs prepare, smoke, then promote; stops before promote when smoke fails"}), true, true, true),
-		withSideEffects(manifest([]string{"release", "status"}, "inspect current release status", "vivero release status my-app --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "project", Description: "project name", Required: true}}, map[string]any{"returns": "current release record and status", "runsAppOwnedCommand": true, "mayUpdateLocalReleaseState": true, "blueGreen": "passes the active slot to statusCommand"}), true, true, false),
+		withApproval(withRemoteEffects(withSideEffects(manifest([]string{"deploy", "apply"}, "apply an approved deploy plan", "vivero deploy apply <plan-id> --json --no-input", false, "stable", global, []CommandArg{{Name: "plan-id", Description: "deploy plan id", Required: true}}, map[string]any{"returns": "release record", "runsAppOwnedCommand": true, "blueGreen": "runs prepare, smoke, then promote; stops before promote when smoke fails"}), true, true, true), true, true), "human"),
+		withRemoteEffects(withSideEffects(manifest([]string{"release", "status"}, "inspect current release status", "vivero release status my-app --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "project", Description: "project name", Required: true}}, map[string]any{"returns": "current release record and status", "runsAppOwnedCommand": true, "mayUpdateLocalReleaseState": true, "blueGreen": "passes the active slot to statusCommand"}), true, true, false), true, false),
 		manifest([]string{"release", "events"}, "show release audit events", "vivero release events release:<release-id> --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment when targeting a project", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "release record, audit events, and targetRef", "targetRefs": []string{"release:<id>"}}),
 		manifest([]string{"release", "logs"}, "show release command logs", "vivero release logs release:<release-id> --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment when targeting a project", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "release output, phase output, and command-output artifacts", "targetRefs": []string{"release:<id>"}}),
-		withSideEffects(manifest([]string{"release", "smoke"}, "run the current release smoke gate", "vivero release smoke my-app --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "smoke result plus updated release evidence", "runsAppOwnedCommand": true, "targetRefs": []string{"release:<id>"}}), true, true, false),
-		withSideEffects(manifest([]string{"release", "rollback"}, "run release rollback", "vivero release rollback my-app <release-id> --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "project", Description: "project name", Required: true}, {Name: "release-id", Description: "release to roll back", Required: true}}, map[string]any{"returns": "rollback release record", "runsAppOwnedCommand": true, "blueGreen": "switches traffic back to the previous active slot"}), true, true, true),
+		withApproval(withRemoteEffects(withSideEffects(manifest([]string{"release", "smoke"}, "run the current release smoke gate", "vivero release smoke my-app --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "smoke result plus updated release evidence", "runsAppOwnedCommand": true, "targetRefs": []string{"release:<id>"}}), true, true, true), true, false), "human"),
+		withApproval(withRemoteEffects(withSideEffects(manifest([]string{"release", "rollback"}, "run release rollback", "vivero release rollback my-app <release-id> --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "project", Description: "project name", Required: true}, {Name: "release-id", Description: "release to roll back", Required: true}}, map[string]any{"returns": "rollback release record", "runsAppOwnedCommand": true, "blueGreen": "switches traffic back to the previous active slot"}), true, true, true), true, true), "human"),
 		manifest([]string{"serve"}, "start the local HTTP control plane", "vivero serve --addr 127.0.0.1:7777", false, "none", []CommandFlag{{Name: "--addr", ValueName: "HOST:PORT", Description: "listen address", Default: "127.0.0.1:7777"}}, nil, map[string]any{"sideEffects": "starts a local server"}),
 		manifest([]string{"projects", "sync"}, "sync a project from vivero.yml", "vivero projects sync . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "project record"}),
 		manifest([]string{"projects"}, "list synced projects", "vivero projects --json --no-input", true, "stable", global, nil, map[string]any{"returns": "project records"}),
@@ -186,7 +188,7 @@ func manifest(path []string, summary, usage string, agentSafe bool, stability st
 	if !validCommandVisibility(visibility) {
 		visibility = CommandVisibilityAdvanced
 	}
-	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Lane: commandLane(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, Schema: schema}
+	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Lane: commandLane(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, TargetRefs: commandTargetRefs(schema), Schema: schema}
 	return m
 }
 
@@ -287,6 +289,35 @@ func withSideEffects(m CommandManifest, writesLocal, requiresNet, dangerous bool
 	return m
 }
 
+func withRemoteEffects(m CommandManifest, readsRemote, writesRemote bool) CommandManifest {
+	m.ReadsRemote = readsRemote
+	m.WritesRemote = writesRemote
+	if readsRemote || writesRemote {
+		m.RequiresNet = true
+	}
+	return m
+}
+
+func withApproval(m CommandManifest, approvalRequired string) CommandManifest {
+	m.ApprovalRequired = approvalRequired
+	return m
+}
+
+func commandTargetRefs(schema map[string]any) []string {
+	if schema == nil {
+		return nil
+	}
+	raw, ok := schema["targetRefs"]
+	if !ok {
+		return nil
+	}
+	refs, ok := raw.([]string)
+	if !ok || len(refs) == 0 {
+		return nil
+	}
+	return append([]string{}, refs...)
+}
+
 func commandCatalog() []CommandManifest {
 	return commandManifests()
 }
@@ -333,6 +364,12 @@ func schemaBody(cmd CommandManifest) map[string]any {
 	}
 	for k, v := range cmd.Schema {
 		body[k] = v
+	}
+	if len(cmd.TargetRefs) > 0 {
+		body["targetRefs"] = cmd.TargetRefs
+	}
+	if cmd.ApprovalRequired != "" {
+		body["approvalRequired"] = cmd.ApprovalRequired
 	}
 	return body
 }
