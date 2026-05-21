@@ -164,6 +164,24 @@ func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
 	if smokePayload["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || smokePayload["smoke"].(map[string]any)["ok"] != true || !strings.Contains(stdout, "smoke-output") {
 		t.Fatalf("release smoke should rerun the configured smoke gate against current release: %s", stdout)
 	}
+	code, stdout, stderr = runCLITestCommand(t, home, "evidence", "events", "release:"+releaseID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("evidence release events exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	evidenceEvents := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, evidenceEvents)
+	if evidenceEvents["targetRef"].(map[string]any)["ref"] != "release:"+releaseID || !strings.Contains(stdout, "\"action\": \"apply\"") {
+		t.Fatalf("evidence release events should route to release audit trail: %s", stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "evidence", "logs", "release:"+releaseID, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("evidence release logs exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertEvidenceShape(t, decodeJSONMap(t, stdout))
+	if !strings.Contains(stdout, "apply-output") || !strings.Contains(stdout, "smoke-output") {
+		t.Fatalf("evidence release logs should route to release logs: %s", stdout)
+	}
 }
 
 func TestCommandDeploySmokeFailureDoesNotBecomeCurrentRelease(t *testing.T) {

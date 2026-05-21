@@ -71,6 +71,7 @@ func (c CommandManifest) Name() string {
 
 func commandManifests() []CommandManifest {
 	previewTargetArg := CommandArg{Name: "preview", Description: "preview id or preview:<id> target ref", Required: true}
+	evidenceTargetArg := CommandArg{Name: "target", Description: "preview:<id> or release:<id> target ref", Required: true}
 	global := []CommandFlag{
 		{Name: "--json", Description: "write stable JSON to stdout", Global: true},
 		{Name: "--no-input", Description: "fail instead of prompting", Global: true},
@@ -96,6 +97,11 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"release", "logs"}, "show release command logs", "vivero release logs release:<release-id> --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment when targeting a project", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "release output, phase output, and command-output artifacts", "targetRefs": []string{"release:<id>"}}),
 		withApproval(withRemoteEffects(withSideEffects(manifest([]string{"release", "smoke"}, "run the current release smoke gate", "vivero release smoke my-app --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "target", Description: "project name or release:<id> target ref", Required: true}}, map[string]any{"returns": "smoke result plus updated release evidence", "runsAppOwnedCommand": true, "targetRefs": []string{"release:<id>"}}), true, true, true), true, false), "human"),
 		withApproval(withRemoteEffects(withSideEffects(manifest([]string{"release", "rollback"}, "run release rollback", "vivero release rollback my-app <release-id> --environment production --json --no-input", false, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "deploy environment", Default: "production"}), []CommandArg{{Name: "project", Description: "project name", Required: true}, {Name: "release-id", Description: "release to roll back", Required: true}}, map[string]any{"returns": "rollback release record", "runsAppOwnedCommand": true, "blueGreen": "switches traffic back to the previous active slot"}), true, true, true), true, true), "human"),
+		manifest([]string{"evidence", "events"}, "show events for a preview or release target", "vivero evidence events preview:my-preview --tail --json --no-input", true, "stable", append(global, CommandFlag{Name: "--tail", Description: "limit preview events to latest entries"}, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "release environment when targeting a release project", Default: "production"}), []CommandArg{evidenceTargetArg}, map[string]any{"returns": "targetRef plus preview events or release audit events", "targetRefs": []string{"preview:<id>", "release:<id>"}}),
+		manifest([]string{"evidence", "logs"}, "show logs for a preview service or release", "vivero evidence logs preview:my-preview web --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "release environment when targeting a release project", Default: "production"}), []CommandArg{evidenceTargetArg, {Name: "service", Description: "preview service name; ignored for release targets"}}, map[string]any{"returns": "targetRef plus preview service logs or release command logs", "targetRefs": []string{"preview:<id>", "release:<id>"}}),
+		withApproval(manifest([]string{"evidence", "smoke"}, "run smoke evidence for a preview or release", "vivero evidence smoke preview:my-preview --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "release environment when targeting a release project", Default: "production"}), []CommandArg{evidenceTargetArg, {Name: "check", Description: "optional preview smoke check name"}}, map[string]any{"returns": "targetRef plus preview or release smoke result", "targetRefs": []string{"preview:<id>", "release:<id>"}}), "human-for-release-targets"),
+		manifest([]string{"evidence", "screenshot"}, "capture screenshot evidence for a preview", "vivero evidence screenshot preview:my-preview web / --target local --json --no-input", true, "stable", append(global, CommandFlag{Name: "--target", ValueName: "local|public|origin", Description: "evidence target", Default: "local"}, CommandFlag{Name: "--color-scheme", ValueName: "light|dark", Description: "browser color scheme"}, CommandFlag{Name: "--storage-state", ValueName: "PATH", Description: "Playwright storage state for authenticated evidence"}, CommandFlag{Name: "--breakpoint", ValueName: "NAME=WxH", Description: "extra screenshot size"}), []CommandArg{previewTargetArg, {Name: "service", Required: true}, {Name: "path"}}, map[string]any{"returns": "screenshot artifact paths with targetRef", "targetRefs": []string{"preview:<id>"}}),
+		manifest([]string{"evidence", "qa"}, "run preview QA evidence commands", "vivero evidence qa run preview:my-preview --scope all --target local --json --no-input", true, "stable", append(global, CommandFlag{Name: "--scope", ValueName: "NAME|all", Description: "QA scope"}, CommandFlag{Name: "--target", ValueName: "local|public|origin", Description: "QA target", Default: "local"}, CommandFlag{Name: "--no-screenshots", Description: "skip screenshot capture for run/final"}, CommandFlag{Name: "--no-record", Description: "skip walkthrough recording for final"}), []CommandArg{{Name: "subcommand", Description: "plan|context|run|record|final|report", Required: true}, previewTargetArg}, withTargetRefs(qaSchema())),
 		manifest([]string{"serve"}, "start the local HTTP control plane", "vivero serve --addr 127.0.0.1:7777", false, "none", []CommandFlag{{Name: "--addr", ValueName: "HOST:PORT", Description: "listen address", Default: "127.0.0.1:7777"}}, nil, map[string]any{"sideEffects": "starts a local server"}),
 		manifest([]string{"projects", "sync"}, "sync a project from vivero.yml", "vivero projects sync . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "project record"}),
 		manifest([]string{"projects"}, "list synced projects", "vivero projects --json --no-input", true, "stable", global, nil, map[string]any{"returns": "project records"}),
@@ -241,7 +247,7 @@ func commandCategory(path []string) string {
 		return "runtime"
 	case "sync", "rm", "diff", "exec":
 		return "source"
-	case "screenshot", "qa":
+	case "screenshot", "qa", "evidence":
 		return "qa"
 	case "prebuild":
 		return "build"
@@ -275,7 +281,7 @@ func commandLane(path []string) string {
 			return CommandLaneDeploy
 		}
 		return CommandLaneSupport
-	case "events", "logs", "smoke", "screenshot", "qa", "diagnose":
+	case "events", "logs", "smoke", "screenshot", "qa", "evidence", "diagnose":
 		return CommandLaneEvidence
 	case "up", "wait", "down", "list", "inspect", "sync", "rm", "diff", "exec":
 		return CommandLanePreview

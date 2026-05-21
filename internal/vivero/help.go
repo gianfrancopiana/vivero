@@ -24,9 +24,11 @@ func rootHelp() string {
 		"  vivero release events release:<release-id> --json --no-input",
 		"  vivero release logs release:<release-id> --json --no-input",
 		"",
-		"  # Evidence/debug: reuse logs, events, smoke, screenshots, and QA commands",
-		"  vivero logs preview:my-app-local web --json --no-input",
-		"  vivero screenshot preview:my-app-local web / --json --no-input",
+		"  # Evidence/debug: one target-aware namespace for preview and release proof",
+		"  vivero evidence events preview:my-app-local --tail --json --no-input",
+		"  vivero evidence logs preview:my-app-local web --json --no-input",
+		"  vivero evidence screenshot preview:my-app-local web / --json --no-input",
+		"  vivero evidence logs release:<release-id> --json --no-input",
 	} {
 		b.WriteString(line + "\n")
 	}
