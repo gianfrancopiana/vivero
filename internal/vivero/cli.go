@@ -98,7 +98,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if len(rest) > 0 && rest[0] == "config" {
 			pos := positionalArgs(rest[1:])
 			if len(pos) == 0 {
-				return errOut(stderr, jsonOut, fmt.Errorf("doctor config requires <path>"))
+				return errOut(stderr, jsonOut, missingArgError("doctor config", "path"))
 			}
 			report, err := a.ConfigDoctor(pos[0])
 			if err != nil {
@@ -227,7 +227,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "wait":
 		pos := positionalArgs(rest)
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("wait requires preview id"))
+			return errOut(stderr, jsonOut, missingArgError("wait", "preview"))
 		}
 		timeout, err := durationFlag(rest, "--timeout", 5*time.Minute)
 		if err != nil {
@@ -242,7 +242,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "down":
 		pos := positionalArgs(rest)
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("down requires preview id"))
+			return errOut(stderr, jsonOut, missingArgError("down", "preview"))
 		}
 		mode := ""
 		if hasArg(rest, "--discard") {
@@ -270,7 +270,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "inspect":
 		pos := positionalArgs(rest)
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("inspect requires preview id"))
+			return errOut(stderr, jsonOut, missingArgError("inspect", "preview"))
 		}
 		p, err := a.getPreview(pos[0])
 		if err != nil {
@@ -281,7 +281,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "events":
 		pos := positionalArgs(rest)
 		if len(pos) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("events requires preview id"))
+			return errOut(stderr, jsonOut, missingArgError("events", "preview"))
 		}
 		limit := 0
 		if hasArg(rest, "--tail") {
@@ -296,11 +296,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "sync":
 		pos := positionalArgs(rest)
 		if len(pos) < 3 {
-			return errOut(stderr, jsonOut, fmt.Errorf("sync requires <preview> <source> <path>"))
+			return errOut(stderr, jsonOut, missingRequiredError("sync", "preview, source, and path", "vivero help sync"))
 		}
 		from, ok := flagValue(rest, "--from")
 		if !ok {
-			return errOut(stderr, jsonOut, fmt.Errorf("sync requires --from"))
+			return errOut(stderr, jsonOut, missingRequiredError("sync", "--from", "vivero help sync"))
 		}
 		v, err := a.SyncFile(pos[0], pos[1], pos[2], from)
 		if err != nil {
@@ -311,7 +311,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "rm":
 		pos := positionalArgs(rest)
 		if len(pos) < 3 {
-			return errOut(stderr, jsonOut, fmt.Errorf("rm requires <preview> <source> <path>"))
+			return errOut(stderr, jsonOut, missingRequiredError("rm", "preview, source, and path", "vivero help rm"))
 		}
 		v, err := a.RemoveFile(pos[0], pos[1], pos[2])
 		if err != nil {
@@ -322,7 +322,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "diff":
 		pos := positionalArgs(rest)
 		if len(pos) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("diff requires <preview> <source>"))
+			return errOut(stderr, jsonOut, missingRequiredError("diff", "preview and source", "vivero help diff"))
 		}
 		v, err := a.Diff(pos[0], pos[1])
 		if err != nil {
@@ -333,11 +333,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "exec":
 		pos := positionalArgs(rest)
 		if len(pos) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("exec requires <preview> <service> -- <command>"))
+			return errOut(stderr, jsonOut, missingRequiredError("exec", "preview, service, and command", "vivero help exec"))
 		}
 		cmdArgs := splitAfterDoubleDash(rest)
 		if len(cmdArgs) == 0 {
-			return errOut(stderr, jsonOut, fmt.Errorf("exec requires command after --"))
+			return errOut(stderr, jsonOut, missingRequiredError("exec", "command after --", "vivero help exec"))
 		}
 		v, err := a.Exec(pos[0], pos[1], cmdArgs)
 		if err != nil {
@@ -351,7 +351,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "logs":
 		pos := positionalArgs(rest)
 		if len(pos) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("logs requires <preview> <service>"))
+			return errOut(stderr, jsonOut, missingRequiredError("logs", "preview and service", "vivero help logs"))
 		}
 		v, err := a.Logs(pos[0], pos[1], 200)
 		if err != nil {
@@ -362,7 +362,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "smoke":
 		pos := positionalArgs(rest)
 		if len(pos) < 1 {
-			return errOut(stderr, jsonOut, fmt.Errorf("smoke requires <preview>"))
+			return errOut(stderr, jsonOut, missingArgError("smoke", "preview"))
 		}
 		name := ""
 		if len(pos) > 1 {
@@ -380,7 +380,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "screenshot":
 		pos := positionalArgs(rest)
 		if len(pos) < 2 {
-			return errOut(stderr, jsonOut, fmt.Errorf("screenshot requires <preview> <service> [path]"))
+			return errOut(stderr, jsonOut, missingRequiredError("screenshot", "preview and service", "vivero help screenshot"))
 		}
 		path := "/"
 		if flagPath, ok := flagValue(rest, "--path"); ok {
@@ -441,7 +441,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "prebuild":
 		pos := positionalArgs(rest)
 		if len(pos) < 1 {
-			return errOut(stderr, jsonOut, fmt.Errorf("prebuild requires project"))
+			return errOut(stderr, jsonOut, missingArgError("prebuild", "project"))
 		}
 		v, err := a.Prebuild(pos[0])
 		if err != nil {
@@ -507,11 +507,12 @@ func commandPathPrefixExists(path []string) bool {
 }
 
 func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if len(args) < 2 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero qa <plan|context|run|record|final|report> <preview>"))
+	pos := positionalArgs(args)
+	if len(pos) < 2 {
+		return errOut(stderr, jsonOut, missingRequiredError("qa", "subcommand and preview", "vivero help qa"))
 	}
-	action := args[0]
-	previewID := args[1]
+	action := pos[0]
+	previewID := pos[1]
 	actionArgs := args[2:]
 	scope, _ := flagValue(actionArgs, "--scope")
 	switch action {
@@ -653,10 +654,11 @@ func artifactTargetFromArgs(args []string) string {
 }
 
 func (a *App) runSecrets(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if len(args) < 2 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero secrets <set|list|unset> <project>"))
+	pos := positionalArgs(args)
+	if len(pos) < 2 {
+		return errOut(stderr, jsonOut, missingRequiredError("secrets", "subcommand and project", "vivero help secrets"))
 	}
-	action, project := args[0], args[1]
+	action, project := pos[0], pos[1]
 	path := a.secretFile(project)
 	switch action {
 	case "set":
@@ -667,7 +669,7 @@ func (a *App) runSecrets(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		for _, kv := range positionalArgs(args[2:]) {
 			k, v, ok := strings.Cut(kv, "=")
 			if !ok || k == "" {
-				return errOut(stderr, jsonOut, fmt.Errorf("secret must be KEY=value"))
+				return errOut(stderr, jsonOut, newCLIError("invalid_argument", "secret must be KEY=value", "Run: vivero help secrets set", map[string]string{"command": "secrets set", "argument": "KEY=value"}))
 			}
 			m[k] = v
 		}
@@ -704,10 +706,11 @@ func (a *App) runSecrets(args []string, stdout, stderr io.Writer, jsonOut bool) 
 }
 
 func (a *App) runSkill(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if len(args) == 0 {
-		return errOut(stderr, jsonOut, fmt.Errorf("usage: vivero skill <install|print|path|doctor>"))
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		return errOut(stderr, jsonOut, missingRequiredError("skill", "subcommand", "vivero help skill"))
 	}
-	switch args[0] {
+	switch pos[0] {
 	case "print":
 		v, err := a.SkillPrint()
 		if err != nil {
@@ -742,7 +745,7 @@ func (a *App) runSkill(args []string, stdout, stderr io.Writer, jsonOut bool) in
 		output(stdout, jsonOut, v, "skill doctor complete")
 		return 0
 	default:
-		return errOut(stderr, jsonOut, unknownSubcommandError("skill", args[0]))
+		return errOut(stderr, jsonOut, unknownSubcommandError("skill", pos[0]))
 	}
 }
 

@@ -91,11 +91,7 @@ func errOut(w io.Writer, jsonOut bool, err error) int {
 		return 0
 	}
 	if jsonOut {
-		if ce, ok := asCLIError(err); ok {
-			writeJSON(w, map[string]any{"ok": false, "error": ce})
-		} else {
-			writeJSON(w, map[string]any{"ok": false, "error": map[string]any{"code": "error", "message": err.Error()}})
-		}
+		writeJSON(w, cliErrorPayload(err))
 	} else {
 		fmt.Fprintln(w, "error:", err)
 	}

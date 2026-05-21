@@ -142,22 +142,42 @@ func TestRunUnknownCommandsAreStateFree(t *testing.T) {
 }
 
 func TestRunUnknownCommandReturnsJSONErrorShape(t *testing.T) {
-	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), "prevue", "--json", "--no-input")
-	if code == 0 {
-		t.Fatalf("unknown command should fail stdout=%s stderr=%s", stdout, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("JSON errors should write to stderr only, got stdout=%s", stdout)
-	}
-	var payload struct {
-		OK    bool     `json:"ok"`
-		Error cliError `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
-		t.Fatalf("stderr should be JSON error: %v stderr=%s", err, stderr)
-	}
-	if payload.OK || payload.Error.Code != "unknown_command" || !strings.Contains(payload.Error.Message, "prevue") || payload.Error.Hint == "" {
+	_, payload := runCLITestJSONError(t, "prevue")
+	if payload.Error.Code != "unknown_command" || !strings.Contains(payload.Error.Message, "prevue") || payload.Error.Hint == "" || payload.Error.Docs == "" {
 		t.Fatalf("unexpected error payload: %#v", payload)
+	}
+}
+
+func TestRunJSONErrorStreamContract(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		code    string
+		docs    string
+		details map[string]string
+	}{
+		{name: "unknown command with suggestion", args: []string{"capabilties"}, code: "unknown_command", docs: "vivero help capabilities", details: map[string]string{"command": "capabilties", "suggestion": "capabilities"}},
+		{name: "unknown nested command with suggestion", args: []string{"qa", "rn", "preview"}, code: "unknown_command", docs: "vivero help qa run", details: map[string]string{"command": "qa rn", "suggestion": "qa run"}},
+		{name: "missing required flag", args: []string{"up", "demo"}, code: "missing_required_argument", docs: "vivero help up", details: map[string]string{"command": "up", "required": "--id"}},
+		{name: "missing group action", args: []string{"qa"}, code: "missing_required_argument", docs: "vivero help qa", details: map[string]string{"command": "qa", "required": "subcommand and preview"}},
+		{name: "missing multi-arg command", args: []string{"sync", "preview", "app"}, code: "missing_required_argument", docs: "vivero help sync", details: map[string]string{"command": "sync", "required": "preview, source, and path"}},
+		{name: "invalid argument", args: []string{"secrets", "set", "demo", "NOT_A_SECRET"}, code: "invalid_argument", docs: "vivero help secrets set", details: map[string]string{"command": "secrets set", "argument": "KEY=value"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, payload := runCLITestJSONError(t, tc.args...)
+			if payload.Error.Code != tc.code || payload.Error.Docs != tc.docs {
+				t.Fatalf("unexpected code/docs: %#v", payload.Error)
+			}
+			if payload.Error.Message == "" || payload.Error.Hint == "" {
+				t.Fatalf("JSON error should be actionable: %#v", payload.Error)
+			}
+			for key, want := range tc.details {
+				got, _ := payload.Error.Details[key].(string)
+				if got != want {
+					t.Fatalf("detail %s = %q, want %q in %#v", key, got, want, payload.Error.Details)
+				}
+			}
+		})
 	}
 }
 
@@ -473,6 +493,33 @@ func runCLITestCommand(t *testing.T, home string, args ...string) (int, string, 
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
+}
+
+func runCLITestJSONError(t *testing.T, args ...string) (int, cliErrorResponse) {
+	t.Helper()
+	jsonArgs := append([]string{}, args...)
+	jsonArgs = append(jsonArgs, "--json", "--no-input")
+	code, stdout, stderr := runCLITestCommand(t, t.TempDir(), jsonArgs...)
+	if code == 0 {
+		t.Fatalf("Run(%v) should fail, stdout=%s stderr=%s", jsonArgs, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("Run(%v) JSON error should write stdout empty, got %s", jsonArgs, stdout)
+	}
+	if !json.Valid([]byte(stderr)) {
+		t.Fatalf("Run(%v) stderr should be valid JSON, got %s", jsonArgs, stderr)
+	}
+	if strings.Contains(stderr, "cause") || strings.Contains(stderr, "Cause") {
+		t.Fatalf("Run(%v) JSON error should not leak wrapped causes: %s", jsonArgs, stderr)
+	}
+	var payload cliErrorResponse
+	if err := json.Unmarshal([]byte(stderr), &payload); err != nil {
+		t.Fatalf("Run(%v) stderr should be JSON error: %v stderr=%s", jsonArgs, err, stderr)
+	}
+	if payload.OK || payload.Error.Code == "" || payload.Error.Message == "" {
+		t.Fatalf("Run(%v) invalid JSON error payload: %#v", jsonArgs, payload)
+	}
+	return code, payload
 }
 
 func setupCLIQAPreview(t *testing.T, home string) {

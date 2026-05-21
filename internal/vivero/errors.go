@@ -10,8 +10,14 @@ type cliError struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`
 	Hint    string         `json:"hint,omitempty"`
+	Docs    string         `json:"docs,omitempty"`
 	Details map[string]any `json:"details,omitempty"`
 	Cause   error          `json:"-"`
+}
+
+type cliErrorResponse struct {
+	OK    bool     `json:"ok"`
+	Error cliError `json:"error"`
 }
 
 func (e cliError) Error() string {
@@ -22,7 +28,42 @@ func (e cliError) Error() string {
 }
 
 func newCLIError(code, message, hint string, details any) error {
-	return cliError{Code: code, Message: message, Hint: hint, Details: normalizeDetails(details)}
+	normalized := normalizeDetails(details)
+	return cliError{Code: code, Message: message, Hint: hint, Docs: cliErrorDocs(code, normalized), Details: normalized}
+}
+
+func cliErrorPayload(err error) cliErrorResponse {
+	ce, ok := asCLIError(err)
+	if !ok {
+		ce = cliError{Code: "error", Message: err.Error()}
+	}
+	return cliErrorResponse{OK: false, Error: ce}
+}
+
+func cliErrorDocs(code string, details map[string]any) string {
+	command := stringDetail(details, "command")
+	if code == "unknown_command" {
+		if suggestion := stringDetail(details, "suggestion"); suggestion != "" {
+			return "vivero help " + suggestion
+		}
+		return "vivero commands --json --no-input"
+	}
+	if command != "" {
+		return "vivero help " + command
+	}
+	return ""
+}
+
+func stringDetail(details map[string]any, key string) string {
+	value, ok := details[key]
+	if !ok {
+		return ""
+	}
+	s, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 func normalizeDetails(details any) map[string]any {

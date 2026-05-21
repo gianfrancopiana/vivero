@@ -10,7 +10,7 @@ import (
 
 func TestJSONErrorShape(t *testing.T) {
 	var stderr bytes.Buffer
-	code := errOut(&stderr, true, newCLIError("missing_required_flag", "up requires --id", "Run: vivero help up", map[string]string{"flag": "--id"}))
+	code := errOut(&stderr, true, missingRequiredError("up", "--id", "vivero help up"))
 	if code != 1 {
 		t.Fatalf("exit = %d", code)
 	}
@@ -20,13 +20,14 @@ func TestJSONErrorShape(t *testing.T) {
 			Code    string            `json:"code"`
 			Message string            `json:"message"`
 			Hint    string            `json:"hint"`
+			Docs    string            `json:"docs"`
 			Details map[string]string `json:"details"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(stderr.Bytes(), &body); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stderr.String())
 	}
-	if body.OK || body.Error.Code != "missing_required_flag" || body.Error.Details["flag"] != "--id" {
+	if body.OK || body.Error.Code != "missing_required_argument" || body.Error.Details["required"] != "--id" || body.Error.Docs != "vivero help up" {
 		t.Fatalf("unexpected error body: %#v", body)
 	}
 }
