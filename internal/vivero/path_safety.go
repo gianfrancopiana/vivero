@@ -2,35 +2,29 @@ package vivero
 
 import (
 	"path/filepath"
-	"strings"
+
+	"github.com/gianfrancopiana/vivero/internal/nameid"
+	"github.com/gianfrancopiana/vivero/internal/safepath"
 )
 
-const safePathComponentMaxLen = 120
-
 func safePathComponent(value, fallback string) string {
-	raw := strings.TrimSpace(value)
-	if isSafePathComponent(raw) && len(raw) <= safePathComponentMaxLen {
-		return raw
-	}
-	clean := strings.ReplaceAll(sanitizeDockerName(raw), ".", "-")
-	if clean == "" {
-		clean = strings.ReplaceAll(sanitizeDockerName(fallback), ".", "-")
-	}
-	if clean == "" {
-		clean = "item"
-	}
-	hash := shortStableID(raw)
-	maxClean := safePathComponentMaxLen - len(hash) - 1
-	if maxClean < 1 {
-		maxClean = 1
-	}
-	if len(clean) > maxClean {
-		clean = strings.Trim(clean[:maxClean], "-._")
-	}
-	if clean == "" {
-		clean = "item"
-	}
-	return clean + "-" + hash
+	return safepath.Component(value, fallback)
+}
+
+func isSafePathComponent(value string) bool {
+	return safepath.IsComponent(value)
+}
+
+func pathWithinRoot(root, path string) bool {
+	return safepath.WithinRoot(root, path)
+}
+
+func sanitizeDockerName(s string) string {
+	return nameid.Docker(s)
+}
+
+func shortStableID(input string) string {
+	return nameid.ShortStable(input)
 }
 
 func managedRepoPath(home, source string) string {
@@ -51,17 +45,4 @@ func qaVideoFallbackDir(home, previewID string) string {
 
 func projectSecretFilePath(home, project string) string {
 	return filepath.Join(home, "secrets", safePathComponent(project, "project")+".env")
-}
-
-func isSafePathComponent(value string) bool {
-	if value == "" || value == "." || value == ".." || filepath.IsAbs(value) {
-		return false
-	}
-	for _, r := range value {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
-			continue
-		}
-		return false
-	}
-	return true
 }
