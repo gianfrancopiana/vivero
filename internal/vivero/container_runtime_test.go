@@ -30,9 +30,11 @@ type fakeContainerRuntime struct {
 	removedNetworks   []string
 	ensuredVolumes    []string
 	removedVolumes    []string
+	removedImages     []string
 	copiedVolumes     []string
 	containers        map[string]bool
 	volumes           map[string]bool
+	images            map[string]bool
 
 	startErr               error
 	publishedErr           error
@@ -143,6 +145,18 @@ func (f *fakeContainerRuntime) CopyVolume(src, dst string) error {
 	return nil
 }
 
+func (f *fakeContainerRuntime) ImageExists(ref string) bool {
+	return f.images != nil && f.images[ref]
+}
+
+func (f *fakeContainerRuntime) RemoveImage(ref string) error {
+	f.removedImages = append(f.removedImages, ref)
+	if f.images != nil {
+		delete(f.images, ref)
+	}
+	return nil
+}
+
 func TestUpUsesInjectedContainerRuntime(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -241,6 +255,62 @@ setup:
 	}
 	if len(fake.healthCommands) != 1 || !strings.Contains(fake.healthCommands[0], "container-123:./bin/ready:") {
 		t.Fatalf("health commands = %#v", fake.healthCommands)
+	}
+}
+
+func TestBuildServiceImagesRecordsBuildCacheMetadata(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	fake := &fakeContainerRuntime{}
+	a.containers = fake
+
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheEnabled := true
+	cfg := ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Services: map[string]ServiceConfig{
+			"web": {
+				Build: ImageBuildConfig{
+					Context: "app",
+					Cache: ImageBuildCacheConfig{
+						Enabled: &cacheEnabled,
+						From:    []string{"type=local,src=.vivero/cache/build/web"},
+						To:      []string{"type=local,dest=.vivero/cache/build/web,mode=max"},
+					},
+				},
+			},
+		},
+	}
+	if err := a.buildServiceImages(ProjectRecord{Name: "demo", Path: projectRoot, Config: cfg}, "demo-pr-17", nil, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.built) != 1 || fake.built[0].Engine != dockerBuildEngineBuildx || !fake.built[0].CacheEnabled {
+		t.Fatalf("expected cache-enabled buildx image spec, got %#v", fake.built)
+	}
+	events, err := a.events("demo-pr-17", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built Event
+	for _, event := range events {
+		if event.Type == "image.built" {
+			built = event
+			break
+		}
+	}
+	if built.Type == "" {
+		t.Fatalf("missing image.built event: %#v", events)
+	}
+	wantCachePath := filepath.Join(projectRoot, "app", ".vivero", "cache", "build", "web")
+	if built.Metadata["engine"] != dockerBuildEngineBuildx || built.Metadata["cacheEnabled"] != "true" || !strings.Contains(built.Metadata["cacheFrom"], wantCachePath) || !strings.Contains(built.Metadata["cacheTo"], wantCachePath) || built.Metadata["durationMs"] == "" {
+		t.Fatalf("build cache metadata missing: %#v", built.Metadata)
 	}
 }
 

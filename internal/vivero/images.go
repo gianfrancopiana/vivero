@@ -31,14 +31,15 @@ func (a *App) buildServiceImages(project ProjectRecord, previewID string, source
 			return err
 		}
 		timer := startOperationTimer()
-		a.recordEvent(previewID, "info", "image.building", "building service image", name, map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile})
+		buildMetadata := dockerBuildEventMetadata(spec)
+		a.recordEvent(previewID, "info", "image.building", "building service image", name, buildMetadata)
 		if err := a.containerRuntime().BuildImage(spec); err != nil {
-			a.recordEvent(previewID, "error", "image.build_failed", err.Error(), name, timer.metadata(map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile}))
+			a.recordEvent(previewID, "error", "image.build_failed", err.Error(), name, timer.metadata(buildMetadata))
 			return fmt.Errorf("build image for service %s: %w", name, err)
 		}
 		svc.Image = spec.Tag
 		services[name] = svc
-		a.recordEvent(previewID, "info", "image.built", "service image built", name, timer.metadata(map[string]string{"tag": spec.Tag, "context": spec.Context, "dockerfile": spec.Dockerfile}))
+		a.recordEvent(previewID, "info", "image.built", "service image built", name, timer.metadata(buildMetadata))
 	}
 	cfg.Services = services
 	return nil
@@ -65,7 +66,29 @@ func dockerBuildSpecForService(projectPath, projectName, previewID, service stri
 	if tag == "" {
 		tag = defaultServiceImageTag(projectName, previewID, service)
 	}
-	return dockerBuildSpec{Tag: tag, Context: resolvedContext, Dockerfile: dockerfile, Args: build.Args}, nil
+	cacheFrom, err := resolveBuildCacheSpecs(resolvedContext, "build.cache.from", build.Cache.From)
+	if err != nil {
+		return dockerBuildSpec{}, fmt.Errorf("resolve build cache from for service %s: %w", service, err)
+	}
+	cacheTo, err := resolveBuildCacheSpecs(resolvedContext, "build.cache.to", build.Cache.To)
+	if err != nil {
+		return dockerBuildSpec{}, fmt.Errorf("resolve build cache to for service %s: %w", service, err)
+	}
+	spec := dockerBuildSpec{Tag: tag, Context: resolvedContext, Dockerfile: dockerfile, Args: build.Args, CacheEnabled: imageBuildCacheEnabled(build.Cache), CacheFrom: cacheFrom, CacheTo: cacheTo}
+	spec.Engine = dockerBuildEngine(spec)
+	return spec, nil
+}
+
+func dockerBuildEventMetadata(spec dockerBuildSpec) map[string]string {
+	return map[string]string{
+		"tag":          spec.Tag,
+		"context":      spec.Context,
+		"dockerfile":   spec.Dockerfile,
+		"engine":       dockerBuildEngine(spec),
+		"cacheEnabled": fmt.Sprint(spec.CacheEnabled),
+		"cacheFrom":    dockerBuildCacheSpecsJSON(spec.CacheFrom),
+		"cacheTo":      dockerBuildCacheSpecsJSON(spec.CacheTo),
+	}
 }
 
 func defaultServiceImageTag(projectName, previewID, service string) string {

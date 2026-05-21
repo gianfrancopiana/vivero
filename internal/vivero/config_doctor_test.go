@@ -134,6 +134,61 @@ func TestConfigDoctorReturnsLoadErrorAsReport(t *testing.T) {
 	}
 }
 
+func TestConfigDoctorReportsInvalidBuildCacheSpecAsConfigLoad(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+services:
+  web:
+    image: alpine:latest
+    build:
+      cache:
+        from:
+          - type=local,src=/tmp/vivero-build-cache
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding, ok := configDoctorFinding(report, "config-load")
+	if !ok || report.OK {
+		t.Fatalf("expected config-load finding for invalid cache spec: %#v", report)
+	}
+	if !strings.Contains(finding.Message, "services.web.build.cache.from[0]") || !strings.Contains(finding.Message, "must be relative") {
+		t.Fatalf("cache spec finding should include config path and reason: %#v", finding)
+	}
+}
+
+func TestConfigDoctorReportsUnavailableBuildxForCacheConfig(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_BUILDX_FAIL", "buildx plugin missing")
+	root := writeConfigDoctorFile(t, `project:
+  name: demo
+services:
+  web:
+    image: alpine:latest
+    build:
+      cache:
+        enabled: true
+        from:
+          - type=local,src=.vivero/cache/build/web
+        to:
+          - type=local,dest=.vivero/cache/build/web,mode=max
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding, ok := configDoctorFinding(report, "build-cache-buildx-unavailable")
+	if !ok || report.OK {
+		t.Fatalf("expected unavailable buildx finding for cache config: %#v", report)
+	}
+	if finding.Path != "services.web.build.cache" || !strings.Contains(finding.Message, "buildx plugin missing") {
+		t.Fatalf("unexpected buildx finding: %#v", finding)
+	}
+}
+
 func TestRunDoctorConfigJSONExitCode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)

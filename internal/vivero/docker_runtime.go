@@ -32,10 +32,14 @@ type dockerServiceSpec struct {
 }
 
 type dockerBuildSpec struct {
-	Tag        string
-	Context    string
-	Dockerfile string
-	Args       map[string]string
+	Tag          string
+	Context      string
+	Dockerfile   string
+	Args         map[string]string
+	Engine       string
+	CacheEnabled bool
+	CacheFrom    []string
+	CacheTo      []string
 }
 
 func dockerRunArgs(spec dockerServiceSpec) ([]string, error) {
@@ -159,11 +163,22 @@ func dockerBuildArgs(spec dockerBuildSpec) ([]string, error) {
 		return nil, fmt.Errorf("docker build context is required")
 	}
 	args := []string{"build", "--tag", spec.Tag}
+	if dockerBuildEngine(spec) == dockerBuildEngineBuildx {
+		args = []string{"buildx", "build", "--load", "--tag", spec.Tag}
+	}
 	if strings.TrimSpace(spec.Dockerfile) != "" {
 		args = append(args, "--file", spec.Dockerfile)
 	}
 	for _, k := range sortedMapKeys(spec.Args) {
 		args = append(args, "--build-arg", k+"="+spec.Args[k])
+	}
+	if dockerBuildEngine(spec) == dockerBuildEngineBuildx {
+		for _, cacheFrom := range spec.CacheFrom {
+			args = append(args, "--cache-from", cacheFrom)
+		}
+		for _, cacheTo := range spec.CacheTo {
+			args = append(args, "--cache-to", cacheTo)
+		}
 	}
 	args = append(args, spec.Context)
 	return args, nil
@@ -174,11 +189,28 @@ func buildDockerImage(spec dockerBuildSpec) error {
 	if err != nil {
 		return err
 	}
+	if dockerBuildEngine(spec) == dockerBuildEngineBuildx {
+		if err := ensureDockerBuildxAvailable(); err != nil {
+			return err
+		}
+	}
 	stdout, stderr, err := runDocker(args)
 	if err != nil {
 		return fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr+"\n"+stdout))
 	}
 	return nil
+}
+
+func ensureDockerBuildxAvailable() error {
+	stdout, stderr, err := runDocker([]string{"buildx", "version"})
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(stderr + "\n" + stdout)
+	if detail != "" {
+		return fmt.Errorf("docker buildx is required for build cache but is not available: %w: %s", err, detail)
+	}
+	return fmt.Errorf("docker buildx is required for build cache but is not available: %w", err)
 }
 
 func (a *App) startDockerService(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error) {
@@ -517,6 +549,31 @@ func removeDockerVolume(name string) error {
 	out, err := runCmd("", nil, "docker", "volume", "rm", name)
 	if err != nil && !isDockerNoSuchContainer(string(out)) && !strings.Contains(strings.ToLower(string(out)), "no such volume") && !strings.Contains(strings.ToLower(string(out)), "not found") {
 		return fmt.Errorf("docker volume rm %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func dockerImageExists(ref string) bool {
+	if strings.TrimSpace(ref) == "" || strings.Contains(ref, "*") {
+		return false
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false
+	}
+	_, err := runCmd("", nil, "docker", "image", "inspect", ref)
+	return err == nil
+}
+
+func removeDockerImage(ref string) error {
+	if strings.TrimSpace(ref) == "" || strings.Contains(ref, "*") {
+		return nil
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil
+	}
+	out, err := runCmd("", nil, "docker", "image", "rm", ref)
+	if err != nil && !strings.Contains(strings.ToLower(string(out)), "no such image") && !strings.Contains(strings.ToLower(string(out)), "not found") {
+		return fmt.Errorf("docker image rm %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

@@ -17,6 +17,8 @@ type containerRuntime interface {
 	EnsureVolume(name string) error
 	RemoveVolume(name string) error
 	CopyVolume(src, dst string) error
+	ImageExists(ref string) bool
+	RemoveImage(ref string) error
 }
 
 type dockerContainerRuntime struct{}
@@ -86,4 +88,12 @@ func (dockerContainerRuntime) RemoveVolume(name string) error {
 
 func (dockerContainerRuntime) CopyVolume(src, dst string) error {
 	return copyDockerVolume(src, dst)
+}
+
+func (dockerContainerRuntime) ImageExists(ref string) bool {
+	return dockerImageExists(ref)
+}
+
+func (dockerContainerRuntime) RemoveImage(ref string) error {
+	return removeDockerImage(ref)
 }

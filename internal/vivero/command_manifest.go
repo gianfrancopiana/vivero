@@ -99,6 +99,9 @@ func commandManifests() []CommandManifest {
 		manifest([]string{"projects", "sync"}, "sync a project from vivero.yml", "vivero projects sync . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "project record"}),
 		manifest([]string{"projects"}, "list synced projects", "vivero projects --json --no-input", true, "stable", global, nil, map[string]any{"returns": "project records"}),
 		manifest([]string{"project", "inspect"}, "inspect one project", "vivero project inspect my-app --json --no-input", true, "stable", global, []CommandArg{{Name: "project", Description: "project name", Required: true}}, map[string]any{"returns": "project record and config"}),
+		manifest([]string{"cache", "inspect"}, "inspect project cache inventory", "vivero cache inspect my-app --json --no-input", true, "stable", global, []CommandArg{{Name: "project", Description: "synced project name", Required: true}}, map[string]any{"returns": "project build cache directories, smart warm volumes, project volumes, and Vivero-tagged images", "readOnly": true}),
+		withSideEffects(manifest([]string{"cache", "warm"}, "warm configured project caches", "vivero cache warm my-app --source app.ref=main --json --no-input", true, "stable", append(global, CommandFlag{Name: "--source", ValueName: "NAME.KEY=VALUE", Description: "source override such as app.ref=main"}), []CommandArg{{Name: "project", Description: "synced project name", Required: true}}, map[string]any{"returns": "cache warm actions for smart warm volumes, prebuild steps, and cache-enabled image builds", "runsAppOwnedCommand": true}), true, true, false),
+		withSideEffects(manifest([]string{"cache", "prune"}, "prune project-scoped caches", "vivero cache prune my-app --kind build --yes --json --no-input", true, "stable", append(global, CommandFlag{Name: "--kind", ValueName: "build|volume|image|all", Description: "cache resources to prune"}, CommandFlag{Name: "--yes", Description: "confirm project-scoped cache deletion"}), []CommandArg{{Name: "project", Description: "synced project name", Required: true}}, map[string]any{"returns": "removed or missing project-scoped cache resources", "scope": "only configured build cache dirs, smart/project volumes, and known Vivero image tags"}), true, false, true),
 		withSideEffects(manifest([]string{"up"}, "start a health-gated preview", "vivero up my-app --id my-app-local --wait --timeout 5m --json --no-input", true, "stable", append(global, CommandFlag{Name: "--id", ValueName: "PREVIEW", Description: "required preview id"}, CommandFlag{Name: "--profile", ValueName: "NAME", Description: "config profile"}, CommandFlag{Name: "--source", ValueName: "NAME.KEY=VALUE", Description: "source override"}, CommandFlag{Name: "--label", ValueName: "KEY=VALUE", Description: "preview label for callers and cleanup"}, CommandFlag{Name: "--metadata", ValueName: "KEY=VALUE", Description: "runtime metadata such as branch or ref"}, CommandFlag{Name: "--wait", Description: "wait for health before returning"}, CommandFlag{Name: "--timeout", ValueName: "DURATION", Description: "wait timeout", Default: "5m"}, CommandFlag{Name: "--public", Description: "request public tunnel/hostname"}), []CommandArg{{Name: "project", Description: "synced project name", Required: true}}, map[string]any{"returns": "preview with health-gated services and URLs", "profile": "selects project.profiles; default profile applies when present", "metadata": "branch/ref metadata influences smart warm baseline selection and is persisted with the preview"}), true, true, false),
 		manifest([]string{"wait"}, "wait for a preview to become healthy", "vivero wait my-preview --timeout 5m --json --no-input", true, "stable", append(global, CommandFlag{Name: "--timeout", ValueName: "DURATION", Description: "wait timeout", Default: "5m"}), []CommandArg{{Name: "preview", Description: "preview id", Required: true}}, map[string]any{"returns": "preview record"}),
 		withSideEffects(manifest([]string{"down"}, "stop and clean up a preview", "vivero down my-preview --discard --json --no-input", true, "stable", append(global, CommandFlag{Name: "--discard", Description: "discard preview changes"}, CommandFlag{Name: "--archive-patch", Description: "archive a patch before cleanup"}, CommandFlag{Name: "--keep-worktree", Description: "preserve the preview worktree"}), []CommandArg{{Name: "preview", Description: "preview id", Required: true}}, map[string]any{"returns": "updated preview record"}), true, false, true),
@@ -133,16 +136,26 @@ func commandManifests() []CommandManifest {
 
 func previewNamespaceAliases(commands []CommandManifest) []CommandManifest {
 	aliasNames := map[string]bool{
-		"up":      true,
-		"wait":    true,
-		"down":    true,
-		"list":    true,
-		"inspect": true,
-		"events":  true,
-		"sync":    true,
-		"rm":      true,
-		"diff":    true,
-		"exec":    true,
+		"up":               true,
+		"wait":             true,
+		"down":             true,
+		"list":             true,
+		"inspect":          true,
+		"events":           true,
+		"sync":             true,
+		"rm":               true,
+		"diff":             true,
+		"exec":             true,
+		"logs":             true,
+		"smoke":            true,
+		"screenshot":       true,
+		"qa plan":          true,
+		"qa context":       true,
+		"qa run":           true,
+		"qa record":        true,
+		"qa final":         true,
+		"qa report":        true,
+		"diagnose startup": true,
 	}
 	aliases := []CommandManifest{}
 	for _, cmd := range commands {
@@ -188,7 +201,11 @@ func manifest(path []string, summary, usage string, agentSafe bool, stability st
 	if !validCommandVisibility(visibility) {
 		visibility = CommandVisibilityAdvanced
 	}
-	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Lane: commandLane(path), Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, TargetRefs: commandTargetRefs(schema), Schema: schema}
+	lane := commandLane(path)
+	if !validCommandLane(lane) {
+		lane = CommandLaneSupport
+	}
+	m := CommandManifest{Command: strings.Join(path, " "), Path: path, Summary: summary, Description: summary, Usage: usage, Examples: []CommandExample{{Description: summary, Command: strings.Fields(usage)}}, Flags: flags, Args: args, Category: commandCategory(path), Lane: lane, Visibility: visibility, JSONStability: stability, ReadsLocal: true, AgentSafe: agentSafe, TargetRefs: commandTargetRefs(schema), Schema: schema}
 	return m
 }
 
@@ -217,6 +234,8 @@ func commandCategory(path []string) string {
 		return "release"
 	case "projects", "project":
 		return "projects"
+	case "cache":
+		return "cache"
 	case "up", "wait", "down", "list", "inspect", "events", "logs", "smoke":
 		return "runtime"
 	case "sync", "rm", "diff", "exec":

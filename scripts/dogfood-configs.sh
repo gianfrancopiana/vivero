@@ -18,7 +18,24 @@ cleanup() {
 trap cleanup EXIT
 
 original_home="$HOME"
-mkdir -p "$workdir/home" "$workdir/out" "$workdir/generated"
+mkdir -p "$workdir/home" "$workdir/out" "$workdir/generated" "$workdir/bin"
+real_docker="$(command -v docker || true)"
+export REAL_DOCKER="$real_docker"
+cat > "$workdir/bin/docker" <<'SH'
+#!/usr/bin/env sh
+set -eu
+if [ "${1:-}" = "buildx" ] && [ "${2:-}" = "version" ]; then
+  printf 'github.com/docker/buildx v0.12.0\n'
+  exit 0
+fi
+if [ -n "${REAL_DOCKER:-}" ] && [ "$REAL_DOCKER" != "$0" ]; then
+  exec "$REAL_DOCKER" "$@"
+fi
+echo "fake docker only supports buildx version in dogfood config fixtures" >&2
+exit 127
+SH
+chmod +x "$workdir/bin/docker"
+export PATH="$workdir/bin:$PATH"
 export HOME="$workdir/home"
 export VIVERO_HOME="$workdir/vivero-home"
 

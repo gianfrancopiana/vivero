@@ -21,12 +21,20 @@ type DeployPlan struct {
 	Diagnostics     []ProductionDoctorDiagnostic `json:"diagnostics"`
 	Changes         []DeployChange               `json:"changes,omitempty"`
 	Services        []DeployServiceArtifact      `json:"services,omitempty"`
+	PrepareCommand  string                       `json:"prepareCommand,omitempty"`
 	ApplyCommand    string                       `json:"applyCommand,omitempty"`
 	StatusCommand   string                       `json:"statusCommand,omitempty"`
 	SmokeCommand    string                       `json:"smokeCommand,omitempty"`
 	RollbackCommand string                       `json:"rollbackCommand,omitempty"`
+	Phases          []DeployPhasePlan            `json:"phases,omitempty"`
+	Cache           *DeployCachePlan             `json:"cache,omitempty"`
 	BlueGreen       *BlueGreenDeployPlan         `json:"blueGreen,omitempty"`
 	CreatedAt       time.Time                    `json:"createdAt"`
+}
+
+type DeployCachePlan struct {
+	Dir   string                `json:"dir,omitempty"`
+	Build ImageBuildCacheConfig `json:"build,omitempty"`
 }
 
 type BlueGreenDeployPlan struct {
@@ -89,9 +97,11 @@ type DeployArtifact struct {
 }
 
 type DeployPhaseRecord struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Output string `json:"output,omitempty"`
+	Name       string          `json:"name"`
+	Status     string          `json:"status"`
+	Output     string          `json:"output,omitempty"`
+	DurationMS int64           `json:"durationMs"`
+	Artifact   *DeployArtifact `json:"artifact,omitempty"`
 }
 
 func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
@@ -138,10 +148,17 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 		plan.Changes = append(plan.Changes, DeployChange{Kind: "deploy-strategy", To: strategy, Summary: fmt.Sprintf("apply %s strategy in %s", strategy, environment)})
 		switch strategy {
 		case "command":
+			plan.PrepareCommand = strings.TrimSpace(deployEnv.PrepareCommand)
 			plan.ApplyCommand = strings.TrimSpace(deployEnv.ApplyCommand)
 			plan.StatusCommand = strings.TrimSpace(deployEnv.StatusCommand)
 			plan.SmokeCommand = strings.TrimSpace(deployEnv.SmokeCommand)
 			plan.RollbackCommand = strings.TrimSpace(deployEnv.RollbackCommand)
+			plan.Phases = commandDeployPhasePlan(plan)
+			if cache, cacheErr := resolveDeployCachePlan(root, deployEnv.Cache); cacheErr != nil {
+				plan.addDiagnostic("error", "deploy-cache-invalid", "deploy.environments."+environment+".cache", cacheErr.Error(), "Keep deploy cache paths relative to the project root and build cache specs valid.")
+			} else {
+				plan.Cache = cache
+			}
 			if plan.ApplyCommand == "" {
 				plan.addDiagnostic("error", "deploy-apply-missing", "deploy.environments."+environment+".applyCommand", "deploy apply command is not configured", "Set an app-owned applyCommand for this environment.")
 			}
@@ -198,6 +215,57 @@ func normalizeDeployStrategy(raw string) string {
 	}
 }
 
+func commandDeployPhasePlan(plan DeployPlan) []DeployPhasePlan {
+	phases := []DeployPhasePlan{}
+	for _, phase := range []DeployPhasePlan{
+		{Name: "prepare", Command: plan.PrepareCommand},
+		{Name: "apply", Command: plan.ApplyCommand},
+		{Name: "smoke", Command: plan.SmokeCommand},
+	} {
+		if strings.TrimSpace(phase.Command) == "" {
+			continue
+		}
+		phases = append(phases, phase)
+	}
+	if strings.TrimSpace(plan.PrepareCommand) != "" && strings.TrimSpace(plan.StatusCommand) != "" {
+		phases = append(phases, DeployPhasePlan{Name: "status", Command: plan.StatusCommand})
+	}
+	return phases
+}
+
+func resolveDeployCachePlan(projectRoot string, cfg DeployCacheConfig) (*DeployCachePlan, error) {
+	dir := strings.TrimSpace(cfg.Dir)
+	buildConfigured := imageBuildCacheEnabled(cfg.Build)
+	if dir == "" && !buildConfigured {
+		return nil, nil
+	}
+	plan := &DeployCachePlan{}
+	if dir != "" {
+		resolved, err := resolveProjectPath(projectRoot, dir)
+		if err != nil {
+			return nil, fmt.Errorf("cache dir: %w", err)
+		}
+		plan.Dir = resolved
+	}
+	if buildConfigured {
+		build := ImageBuildCacheConfig{}
+		enabled := true
+		build.Enabled = &enabled
+		from, err := resolveBuildCacheSpecs(projectRoot, "deploy.cache.build.from", cfg.Build.From)
+		if err != nil {
+			return nil, err
+		}
+		to, err := resolveBuildCacheSpecs(projectRoot, "deploy.cache.build.to", cfg.Build.To)
+		if err != nil {
+			return nil, err
+		}
+		build.From = from
+		build.To = to
+		plan.Build = build
+	}
+	return plan, nil
+}
+
 func (r *ReleaseRecord) addAudit(action, status, message string) {
 	r.Audit = append(r.Audit, DeployAuditEvent{At: nowUTC(), Action: action, Status: status, Message: message})
 	r.UpdatedAt = nowUTC()
@@ -232,34 +300,32 @@ func (a *App) ApplyDeployPlan(planID string) (ReleaseRecord, error) {
 	if strings.TrimSpace(plan.ApplyCommand) == "" {
 		return ReleaseRecord{}, fmt.Errorf("deploy plan %s has no apply command", planID)
 	}
+	if len(plan.Phases) == 0 {
+		plan.Phases = commandDeployPhasePlan(plan)
+	}
 	release := newReleaseRecord(plan, "applying", "")
-	release.addAudit("apply", "started", "running app-owned apply command")
 	if err := a.saveReleaseHistory(release); err != nil {
 		return ReleaseRecord{}, err
 	}
-	out, err := runDeployShell(plan, release, plan.ApplyCommand, map[string]string{"VIVERO_RELEASE_ACTION": "apply"})
-	release.Output = strings.TrimSpace(string(out))
-	if err != nil {
-		release.Status = "failed"
-		release.addAudit("apply", "failed", strings.TrimSpace(string(out)))
-		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "apply", "command-output", string(out)); artifactErr == nil {
-			release.Artifacts = append(release.Artifacts, artifact)
+	for _, phase := range plan.Phases {
+		record, phaseErr := a.runCommandDeployPhase(plan, &release, phase)
+		if record.Status != "skipped" {
+			release.Phases = append(release.Phases, record)
 		}
-		_ = a.saveReleaseHistory(release)
-		return release, fmt.Errorf("deploy apply failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	if artifact, artifactErr := a.saveDeployArtifact(release.ID, "apply", "command-output", string(out)); artifactErr == nil && strings.TrimSpace(string(out)) != "" {
-		release.Artifacts = append(release.Artifacts, artifact)
-	}
-	if strings.TrimSpace(plan.SmokeCommand) != "" {
-		smoke, smokeErr := a.runReleaseSmoke(plan, &release)
-		if smokeErr != nil {
+		if phaseErr != nil {
 			_ = a.saveReleaseHistory(release)
-			return release, fmt.Errorf("deploy smoke failed: %w: %s", smokeErr, smoke.Output)
+			switch phase.Name {
+			case "smoke":
+				return release, fmt.Errorf("deploy smoke failed: %w: %s", phaseErr, record.Output)
+			case "apply":
+				return release, fmt.Errorf("deploy apply failed: %w: %s", phaseErr, record.Output)
+			default:
+				return release, fmt.Errorf("deploy %s failed: %w: %s", phase.Name, phaseErr, record.Output)
+			}
 		}
 	}
 	release.Status = "applied"
-	release.addAudit("apply", "succeeded", "app-owned apply command completed")
+	release.addAudit("apply", "succeeded", "app-owned deploy phases completed")
 	if err := a.saveRelease(release); err != nil {
 		return ReleaseRecord{}, err
 	}

@@ -88,8 +88,16 @@ assert plan.get("verdict") == "ready", plan
 assert plan.get("project") == "deploy-ready", plan
 assert plan.get("environment") == "production", plan
 assert plan.get("applyCommand"), plan
+assert plan.get("prepareCommand"), plan
 assert plan.get("smokeCommand"), plan
 assert plan.get("rollbackCommand"), plan
+phases = [phase.get("name") for phase in plan.get("phases", [])]
+assert phases == ["prepare", "apply", "smoke", "status"], phases
+cache = plan.get("cache") or {}
+assert cache.get("dir", "").endswith("/.vivero/cache/deploy"), cache
+build_cache = cache.get("build") or {}
+assert build_cache.get("enabled") is True, build_cache
+assert build_cache.get("from") and build_cache.get("to"), build_cache
 changes = {change.get("kind") for change in plan.get("changes", [])}
 assert {"service-image", "deploy-strategy"}.issubset(changes), (changes, plan)
 services = plan.get("services") or []
@@ -100,21 +108,28 @@ PY
 )"
 
 run_json apply bin/vivero deploy apply "$plan_id" --json --no-input
-release_id="$(python3 - "$out/apply.json" "$ready_project/deploy-applied.txt" "$ready_project/deploy-smoke.txt" "$plan_id" <<'PY'
+release_id="$(python3 - "$out/apply.json" "$ready_project/deploy-prepare.txt" "$ready_project/deploy-applied.txt" "$ready_project/deploy-smoke.txt" "$plan_id" <<'PY'
 import json
 import pathlib
 import sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 release = payload.get("release") or {}
-apply_proof = pathlib.Path(sys.argv[2]).read_text()
-smoke_proof = pathlib.Path(sys.argv[3]).read_text()
-plan_id = sys.argv[4]
+prepare_proof = pathlib.Path(sys.argv[2]).read_text()
+apply_proof = pathlib.Path(sys.argv[3]).read_text()
+smoke_proof = pathlib.Path(sys.argv[4]).read_text()
+plan_id = sys.argv[5]
 assert release.get("stateVersion") == 1, release
 assert release.get("status") == "applied", release
 assert release.get("planId") == plan_id, release
+assert any(event.get("action") == "prepare" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
 assert any(event.get("action") == "apply" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
 assert any(event.get("action") == "smoke" and event.get("status") == "succeeded" for event in release.get("audit", [])), release
+phase_names = [f"{phase.get('name')}:{phase.get('status')}" for phase in release.get("phases", [])]
+assert phase_names == ["prepare:succeeded", "apply:succeeded", "smoke:succeeded", "status:succeeded"], phase_names
+assert "prepare-output" in release.get("output", ""), release
 assert "smoke-output" in release.get("output", ""), release
+for expected in ["cache-dir=", "release-action=prepare", "VIVERO_BUILD_CACHE_FROM=", "type=local,src=", "VIVERO_BUILD_CACHE_TO=", "type=local,dest="]:
+    assert expected in prepare_proof, (expected, prepare_proof)
 assert plan_id in apply_proof, apply_proof
 assert release.get("id") in apply_proof, (release, apply_proof)
 assert release.get("id") in smoke_proof, (release, smoke_proof)
@@ -144,6 +159,7 @@ import sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 logs = payload.get("logs") or []
 content = "\n".join(log.get("content", "") for log in logs)
+assert "prepare-output" in content, content
 assert "apply-output" in content, content
 assert "smoke-output" in content, content
 PY

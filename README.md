@@ -2,7 +2,7 @@
 
 Vivero is Spanish for “nursery”: a place to grow app changes until they are ready.
 
-For coding agents, Vivero is a safe app-operations control plane. It has two first-class lanes — preview and deploy/release — plus one shared evidence loop for logs, health checks, screenshots, QA reports, recordings, release events, and command output artifacts.
+For coding agents, Vivero is an agent app-ops runtime. It has two first-class lanes — preview and deploy/release — plus one shared evidence/cache lane for logs, health checks, screenshots, QA reports, recordings, release events, command output artifacts, and cache visibility.
 
 Vivero is local-first. The boundary is simple: **the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence.** Keep Dockerfiles, scripts, migrations, env contracts, secrets, and infra logic in the app repo. Use `vivero.yml` to point at them and describe how agents should operate the app.
 
@@ -10,9 +10,10 @@ Vivero is local-first. The boundary is simple: **the app owns how it runs and de
 
 - **Preview lane:** isolated, disposable previews for local repos, branches, or worktrees.
 - **Deploy/release lane:** explicit `deploy` and `release` commands for app-owned production logic.
-- **Evidence/debug lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, and release artifacts.
+- **Evidence/cache lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, release artifacts, and cache controls.
 - JSON output for every agent-facing workflow.
 - Unique ports, networks, and state per preview.
+- Fast-path primitives: Docker build cache, warm dependency volumes, setup/prebuild reuse, deploy prepare/cache hints, and timing evidence.
 - Warm dependency volumes, with baseline refs like `main` feeding branch-local copies.
 - Multi-service previews and profiles for coupled apps.
 - Local URLs by default; public URLs only when `public:` is configured.
@@ -34,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/gianfrancopiana/vivero/main/scripts
 
 See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`. Maintainers should use [docs/releasing.md](docs/releasing.md) for tag, postflight, and upgrade-cadence checks.
 
-## Golden path: preview, prove, deploy
+## Golden paths: preview fast, prove, deploy fast
 
 Start with the certified example. It is small, local, and CI-proven:
 
@@ -48,7 +49,7 @@ That target runs `examples/agent-demo` through config doctor, project sync, Dock
 VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e
 ```
 
-Then use the same shape on your app.
+Then use the same lane shape on your app: start a preview, collect evidence, and only then plan or apply a deploy.
 
 ### 1. Preview a change
 
@@ -94,6 +95,18 @@ vivero release rollback deploy-ready <release-id> --environment production --jso
 ```
 
 For blue/green deploys, configure app-owned slot commands and let Vivero enforce prepare → smoke → promote → rollback state transitions. The certified example lives at `examples/deploy-blue-green`.
+
+## Fast paths
+
+Vivero treats speed as part of the product contract, not an accidental Docker side effect:
+
+- **Docker build cache:** `services.<name>.build.cache` can declare BuildKit cache specs for repeat image builds while app-owned Dockerfiles still control layer ordering.
+- **Runtime dependency volumes:** `dependencyVolumes` with `lifetime: project` or `lifetime: smart` keep expensive package, database, or tool caches out of disposable source trees.
+- **Setup/prebuild cache:** app-owned prebuild and setup commands can write to durable volumes or artifacts; Vivero records when they run, skip, or fail.
+- **Deploy prepare/cache hints:** deploy configs can expose prepare phases and cache hints to app-owned scripts without Vivero provisioning production infrastructure.
+- **Timing/evidence:** preview startup, image builds, warm events, deploy phases, logs, screenshots, QA reports, and release artifacts remain visible through JSON.
+
+Use `vivero cache inspect`, `vivero cache warm`, and `vivero cache prune` when you need explicit cache state instead of guessing from Docker or volume names.
 
 ## Certified examples
 
@@ -148,10 +161,17 @@ Deploy config points to app-owned commands:
 deploy:
   environments:
     production:
+      prepareCommand: ./script/deploy-prepare production
       applyCommand: ./script/deploy production
       smokeCommand: ./script/deploy-smoke production
       statusCommand: ./script/deploy-status production
       rollbackCommand: ./script/deploy-rollback production
+      cache:
+        build:
+          from:
+            - type=local,src=.vivero/cache/build/web
+          to:
+            - type=local,dest=.vivero/cache/build/web,mode=max
 ```
 
 ## CLI contract

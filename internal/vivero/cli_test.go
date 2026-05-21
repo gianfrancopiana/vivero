@@ -93,6 +93,9 @@ func TestPreviewNamespaceAliasesRootPreviewCommands(t *testing.T) {
 		{name: "list", root: []string{"list", "--json", "--no-input"}, alias: []string{"preview", "list", "--json", "--no-input"}},
 		{name: "inspect", root: []string{"inspect", "cli-pr", "--json", "--no-input"}, alias: []string{"preview", "inspect", "cli-pr", "--json", "--no-input"}},
 		{name: "events", root: []string{"events", "cli-pr", "--tail", "--json", "--no-input"}, alias: []string{"preview", "events", "cli-pr", "--tail", "--json", "--no-input"}},
+		{name: "logs", root: []string{"logs", "cli-pr", "web", "--json", "--no-input"}, alias: []string{"preview", "logs", "cli-pr", "web", "--json", "--no-input"}},
+		{name: "qa plan", root: []string{"qa", "plan", "cli-pr", "--scope", "auth", "--json", "--no-input"}, alias: []string{"preview", "qa", "plan", "cli-pr", "--scope", "auth", "--json", "--no-input"}},
+		{name: "diagnose startup", root: []string{"diagnose", "startup", "cli-pr", "--json", "--no-input"}, alias: []string{"preview", "diagnose", "startup", "cli-pr", "--json", "--no-input"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rootCode, rootStdout, rootStderr := runCLITestCommand(t, home, tc.root...)
@@ -333,8 +336,8 @@ func TestRunCommandsJSONCoversREADMEInvocations(t *testing.T) {
 		t.Fatal("commands JSON should include command manifests")
 	}
 	for _, cmd := range payload.Commands {
-		if cmd.Category == "" || !validCommandVisibility(cmd.Visibility) {
-			t.Fatalf("commands JSON missing category/visibility metadata: %#v", cmd)
+		if cmd.Category == "" || !validCommandVisibility(cmd.Visibility) || !validCommandLane(cmd.Lane) {
+			t.Fatalf("commands JSON missing category/visibility/lane metadata: %#v", cmd)
 		}
 	}
 	readmeBytes, err := os.ReadFile("../../README.md")

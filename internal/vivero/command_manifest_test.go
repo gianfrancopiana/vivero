@@ -43,7 +43,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "preview up", "preview inspect", "preview down", "preview events", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing manifest for %s", name)
 		}
@@ -57,7 +57,12 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		{name: "up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
 		{name: "preview up", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLanePreview},
 		{name: "preview events", category: "runtime", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
+		{name: "preview logs", category: "runtime", visibility: CommandVisibilityAdvanced, lane: CommandLaneEvidence},
+		{name: "preview qa run", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "qa run", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
+		{name: "cache inspect", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
+		{name: "cache warm", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
+		{name: "cache prune", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
 		{name: "deploy apply", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
 		{name: "release rollback", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
 		{name: "serve", category: "control-plane", visibility: CommandVisibilityInternal, lane: CommandLaneSupport},
