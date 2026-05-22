@@ -5,6 +5,9 @@ repo="${VIVERO_REPO:-gianfrancopiana/vivero}"
 version=""
 dist_dir="dist"
 output=""
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
 
 usage() {
   cat <<'EOF'
@@ -49,10 +52,7 @@ if [ -z "$version" ]; then
   usage >&2
   exit 2
 fi
-if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-  echo "--repo must be OWNER/REPO with GitHub-safe characters, got: $repo" >&2
-  exit 2
-fi
+validate_github_repo "$repo" "--repo"
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
   echo "--version must be a semver tag like v1.2.3, got: $version" >&2
   exit 2

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
+
 snapshot=1
 dist_dir="${DIST_DIR:-dist}"
 
@@ -25,14 +29,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required for release smoke JSON assertions" >&2
-  exit 127
-fi
-if ! command -v ruby >/dev/null 2>&1; then
-  echo "ruby is required for Homebrew formula syntax validation" >&2
-  exit 127
-fi
+require_cmd python3
+require_cmd ruby
+
+bash -s -- --help < "$script_dir/install.sh" >/dev/null
+(
+  standalone_install_tmp="$(mktemp_workdir)"
+  trap 'rm -rf "$standalone_install_tmp"' EXIT
+  cp "$script_dir/install.sh" "$standalone_install_tmp/install.sh"
+  bash "$standalone_install_tmp/install.sh" --help >/dev/null
+)
 
 if [ "$snapshot" -eq 1 ]; then
   if ! command -v goreleaser >/dev/null 2>&1; then
@@ -97,7 +103,7 @@ scripts/render-homebrew-formula.sh --version v0.0.0 --dist "$dist_dir" --output 
 scripts/generate-release-sbom.sh --version v0.0.0 --dist "$dist_dir" --output "$dist_dir/vivero_sbom.spdx.json" >/dev/null
 scripts/verify-release-sbom.py --version v0.0.0 --sbom "$dist_dir/vivero_sbom.spdx.json" --dist "$dist_dir"
 
-tap_tmp="$(mktemp -d)"
+tap_tmp="$(mktemp_workdir)"
 trap 'rm -rf "$tap_tmp"' EXIT
 git init "$tap_tmp/source" >/dev/null
 git -C "$tap_tmp/source" checkout -B main >/dev/null 2>&1
@@ -113,7 +119,7 @@ cmp "$dist_dir/vivero.rb" "$tap_tmp/clone/Formula/vivero.rb" >/dev/null
 rm -rf "$tap_tmp"
 trap - EXIT
 
-install_tmp="$(mktemp -d)"
+install_tmp="$(mktemp_workdir)"
 trap 'rm -rf "$install_tmp"' EXIT
 scripts/install.sh --version v0.0.0 --base-url "file://$dist_abs" --bin-dir "$install_tmp/bin" >/dev/null
 "$install_tmp/bin/vivero" version --json --no-input >/dev/null
@@ -130,7 +136,7 @@ tmp=""
 smoked=0
 for archive in "${archives[@]}"; do
   name="$(basename "$archive")"
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp_workdir)"
   trap cleanup EXIT
   tar -xzf "$archive" -C "$tmp"
 

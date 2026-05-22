@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
+repo_root="$(cd "$script_dir/.." && pwd)"
 cd "$repo_root"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -12,10 +15,7 @@ if ! docker version >/dev/null 2>&1; then
   echo "docker daemon is not reachable" >&2
   exit 1
 fi
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required for JSON assertions" >&2
-  exit 127
-fi
+require_cmd python3
 
 if [ -n "${VIVERO_BIN:-}" ]; then
   if ! vivero_bin="$(command -v "$VIVERO_BIN" 2>/dev/null)"; then
@@ -27,7 +27,7 @@ else
   vivero_bin="$repo_root/bin/vivero"
 fi
 
-workdir="$(mktemp -d)"
+workdir="$(mktemp_workdir)"
 preview_id="agent-demo-e2e-$$"
 up_started=0
 
