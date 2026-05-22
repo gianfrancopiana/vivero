@@ -35,7 +35,7 @@ type ServiceConfig struct {
 	Runtime           string                `yaml:"runtime" json:"runtime,omitempty"`
 	Image             string                `yaml:"image" json:"image,omitempty"`
 	Build             ImageBuildConfig      `yaml:"build" json:"build,omitempty"`
-	Command           string                `yaml:"command" json:"command,omitempty"`
+	Command           RuntimeCommand        `yaml:"command" json:"command,omitempty"`
 	WorkingDir        string                `yaml:"workingDir" json:"workingDir,omitempty"`
 	Port              int                   `yaml:"port" json:"port,omitempty"`
 	Ports             map[string]PortConfig `yaml:"ports" json:"ports,omitempty"`
@@ -124,7 +124,7 @@ type BlueGreenDeployConfig struct {
 
 type BackingConfig struct {
 	Image             string            `yaml:"image" json:"image,omitempty"`
-	Command           string            `yaml:"command" json:"command,omitempty"`
+	Command           RuntimeCommand    `yaml:"command" json:"command,omitempty"`
 	Env               map[string]string `yaml:"env" json:"env,omitempty"`
 	Health            HealthConfig      `yaml:"health" json:"health,omitempty"`
 	DependencyVolumes []VolumeConfig    `yaml:"dependencyVolumes" json:"dependencyVolumes,omitempty"`
@@ -132,11 +132,11 @@ type BackingConfig struct {
 }
 
 type HealthConfig struct {
-	Path         string `yaml:"path" json:"path,omitempty"`
-	Command      string `yaml:"command" json:"command,omitempty"`
-	ExpectStatus int    `yaml:"expectStatus" json:"expectStatus,omitempty"`
-	Interval     string `yaml:"interval" json:"interval,omitempty"`
-	Timeout      string `yaml:"timeout" json:"timeout,omitempty"`
+	Path         string         `yaml:"path" json:"path,omitempty"`
+	Command      RuntimeCommand `yaml:"command" json:"command,omitempty"`
+	ExpectStatus int            `yaml:"expectStatus" json:"expectStatus,omitempty"`
+	Interval     string         `yaml:"interval" json:"interval,omitempty"`
+	Timeout      string         `yaml:"timeout" json:"timeout,omitempty"`
 }
 
 type VolumeConfig struct {
@@ -171,7 +171,7 @@ type SetupConfig struct {
 
 type SetupStep struct {
 	Service     string                `yaml:"service" json:"service"`
-	Command     string                `yaml:"command" json:"command"`
+	Command     RuntimeCommand        `yaml:"command" json:"command"`
 	Policy      string                `yaml:"policy" json:"policy,omitempty"`
 	Fingerprint WarmFingerprintConfig `yaml:"fingerprint" json:"fingerprint,omitempty"`
 }

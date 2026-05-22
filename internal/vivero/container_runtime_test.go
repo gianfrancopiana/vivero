@@ -35,6 +35,7 @@ type fakeContainerRuntime struct {
 	containers        map[string]bool
 	volumes           map[string]bool
 	images            map[string]bool
+	logs              map[string][]string
 
 	startErr               error
 	publishedErr           error
@@ -75,8 +76,8 @@ func (f *fakeContainerRuntime) StartService(home, projectName, previewID, servic
 	return f.containerID, nil
 }
 
-func (f *fakeContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
-	f.runOnceCommands = append(f.runOnceCommands, fmt.Sprintf("%s/%s/%s/%s:%s", home, projectName, previewID, service, command))
+func (f *fakeContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
+	f.runOnceCommands = append(f.runOnceCommands, fmt.Sprintf("%s/%s/%s/%s:%s", home, projectName, previewID, service, command.Display()))
 	return []byte("ok"), nil
 }
 
@@ -89,8 +90,16 @@ func (f *fakeContainerRuntime) PublishedPorts(containerID string, ports []Servic
 }
 
 func (f *fakeContainerRuntime) WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error {
-	f.healthCommands = append(f.healthCommands, fmt.Sprintf("%s:%s:%s", containerID, h.Command, timeout))
+	f.healthCommands = append(f.healthCommands, fmt.Sprintf("%s:%s:%s", containerID, h.Command.Display(), timeout))
 	return f.healthErr
+}
+
+func (f *fakeContainerRuntime) ContainerLogs(containerID string, limit int) ([]string, error) {
+	lines := append([]string(nil), f.logs[containerID]...)
+	if limit > 0 && len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return lines, nil
 }
 
 func (f *fakeContainerRuntime) ContainerExists(containerID string) bool {

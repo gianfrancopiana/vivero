@@ -83,7 +83,7 @@ func TestRunSetupStepsOncePerFingerprintSkipsUntilFingerprintChanges(t *testing.
 		Setup: SetupConfig{AfterSeeds: []SetupStep{{
 			Service:     "web",
 			Policy:      "once-per-fingerprint",
-			Command:     "printf x >> setup-count.txt",
+			Command:     RuntimeCommand{Shell: "printf x >> setup-count.txt"},
 			Fingerprint: WarmFingerprintConfig{Paths: []string{"package-lock.json"}},
 		}}},
 	}
@@ -134,7 +134,7 @@ func TestRunSetupStepsOncePerFingerprintFallsBackToWarmPaths(t *testing.T) {
 		Services: map[string]ServiceConfig{
 			"web": {Source: "app", Image: "alpine:latest", DependencyVolumes: []VolumeConfig{{Name: "bundle", Target: "/bundle", Lifetime: "project"}}},
 		},
-		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: "printf x >> setup-count.txt"}}},
+		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: RuntimeCommand{Shell: "printf x >> setup-count.txt"}}}},
 	}
 	sources := map[string]PreviewSource{"app": {Name: "app", Mode: "external", Path: source}}
 	if err := a.runSetupSteps("first-pr", cfg.Setup.AfterSeeds, cfg, sources, warmRunState{}); err != nil {
@@ -168,7 +168,7 @@ func TestRunSetupStepsOncePerFingerprintRequiresPersistentVolumeAndPaths(t *test
 	withoutVolume := ProjectConfig{
 		Project:  ProjectMeta{Name: "demo"},
 		Services: map[string]ServiceConfig{"web": {Source: "app", Image: "alpine:latest"}},
-		Setup:    SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: "printf x", Fingerprint: WarmFingerprintConfig{Paths: []string{"package-lock.json"}}}}},
+		Setup:    SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: RuntimeCommand{Shell: "printf x"}, Fingerprint: WarmFingerprintConfig{Paths: []string{"package-lock.json"}}}}},
 	}
 	if err := a.runSetupSteps("no-volume", withoutVolume.Setup.AfterSeeds, withoutVolume, sources, warmRunState{}); err == nil || !strings.Contains(err.Error(), "persistent dependency volume") {
 		t.Fatalf("expected persistent volume error, got %v", err)
@@ -176,7 +176,7 @@ func TestRunSetupStepsOncePerFingerprintRequiresPersistentVolumeAndPaths(t *test
 	withoutPaths := ProjectConfig{
 		Project:  ProjectMeta{Name: "demo"},
 		Services: map[string]ServiceConfig{"web": {Source: "app", Image: "alpine:latest", DependencyVolumes: []VolumeConfig{{Name: "node_modules", Target: "/node_modules", Lifetime: "project"}}}},
-		Setup:    SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: "printf x"}}},
+		Setup:    SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-fingerprint", Command: RuntimeCommand{Shell: "printf x"}}}},
 	}
 	if err := a.runSetupSteps("no-paths", withoutPaths.Setup.AfterSeeds, withoutPaths, sources, warmRunState{}); err == nil || !strings.Contains(err.Error(), "fingerprint paths") {
 		t.Fatalf("expected fingerprint paths error, got %v", err)

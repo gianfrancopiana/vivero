@@ -42,7 +42,7 @@ func TestDockerRunArgsPublishesNamedPortsWithDynamicHostPort(t *testing.T) {
 		PreviewID: "demo-pr-17",
 		Service:   "web",
 		Image:     "python:3.12-alpine",
-		Command:   "python3 -m http.server 3310 --bind 0.0.0.0",
+		Command:   RuntimeCommand{Shell: "python3 -m http.server 3310 --bind 0.0.0.0"},
 		Ports: []ServicePort{
 			{Name: "http", Container: 3310, Host: 0, Protocol: "tcp", Primary: true},
 			{Name: "metrics", Container: 9394, Host: 19394, Protocol: "tcp"},
@@ -151,7 +151,7 @@ func TestCleanupPreviewServicesRemovesStrayDockerContainersByPreviewLabel(t *tes
 	}
 	defer a.Close()
 
-	stray := dockerOneShotContainerName("demo-pr-17", "web", "bundle install")
+	stray := dockerOneShotContainerName("demo-pr-17", "web", RuntimeCommand{Shell: "bundle install"})
 	state := os.Getenv("FAKE_DOCKER_STATE")
 	if err := os.WriteFile(filepath.Join(state, stray+".pid"), []byte("999999"), 0o644); err != nil {
 		t.Fatal(err)

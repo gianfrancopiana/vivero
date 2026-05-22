@@ -14,7 +14,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 		root = projectPath[0]
 	}
 	for i, step := range steps {
-		if strings.TrimSpace(step.Command) == "" {
+		if step.Command.IsZero() {
 			continue
 		}
 		policy, err := normalizeSetupPolicy(step.Policy)
@@ -22,7 +22,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			return fmt.Errorf("setup.afterSeeds[%d]: %w", i, err)
 		}
 		timer := startOperationTimer()
-		metadata := map[string]string{"command": step.Command, "index": fmt.Sprint(i), "policy": policy}
+		metadata := map[string]string{"command": step.Command.Display(), "index": fmt.Sprint(i), "policy": policy}
 		if step.Service != "" {
 			metadata["service"] = step.Service
 		}
@@ -182,7 +182,7 @@ func (a *App) setupStepMarkerPath(projectName string, index int, step SetupStep)
 	if projectName == "" {
 		projectName = "project"
 	}
-	id := shortStableID(fmt.Sprintf("%s\x00%d\x00%s\x00%s", projectName, index, step.Service, step.Command))
+	id := shortStableID(fmt.Sprintf("%s\x00%d\x00%s\x00%s", projectName, index, step.Service, step.Command.Key()))
 	return filepath.Join(a.Home, "setup", projectName, id+".done")
 }
 
@@ -195,13 +195,13 @@ func (a *App) setupStepFingerprintMarkerPath(projectName, fingerprint string, pa
 	if fingerprint == "" {
 		fingerprint = "unknown"
 	}
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command, strings.Join(paths, "\x00")))
+	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key(), strings.Join(paths, "\x00")))
 	return filepath.Join(a.Home, "setup", projectName, "fingerprints", fingerprint, id+".done")
 }
 
 func (a *App) setupStepWarmMarkerPath(projectName, fingerprint string, index int, step SetupStep) string {
 	dir, projectName, fingerprint := a.warmMarkerDir(projectName, fingerprint)
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command))
+	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key()))
 	return filepath.Join(dir, id+".done")
 }
 
@@ -227,7 +227,7 @@ func (a *App) clearWarmSetupMarkers(projectName, fingerprint string) error {
 
 func (a *App) setupStepPreviewWarmMarkerPath(previewID, fingerprint string, index int, step SetupStep) string {
 	dir, previewID, fingerprint := a.previewWarmMarkerDir(previewID, fingerprint)
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", previewID, fingerprint, index, step.Service, step.Command))
+	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", previewID, fingerprint, index, step.Service, step.Command.Key()))
 	return filepath.Join(dir, id+".done")
 }
 

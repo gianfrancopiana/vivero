@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -137,8 +138,8 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 		} else {
 			b.WriteString("    image: scratch\n")
 		}
-		if svc.Command != "" {
-			b.WriteString("    command: " + quoteYAML(svc.Command) + "\n")
+		if !svc.Command.IsZero() {
+			b.WriteString("    command: " + runtimeCommandYAML(svc.Command) + "\n")
 		}
 		ports, err := servicePortPlan(svc)
 		if err != nil {
@@ -168,6 +169,16 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 }
 
 func quoteYAML(s string) string { return fmt.Sprintf("%q", s) }
+
+func runtimeCommandYAML(command RuntimeCommand) string {
+	if len(command.Args) > 0 {
+		encoded, err := json.Marshal(command.Args)
+		if err == nil {
+			return string(encoded)
+		}
+	}
+	return quoteYAML(command.Shell)
+}
 
 func serviceConfigForBacking(backing BackingConfig) ServiceConfig {
 	return ServiceConfig{
@@ -232,9 +243,9 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 	runtime := serviceRuntime(svc)
 	ports, err := servicePortPlan(svc)
 	if err != nil {
-		return PreviewService{Name: name, Source: svc.Source, Runtime: runtime, Status: "starting", Command: svc.Command, StartedAt: nowUTC()}, err
+		return PreviewService{Name: name, Source: svc.Source, Runtime: runtime, Status: "starting", Command: svc.Command.Display(), StartedAt: nowUTC()}, err
 	}
-	ps := PreviewService{Name: name, Source: svc.Source, Runtime: runtime, Status: "starting", Port: svc.Port, Command: svc.Command, StartedAt: nowUTC()}
+	ps := PreviewService{Name: name, Source: svc.Source, Runtime: runtime, Status: "starting", Port: svc.Port, Command: svc.Command.Display(), StartedAt: nowUTC()}
 	originURL := ""
 	originHost := originHostForService(svc)
 	if len(ports) > 0 && (forcePublic || svc.Public) && !isLoopbackHost(originHost) {
@@ -294,22 +305,23 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		}
 	}
 	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via docker\n"), 0o644)
-	a.recordEvent(previewID, "info", "service.started", "container started", name, serviceTimer.metadata(map[string]string{"container": containerID, "image": svc.Image, "command": svc.Command}))
+	a.recordEvent(previewID, "info", "service.started", "container started", name, serviceTimer.metadata(map[string]string{"container": containerID, "image": svc.Image, "command": svc.Command.Display()}))
 	if workdir != "" {
 		a.recordEvent(previewID, "info", "service.workdir", "container source mounted", name, map[string]string{"hostPath": workdir})
 	}
-	if strings.TrimSpace(svc.Health.Command) != "" {
+	if !svc.Health.Command.IsZero() {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
 		healthTimer := startOperationTimer()
 		if err := a.containerRuntime().WaitHealthCommand(containerID, svc.Health, timeout); err != nil {
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"container": containerID}))
+			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
 			if cleanupErr := cleanupStarted(); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
 			}
 			_ = a.saveService(previewID, ps)
-			return ps, err
+			return ps, failureErr
 		}
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"
@@ -322,11 +334,12 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"url": originURL}))
+			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
 			if cleanupErr := cleanupStarted(); cleanupErr != nil {
-				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
 			}
 			_ = a.saveService(previewID, ps)
-			return ps, err
+			return ps, failureErr
 		}
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"

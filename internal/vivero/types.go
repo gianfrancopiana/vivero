@@ -21,6 +21,7 @@ func buildVersionInfo() VersionInfo {
 type ProjectConfig = schema.ProjectConfig
 type ProjectMeta = schema.ProjectMeta
 type SourceConfig = schema.SourceConfig
+type RuntimeCommand = schema.RuntimeCommand
 type ServiceConfig = schema.ServiceConfig
 type PortConfig = schema.PortConfig
 type ImageBuildConfig = schema.ImageBuildConfig

@@ -6,9 +6,10 @@ type containerRuntime interface {
 	BuildImage(spec dockerBuildSpec) error
 	EnsureNetwork(previewID string) error
 	StartService(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error)
-	RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error)
+	RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error)
 	PublishedPorts(containerID string, ports []ServicePort) ([]PreviewPort, error)
 	WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error
+	ContainerLogs(containerID string, limit int) ([]string, error)
 	ContainerExists(containerID string) bool
 	RemoveContainer(containerID string) (missing bool, output string, err error)
 	RemoveContainersForPreview(previewID string) error
@@ -42,7 +43,7 @@ func (dockerContainerRuntime) StartService(home, projectName, previewID, service
 	return startDockerService(home, projectName, previewID, service, svc, sources, env)
 }
 
-func (dockerContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
+func (dockerContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
 	return runDockerOneShot(home, projectName, previewID, service, svc, sources, env, command)
 }
 
@@ -52,6 +53,10 @@ func (dockerContainerRuntime) PublishedPorts(containerID string, ports []Service
 
 func (dockerContainerRuntime) WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error {
 	return waitDockerHealthCommand(containerID, h, timeout)
+}
+
+func (dockerContainerRuntime) ContainerLogs(containerID string, limit int) ([]string, error) {
+	return dockerLogs(containerID, limit)
 }
 
 func (dockerContainerRuntime) ContainerExists(containerID string) bool {

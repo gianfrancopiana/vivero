@@ -18,7 +18,7 @@ type dockerServiceSpec struct {
 	PreviewID string
 	Service   string
 	Image     string
-	Command   string
+	Command   RuntimeCommand
 	Source    string
 	Workdir   string
 	Port      int
@@ -90,8 +90,8 @@ func dockerRunArgs(spec dockerServiceSpec) ([]string, error) {
 		return nil, err
 	}
 	args = append(args, spec.Image)
-	if strings.TrimSpace(spec.Command) != "" {
-		args = append(args, "/bin/sh", "-lc", spec.Command)
+	if !spec.Command.IsZero() {
+		args = append(args, spec.Command.RuntimeArgs()...)
 	}
 	return args, nil
 }
@@ -106,7 +106,7 @@ func dockerPortsForSpec(spec dockerServiceSpec) []ServicePort {
 	return nil
 }
 
-func dockerRunOnceArgs(spec dockerServiceSpec, command string) ([]string, error) {
+func dockerRunOnceArgs(spec dockerServiceSpec, command RuntimeCommand) ([]string, error) {
 	if strings.TrimSpace(spec.Image) == "" {
 		return nil, fmt.Errorf("service %s must declare image", spec.Service)
 	}
@@ -141,7 +141,8 @@ func dockerRunOnceArgs(spec dockerServiceSpec, command string) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, spec.Image, "/bin/sh", "-lc", command)
+	args = append(args, spec.Image)
+	args = append(args, command.RuntimeArgs()...)
 	return args, nil
 }
 
@@ -248,11 +249,11 @@ func startDockerService(home, projectName, previewID, service string, svc Servic
 	return containerID, nil
 }
 
-func (a *App) runDockerOneShot(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
+func (a *App) runDockerOneShot(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
 	return a.containerRuntime().RunOneShot(a.Home, projectName, previewID, service, svc, sources, env, command)
 }
 
-func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command string) ([]byte, error) {
+func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
 	}
@@ -629,8 +630,8 @@ func copyDockerVolume(src, dst string) error {
 	return nil
 }
 
-func dockerOneShotContainerName(previewID, service, command string) string {
-	return dockerResourceName("vivero", previewID, service, "oneshot", shortStableID(command))
+func dockerOneShotContainerName(previewID, service string, command RuntimeCommand) string {
+	return dockerResourceName("vivero", previewID, service, "oneshot", shortStableID(command.Key()))
 }
 
 func dockerVolumeName(previewID, service, name string) string {
