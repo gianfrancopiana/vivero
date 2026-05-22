@@ -95,7 +95,7 @@ Keep Vivero proof small and invariant-led. The bundled examples are not a framew
 
 - **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
 - **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs, cache hints, timeouts, and capped/redacted output; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent. Prove this with `make deploy-fixtures`.
-- **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> <service> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` when collecting cross-lane evidence. Maintainers can run `make chetear-real-dogfood` for private real-app proof across preview evidence, deploy/release, and rollback.
+- **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> <service> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` when collecting cross-lane evidence.
 
 Add or document a fixture only when it proves a distinct invariant failure mode. Otherwise extend the smallest existing fixture.
 
@@ -193,11 +193,11 @@ vivero preview up webapp \
 For a non-default profile, pass it explicitly:
 
 ```sh
-vivero preview up helper-host-products \
-  --id helper-gumroad \
-  --profile gumroad \
-  --source helper.path=/path/to/helper \
-  --source gumroad.path=/path/to/gumroad \
+vivero preview up host-workspace \
+  --id host-product-a \
+  --profile product-a \
+  --source host.path=/path/to/host-app \
+  --source product.path=/path/to/product-app \
   --wait --timeout 5m \
   --json --no-input --quiet
 ```
@@ -223,7 +223,7 @@ vivero preview exec webapp-local web --json --no-input -- npm test -- --runInBan
 vivero preview rm webapp-local app src/old-file.ts --json --no-input --quiet
 ```
 
-Profiles should keep the default boring. For helper-style apps, make `profiles.default` run the app's local clone shape, then add explicit host-product profiles such as `gumroad` or `flexile`. Use `serviceEnv` to point one service at another by Docker service name, for example `GUMROAD_URL=http://gumroad-web:3310`.
+Profiles should keep the default boring. For host-style apps, make `profiles.default` run the app's local clone shape, then add explicit host-product profiles such as `product-a` or `product-b`. Use `serviceEnv` to point one service at another by Docker service name, for example `PRODUCT_A_URL=http://product-a-web:3310`.
 
 Project config can make expensive container volumes reusable. Use `lifetime: project` for shared durable dependency volumes and `lifetime: smart` for baseline-vs-branch copied volumes. Put fingerprint paths on lockfiles, migrations, schemas, and seed files. Avoid running two baseline previews for the same project at once because they share canonical smart volumes.
 
@@ -471,7 +471,7 @@ make cover
 make example-e2e
 make integration-fixtures
 make nasty-integration-fixtures
-make dogfood-configs
+make example-configs
 make deploy-fixtures
 make release-smoke
 ```
@@ -484,4 +484,4 @@ vivero skill doctor --json --no-input
 vivero skill install --target /tmp/vivero-skill --force --json --no-input
 ```
 
-`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, timeouts, output caps/redaction, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples. After a tag publishes, use `VERSION=vX.Y.Z make release-postflight` to verify release metadata, checksums, attestations, the installer, and the Homebrew tap formula; add `RELEASE_POSTFLIGHT_FLAGS="--example-e2e"` to run the certified preview E2E against the checksum-installed release binary.
+`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, deploy fixtures, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, timeouts, output caps/redaction, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples. After a tag publishes, use `VERSION=vX.Y.Z make release-postflight` to verify release metadata, checksums, attestations, the installer, and the Homebrew tap formula; add `RELEASE_POSTFLIGHT_FLAGS="--example-e2e"` to run the certified preview E2E against the checksum-installed release binary.

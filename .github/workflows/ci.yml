@@ -73,7 +73,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make nasty-integration-fixtures
-      - run: make dogfood-configs
+      - run: make example-configs
 
   deploy-fixtures:
     name: Deploy/release fixtures

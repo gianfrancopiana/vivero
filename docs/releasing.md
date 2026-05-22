@@ -17,14 +17,11 @@ Run the local confidence ladder that proves the release path, not just unit test
 ```sh
 make certify
 make live-cloud-browser-smoke
-make chetear-real-dogfood
 ```
 
-`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
+`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, deploy fixtures, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
 
 `make live-cloud-browser-smoke` is intentionally not required on every PR. It is now a required tag gate in the Release workflow; run it locally before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
-
-`make chetear-real-dogfood` is a maintainer-only real-app proof. It copies the local `chetear.com` repo into a temporary workspace, starts a Docker preview, collects preview evidence, runs app-owned deploy/release/status/smoke commands against the copied app, and proves rollback. It skips when the private dogfood repo is unavailable unless `VIVERO_REAL_DOGFOOD_REQUIRE=1` is set.
 
 ## Cut the tag
 

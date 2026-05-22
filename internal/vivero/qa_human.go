@@ -6,6 +6,13 @@ import (
 )
 
 func renderQAReport(plan map[string]any) string {
+	return renderQAReportWithStatus(plan, "pending")
+}
+
+func renderQAReportWithStatus(plan map[string]any, statusText string) string {
+	if statusText == "" {
+		statusText = "pending"
+	}
 	var b strings.Builder
 	preview, _ := plan["preview"].(map[string]any)
 	artifacts, _ := plan["artifacts"].(map[string]any)
@@ -27,7 +34,7 @@ func renderQAReport(plan map[string]any) string {
 	fmt.Fprintf(&b, "- Artifact directory: `%s`\n\n", artifactDir)
 
 	b.WriteString("## Summary\n\n")
-	b.WriteString("- Status: pending\n")
+	fmt.Fprintf(&b, "- Status: %s\n", statusText)
 	b.WriteString("- Critical issues: 0\n")
 	b.WriteString("- High issues: 0\n")
 	b.WriteString("- Medium issues: 0\n")

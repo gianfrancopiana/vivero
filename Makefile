@@ -9,7 +9,7 @@ STATICCHECK ?= honnef.co/go/tools/cmd/staticcheck@v0.6.1
 DEADCODE ?= golang.org/x/tools/cmd/deadcode@v0.36.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION) -X github.com/gianfrancopiana/vivero/internal/vivero.Commit=$(COMMIT) -X github.com/gianfrancopiana/vivero/internal/vivero.BuildDate=$(DATE)"
 
-.PHONY: build test test-short test-race vet fmt-check cover verify staticcheck deadcode stale-markers script-refs ignored-artifacts package-boundaries audit cross-build install snapshot release-smoke release-postflight certify live-cloud-browser-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures dogfood-configs chetear-real-dogfood clean
+.PHONY: build test test-short test-race vet fmt-check cover verify staticcheck deadcode stale-markers script-refs ignored-artifacts package-boundaries audit cross-build install snapshot release-smoke release-postflight certify live-cloud-browser-smoke example-e2e integration-fixtures deploy-fixtures nasty-integration-fixtures example-configs clean
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
@@ -90,7 +90,7 @@ certify:
 	$(MAKE) example-e2e
 	$(MAKE) integration-fixtures
 	$(MAKE) nasty-integration-fixtures
-	$(MAKE) dogfood-configs
+	$(MAKE) example-configs
 	$(MAKE) deploy-fixtures
 	$(MAKE) release-smoke
 
@@ -109,11 +109,8 @@ deploy-fixtures:
 nasty-integration-fixtures:
 	scripts/nasty-integration-fixtures.sh
 
-dogfood-configs:
-	scripts/dogfood-configs.sh
-
-chetear-real-dogfood:
-	scripts/chetear-real-dogfood.sh
+example-configs:
+	scripts/example-configs.sh
 
 clean:
 	rm -rf bin dist

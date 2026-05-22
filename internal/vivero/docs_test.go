@@ -95,7 +95,7 @@ func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 		"\t$(MAKE) example-e2e",
 		"\t$(MAKE) integration-fixtures",
 		"\t$(MAKE) nasty-integration-fixtures",
-		"\t$(MAKE) dogfood-configs",
+		"\t$(MAKE) example-configs",
 		"\t$(MAKE) deploy-fixtures",
 		"\t$(MAKE) release-smoke",
 	} {
