@@ -9,6 +9,30 @@ import (
 	"testing"
 )
 
+func TestRenderQAReportWithStatusMarksCompletedAndFailedHandoffs(t *testing.T) {
+	plan := map[string]any{
+		"preview": map[string]any{"id": "qa-pr"},
+		"scope":   map[string]any{"name": "smoke"},
+		"target":  map[string]any{"name": "local"},
+		"artifacts": map[string]any{
+			"dir": "/tmp/vivero-qa",
+		},
+	}
+
+	pending := renderQAReport(plan)
+	if !strings.Contains(pending, "- Status: pending") {
+		t.Fatalf("plain QA report should remain a plan/handoff template:\n%s", pending)
+	}
+	ok := renderQAReportWithStatus(plan, "ok")
+	if strings.Contains(ok, "- Status: pending") || !strings.Contains(ok, "- Status: ok") {
+		t.Fatalf("completed QA report should not look pending:\n%s", ok)
+	}
+	failed := renderQAReportWithStatus(plan, "failed")
+	if strings.Contains(failed, "- Status: pending") || !strings.Contains(failed, "- Status: failed") {
+		t.Fatalf("failed QA report should be explicit, not pending:\n%s", failed)
+	}
+}
+
 func TestQAURLsDefaultToLocalProxyForFastEvidence(t *testing.T) {
 	p := PreviewRecord{Services: map[string]PreviewService{
 		"web": {

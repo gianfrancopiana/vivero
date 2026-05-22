@@ -506,7 +506,7 @@ func TestBuildServiceImagesUsesServiceSourceAsBuildContext(t *testing.T) {
 	}
 	defer a.Close()
 	projectRoot := t.TempDir()
-	sourceRoot := filepath.Join(t.TempDir(), "gumroad")
+	sourceRoot := filepath.Join(t.TempDir(), "storefront")
 	if err := os.MkdirAll(filepath.Join(sourceRoot, "docker", "web"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -514,27 +514,27 @@ func TestBuildServiceImagesUsesServiceSourceAsBuildContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := ProjectConfig{
-		Project: ProjectMeta{Name: "gumroad-main"},
+		Project: ProjectMeta{Name: "storefront-main"},
 		Services: map[string]ServiceConfig{
-			"gumroad-web": {
-				Source: "gumroad",
-				Build:  ImageBuildConfig{Context: ".", Dockerfile: "docker/web/Dockerfile", Tag: "vivero/gumroad-web:test"},
+			"storefront-web": {
+				Source: "storefront",
+				Build:  ImageBuildConfig{Context: ".", Dockerfile: "docker/web/Dockerfile", Tag: "vivero/storefront-web:test"},
 			},
 		},
 	}
-	if err := a.buildServiceImages(ProjectRecord{Name: "gumroad-main", Path: projectRoot, Config: cfg}, "gumroad-pr-1", map[string]PreviewSource{
-		"gumroad": {Name: "gumroad", Path: sourceRoot},
+	if err := a.buildServiceImages(ProjectRecord{Name: "storefront-main", Path: projectRoot, Config: cfg}, "storefront-pr-1", map[string]PreviewSource{
+		"storefront": {Name: "storefront", Path: sourceRoot},
 	}, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Services["gumroad-web"].Image; got != "vivero/gumroad-web:test" {
+	if got := cfg.Services["storefront-web"].Image; got != "vivero/storefront-web:test" {
 		t.Fatalf("built image not written back to service config: %q", got)
 	}
 	builds, err := os.ReadFile(filepath.Join(os.Getenv("FAKE_DOCKER_STATE"), "builds"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "vivero/gumroad-web:test|" + filepath.Join(sourceRoot, "docker", "web", "Dockerfile") + "|" + sourceRoot
+	want := "vivero/storefront-web:test|" + filepath.Join(sourceRoot, "docker", "web", "Dockerfile") + "|" + sourceRoot
 	if !strings.Contains(string(builds), want) {
 		t.Fatalf("build should be rooted at the resolved service source; want %q in %q", want, builds)
 	}
@@ -835,9 +835,9 @@ func TestExposeLocalServiceThroughHeaderRewriteProxyUsesProxyURL(t *testing.T) {
 	}
 	var called bool
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
 		called = true
-		if previewID != "gumroad-main" || service != "web" || originURL != ps.OriginURL || hostHeader != "localhost" {
+		if previewID != "storefront-main" || service != "web" || originURL != ps.OriginURL || hostHeader != "localhost" {
 			t.Fatalf("unexpected proxy args: preview=%s service=%s origin=%s host=%s", previewID, service, originURL, hostHeader)
 		}
 		if len(rewrite.Origins) != 1 || rewrite.Origins[0] != "http://localhost:3310" {
@@ -869,7 +869,7 @@ func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *t
 	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
 	svc := ServiceConfig{TunnelHostHeader: "localhost", Public: true}
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-pr", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-pr", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
 		return "http://127.0.0.1:56073", 5678, nil
 	})
 	if err != nil {
@@ -889,7 +889,7 @@ func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *t
 func TestExposeServiceThroughHeaderRewriteProxySkipsServicesWithoutHostHeader(t *testing.T) {
 	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("gumroad-main", "web", ps, ServiceConfig{}, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, ServiceConfig{}, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
 		t.Fatal("proxy should not start without tunnelHostHeader")
 		return "", 0, nil
 	})

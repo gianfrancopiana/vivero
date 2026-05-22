@@ -536,6 +536,15 @@ func TestRunQASubcommandsJSONContract(t *testing.T) {
 	if run["ok"] != true || run["plan"] == nil || run["report"] == nil || run["runPath"] == "" {
 		t.Fatalf("qa run missing stable contract fields: %#v", run)
 	}
+	report := run["report"].(map[string]any)
+	reportPath := report["path"].(string)
+	reportBody, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("read qa run report: %v", err)
+	}
+	if strings.Contains(string(reportBody), "- Status: pending") || !strings.Contains(string(reportBody), "- Status: ok") {
+		t.Fatalf("successful qa run report should be a completed handoff, not pending:\n%s", reportBody)
+	}
 
 	code, stdout, stderr = runCLITestCommand(t, home, "qa", "final", "cli-pr", "--scope", "auth", "--no-screenshots", "--no-record", "--json", "--no-input")
 	if code != 0 || stderr != "" {
@@ -551,6 +560,13 @@ func TestRunQASubcommandsJSONContract(t *testing.T) {
 	}
 	if proof["url"] != "http://127.0.0.1:7777" || proof["reportPath"] == "" || proof["runPath"] == "" || proof["recordSkipped"] != true {
 		t.Fatalf("qa final proof should summarize handoff evidence: %#v", proof)
+	}
+	finalReportBody, err := os.ReadFile(proof["reportPath"].(string))
+	if err != nil {
+		t.Fatalf("read qa final report: %v", err)
+	}
+	if strings.Contains(string(finalReportBody), "- Status: pending") || !strings.Contains(string(finalReportBody), "- Status: ok") {
+		t.Fatalf("successful qa final report should be a completed handoff, not pending:\n%s", finalReportBody)
 	}
 	if _, err := os.Stat(final["finalPath"].(string)); err != nil {
 		t.Fatalf("qa final should write final proof JSON: %v", err)

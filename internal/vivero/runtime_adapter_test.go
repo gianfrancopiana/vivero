@@ -392,9 +392,9 @@ func TestDockerRunOnceArgsUsesPreviewNetwork(t *testing.T) {
 
 func TestDockerRunArgsUsesProjectLifetimeVolumeNames(t *testing.T) {
 	args, err := dockerRunArgs(dockerServiceSpec{
-		Project:   "gumroad-main",
-		PreviewID: "gumroad-pr-17",
-		Service:   "gumroad-web",
+		Project:   "demo-main",
+		PreviewID: "demo-pr-17",
+		Service:   "demo-web",
 		Image:     "alpine:latest",
 		Volumes: []VolumeConfig{
 			{Name: "bundle_path", Target: "/bundle_path", Lifetime: "project"},
@@ -405,8 +405,8 @@ func TestDockerRunArgsUsesProjectLifetimeVolumeNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
-	projectVolume := dockerProjectVolumeName("gumroad-main", "gumroad-web", "bundle_path")
-	previewVolume := dockerVolumeName("gumroad-pr-17", "gumroad-web", "tmp")
+	projectVolume := dockerProjectVolumeName("demo-main", "demo-web", "bundle_path")
+	previewVolume := dockerVolumeName("demo-pr-17", "demo-web", "tmp")
 	for _, want := range []string{
 		"source=" + projectVolume + ",target=/bundle_path",
 		"source=" + previewVolume + ",target=/tmp/cache",
@@ -415,7 +415,7 @@ func TestDockerRunArgsUsesProjectLifetimeVolumeNames(t *testing.T) {
 			t.Fatalf("docker args missing %q: %v", want, args)
 		}
 	}
-	if strings.Contains(joined, dockerVolumeName("gumroad-pr-17", "gumroad-web", "bundle_path")) {
+	if strings.Contains(joined, dockerVolumeName("demo-pr-17", "demo-web", "bundle_path")) {
 		t.Fatalf("project-lifetime volume should not be preview-scoped: %v", args)
 	}
 }

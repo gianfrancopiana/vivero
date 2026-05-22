@@ -213,15 +213,7 @@ Run the strongest local non-live ladder before release-facing changes:
 make certify
 ```
 
-`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. CI runs the same surfaces as split jobs. The Release workflow also gates tags on live Docker + Cloudflare quick tunnel + Playwright evidence before publishing.
-
-For maintainer real-app confidence against Chetear, run:
-
-```sh
-make chetear-real-dogfood
-```
-
-That target copies the local `chetear.com` repo into a temp workspace and proves preview startup, preview evidence, app-owned deploy/release/status/smoke, and rollback without mutating the source repo.
+`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, example config validation, deploy/release fixtures, and snapshot release smoke. CI runs the same surfaces as split jobs. The Release workflow also gates tags on live Docker + Cloudflare quick tunnel + Playwright evidence before publishing.
 
 After a tag publishes, run the install trust postflight against the exact release:
 

@@ -123,6 +123,10 @@ func (a *App) QAReportWithTarget(previewID, scopeName, target, outPath string) (
 	if err != nil {
 		return nil, err
 	}
+	return writeQAReportForPlan(plan, outPath, renderQAReport(plan))
+}
+
+func writeQAReportForPlan(plan map[string]any, outPath, content string) (map[string]any, error) {
 	artifacts, _ := plan["artifacts"].(map[string]any)
 	if outPath == "" {
 		outPath, _ = artifacts["reportPath"].(string)
@@ -137,11 +141,11 @@ func (a *App) QAReportWithTarget(previewID, scopeName, target, outPath string) (
 	if err := ensureDir(filepath.Dir(outPath)); err != nil {
 		return nil, err
 	}
-	content := renderQAReport(plan)
 	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "preview": previewID, "scope": scopeNameFromPlan(plan), "path": outPath, "bytes": len(content)}, nil
+	preview, _ := plan["preview"].(map[string]any)
+	return map[string]any{"ok": true, "preview": stringValue(preview["id"]), "scope": scopeNameFromPlan(plan), "path": outPath, "bytes": len(content)}, nil
 }
 
 func (a *App) QARunWithTarget(previewID, scopeName, target string, screenshots bool) (map[string]any, error) {
@@ -180,7 +184,11 @@ func (a *App) QARunWithTarget(previewID, scopeName, target string, screenshots b
 			result["screenshots"] = shots
 		}
 	}
-	report, err := a.QAReportWithTarget(previewID, scopeName, target, "")
+	reportStatus := "failed"
+	if result["ok"] == true {
+		reportStatus = "ok"
+	}
+	report, err := writeQAReportForPlan(plan, "", renderQAReportWithStatus(plan, reportStatus))
 	if err != nil {
 		result["ok"] = false
 		result["reportError"] = err.Error()
