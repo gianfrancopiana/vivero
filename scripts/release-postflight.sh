@@ -230,6 +230,7 @@ fi
 
 if [ "$skip_homebrew" -eq 0 ]; then
   require_cmd brew
+  brew tap gianfrancopiana/tap >/dev/null
   brew_info_json="$tmp/brew-info.json"
   brew info --json=v2 gianfrancopiana/tap/vivero > "$brew_info_json"
   python3 - "$brew_info_json" "$plain_version" <<'PY'
