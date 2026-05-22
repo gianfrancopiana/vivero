@@ -143,7 +143,7 @@ for archive in "${archives[@]}"; do
     "$tmp/vivero" capabilities --json --no-input > "$tmp/capabilities.json"
     "$tmp/vivero" doctor --json --no-input > "$tmp/doctor.json"
     "$tmp/vivero" commands --json --no-input > "$tmp/commands.json"
-    "$tmp/vivero" schema qa --json --no-input > "$tmp/schema-qa.json"
+    "$tmp/vivero" schema preview qa final --json --no-input > "$tmp/schema-qa.json"
     "$tmp/vivero" doctor config examples/gumroad --json --no-input > "$tmp/gumroad-config.json"
     "$tmp/vivero" doctor config examples/helper-host-products --json --no-input > "$tmp/helper-config.json"
     python3 - "$tmp" <<'PY'
@@ -171,7 +171,7 @@ require(capabilities.get("build", {}).get("commit") == version.get("commit"), "c
 require("release-checksums" in capabilities.get("features", []), "release checksum capability missing", capabilities)
 require(doctor.get("ok") is True, "doctor failed", doctor)
 names = {cmd.get("name") for cmd in commands.get("commands", [])}
-require("qa final" in names, "qa final command missing", sorted(names))
+require("preview qa final" in names, "preview qa final command missing", sorted(names))
 require(schema.get("schema", {}).get("jsonStability") == "stable", "qa schema is not stable", schema)
 for payload in (gumroad, helper):
     report = payload.get("configDoctor", {})

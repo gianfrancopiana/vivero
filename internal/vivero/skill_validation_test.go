@@ -166,8 +166,8 @@ func TestSkillCommandSnippetValidationRejectsUnknownFlagsAndTypos(t *testing.T) 
 	}
 
 	for _, command := range []string{
-		"vivero screenshot webapp-local web / --breakpoints --json --no-input --quiet",
-		"vivero qa record webapp-local --scope public --storage-state auth.json --json --no-input --quiet",
+		"vivero evidence screenshot preview:webapp-local web / --breakpoints --json --no-input --quiet",
+		"vivero evidence qa record preview:webapp-local --scope public --storage-state auth.json --json --no-input --quiet",
 	} {
 		snippet := validateSkillCommandSnippet(skillCommandSnippet{Line: 1, Command: command})
 		if !snippet.OK {

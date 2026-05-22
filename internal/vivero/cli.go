@@ -1,11 +1,15 @@
 package vivero
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -94,6 +98,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return errOut(stderr, jsonOut, err)
 	}
 	defer a.Close()
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	a.Context = ctx
 	cmd := args[0]
 	rest := args[1:]
 	switch cmd {

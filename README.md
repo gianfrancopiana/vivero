@@ -43,7 +43,7 @@ Start with the certified example. It is small, local, and CI-proven:
 make example-e2e
 ```
 
-That target runs `examples/agent-demo` through config doctor, project sync, Docker preview startup, `qa final`, startup diagnosis, teardown, and clean-file checks. Browser screenshot/video evidence is opt-in:
+That target runs `examples/agent-demo` through config doctor, project sync, Docker preview startup, `vivero preview qa final`, startup diagnosis, teardown, and clean-file checks. Browser screenshot/video evidence is opt-in:
 
 ```sh
 VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e
@@ -57,7 +57,7 @@ Then use the same lane shape on your app: start a preview, collect evidence, and
 vivero projects sync /path/to/project --json --no-input
 vivero preview up webapp --id webapp-local --source app.path=/path/to/webapp --wait --timeout 5m --json --no-input --quiet
 vivero preview inspect webapp-local --json --no-input
-vivero qa final webapp-local --scope smoke --json --no-input --quiet
+vivero preview qa final webapp-local --scope smoke --json --no-input --quiet
 vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
@@ -68,10 +68,10 @@ Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain co
 Evidence commands return one stable target-aware JSON shape. Use preview IDs, `preview:<id>`, or release targets like `release:<id>`:
 
 ```sh
-vivero logs preview:webapp-local --json --no-input
-vivero diagnose startup preview:webapp-local --json --no-input
-vivero screenshot preview:webapp-local --page home --json --no-input
-vivero qa final preview:webapp-local --scope smoke --json --no-input
+vivero evidence logs preview:webapp-local web --json --no-input
+vivero preview diagnose startup preview:webapp-local --json --no-input
+vivero evidence screenshot preview:webapp-local web / --target local --json --no-input
+vivero evidence qa run preview:webapp-local --scope smoke --target local --json --no-input
 ```
 
 The same debugging loop applies after deploys:
@@ -124,7 +124,7 @@ The fixture set stays intentionally small. Each fixture exists because it proves
 
 - **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, and cleanup. Prove the boring path with `make example-e2e`; prove messy preview shapes with `make nasty-integration-fixtures`.
 - **Deploy/release invariants:** production doctor, read-only plan, app-owned prepare/apply/smoke/status/rollback commands, locks, idempotency, release history, and blue/green slot transitions. Prove them with `make deploy-fixtures`.
-- **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
+- **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
 
 Add a new fixture only when it proves a new invariant class. Do not grow a framework zoo of example apps that all prove the same thing.
 
@@ -171,6 +171,8 @@ Deploy config points to app-owned commands:
 deploy:
   environments:
     production:
+      commandTimeout: 30m
+      statusTimeout: 2m
       prepareCommand: ./script/deploy-prepare production
       applyCommand: ./script/deploy production
       smokeCommand: ./script/deploy-smoke production
@@ -188,7 +190,7 @@ deploy:
 
 Vivero follows a small, test-ratcheted CLI contract:
 
-- Human help is examples-first: `vivero --help`, `vivero help <command>`, and grouped help such as `vivero help qa`.
+- Human help is examples-first: `vivero --help`, `vivero help <command>`, and grouped help such as `vivero help preview qa final`, `vivero help evidence qa`, or `vivero help deploy plan`.
 - Machines can discover commands with `vivero commands --json --no-input` and schemas with `vivero schema <command> --json --no-input`.
 - JSON command output goes to stdout; JSON errors go to stderr with `code`, `message`, `hint`, and `details` when available.
 - `vivero version --json --no-input` and `vivero --version` expose version, commit, and build date for release provenance.
@@ -219,7 +221,11 @@ After a tag publishes, run the install trust postflight against the exact releas
 GH_CLI=gh VERSION=v0.1.1 make release-postflight
 ```
 
-That verifies release metadata, required assets, checksums, GitHub artifact attestations, the checksum-verifying installer, and the Homebrew tap formula.
+That verifies release metadata, required assets, checksums, GitHub artifact attestations, the checksum-verifying installer, and the Homebrew tap formula. For release-candidate confidence, run the same postflight with the checksum-installed release binary through the certified preview E2E:
+
+```sh
+GH_CLI=gh VERSION=v0.1.1 RELEASE_POSTFLIGHT_FLAGS="--example-e2e" make release-postflight
+```
 
 ## Limits
 

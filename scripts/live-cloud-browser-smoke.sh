@@ -65,9 +65,9 @@ copy_artifacts() {
 
 run_down() {
   if command -v timeout >/dev/null 2>&1; then
-    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" timeout 90s bin/vivero down "$preview_id" --discard --json --no-input > "$workdir/out/down.json" 2> "$workdir/out/down.stderr"
+    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" timeout 90s bin/vivero preview down "$preview_id" --discard --json --no-input > "$workdir/out/down.json" 2> "$workdir/out/down.stderr"
   else
-    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero down "$preview_id" --discard --json --no-input > "$workdir/out/down.json" 2> "$workdir/out/down.stderr"
+    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero preview down "$preview_id" --discard --json --no-input > "$workdir/out/down.json" 2> "$workdir/out/down.stderr"
   fi
 }
 
@@ -101,7 +101,7 @@ npx --yes "$VIVERO_PLAYWRIGHT_PACKAGE" install ffmpeg >/dev/null
 bin/vivero doctor config examples/agent-demo --json --no-input > "$workdir/out/config-doctor.json"
 bin/vivero projects sync examples/agent-demo --json --no-input > "$workdir/out/sync.json"
 cleanup_needed=1
-bin/vivero up agent-demo \
+bin/vivero preview up agent-demo \
   --id "$preview_id" \
   --public \
   --wait \
@@ -109,14 +109,14 @@ bin/vivero up agent-demo \
   --json \
   --no-input > "$workdir/out/up-public.json"
 
-bin/vivero events "$preview_id" --json --no-input > "$workdir/out/events-before-qa.json"
-bin/vivero qa final "$preview_id" \
+bin/vivero preview events "$preview_id" --json --no-input > "$workdir/out/events-before-qa.json"
+bin/vivero preview qa final "$preview_id" \
   --scope smoke \
   --public \
   --format webm \
   --json \
   --no-input > "$workdir/out/final-public-browser.json"
-bin/vivero events "$preview_id" --json --no-input > "$workdir/out/events-after-qa.json"
+bin/vivero preview events "$preview_id" --json --no-input > "$workdir/out/events-after-qa.json"
 
 python3 - "$workdir/out" <<'PY'
 import json

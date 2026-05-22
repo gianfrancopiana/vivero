@@ -96,6 +96,8 @@ type DeployConfig struct {
 
 type DeployEnvironmentConfig struct {
 	Strategy        string                `yaml:"strategy" json:"strategy,omitempty"`
+	CommandTimeout  string                `yaml:"commandTimeout" json:"commandTimeout,omitempty"`
+	StatusTimeout   string                `yaml:"statusTimeout" json:"statusTimeout,omitempty"`
 	PrepareCommand  string                `yaml:"prepareCommand" json:"prepareCommand,omitempty"`
 	ApplyCommand    string                `yaml:"applyCommand" json:"applyCommand,omitempty"`
 	StatusCommand   string                `yaml:"statusCommand" json:"statusCommand,omitempty"`

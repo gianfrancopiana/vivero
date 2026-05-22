@@ -14,7 +14,7 @@ func rootHelp() string {
 		"  vivero projects sync . --json --no-input",
 		"  vivero preview up my-app --id my-app-local --wait --timeout 5m --json --no-input",
 		"  vivero preview events my-app-local --tail --json --no-input",
-		"  vivero qa run my-app-local --scope all --target local --json --no-input",
+		"  vivero preview qa run my-app-local --scope all --target local --json --no-input",
 		"  vivero preview down my-app-local --discard --json --no-input",
 		"",
 		"  # Deploy/release: plan, apply, inspect, and roll back app-owned production logic",

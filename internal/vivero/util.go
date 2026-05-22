@@ -62,7 +62,61 @@ func writeIndentedJSONFile(path string, v any, perm os.FileMode) error {
 		return err
 	}
 	body = append(body, '\n')
-	return os.WriteFile(path, body, perm)
+	return atomicWriteFile(path, body, perm)
+}
+
+var atomicWriteBeforeRenameHook func(path string, body []byte) error
+
+func atomicWriteFile(path string, body []byte, perm os.FileMode) error {
+	if err := ensureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if atomicWriteBeforeRenameHook != nil {
+		if err := atomicWriteBeforeRenameHook(path, body); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	syncParentDir(filepath.Dir(path))
+	return nil
+}
+
+func syncParentDir(dir string) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = f.Sync()
 }
 
 func fromJSONString[T any](s string) (T, error) {

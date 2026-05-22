@@ -27,8 +27,8 @@ known_volumes_file="$workdir/out/warm-volumes.txt"
 
 cleanup_preview() {
   local id="$1"
-  if HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero inspect "$id" --json --no-input >/dev/null 2>&1; then
-    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero down "$id" --discard --json --no-input >/dev/null 2>&1 || true
+  if HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero preview inspect "$id" --json --no-input >/dev/null 2>&1; then
+    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero preview down "$id" --discard --json --no-input >/dev/null 2>&1 || true
   fi
 }
 
@@ -76,27 +76,27 @@ export VIVERO_HOME="$workdir/vivero-home"
 bin/vivero doctor config "$fixture" --json --no-input > "$workdir/out/config-doctor.json"
 bin/vivero projects sync "$fixture" --json --no-input > "$workdir/out/sync.json"
 
-bin/vivero up integration-stack \
+bin/vivero preview up integration-stack \
   --id "$baseline_id" \
   --metadata branch=main \
   --wait \
   --timeout 4m \
   --json \
   --no-input > "$workdir/out/baseline-up.json"
-bin/vivero qa final "$baseline_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/baseline-final.json"
-bin/vivero events "$baseline_id" --json --no-input > "$workdir/out/baseline-events.json"
-bin/vivero down "$baseline_id" --json --no-input > "$workdir/out/baseline-down.json"
+bin/vivero preview qa final "$baseline_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/baseline-final.json"
+bin/vivero preview events "$baseline_id" --json --no-input > "$workdir/out/baseline-events.json"
+bin/vivero preview down "$baseline_id" --json --no-input > "$workdir/out/baseline-down.json"
 
-bin/vivero up integration-stack \
+bin/vivero preview up integration-stack \
   --id "$derived_id" \
   --metadata branch=feature/integration-fixture \
   --wait \
   --timeout 4m \
   --json \
   --no-input > "$workdir/out/derived-up.json"
-bin/vivero qa final "$derived_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/derived-final.json"
-bin/vivero diagnose startup "$derived_id" --json --no-input > "$workdir/out/derived-diagnose.json"
-bin/vivero events "$derived_id" --json --no-input > "$workdir/out/derived-events.json"
+bin/vivero preview qa final "$derived_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/derived-final.json"
+bin/vivero preview diagnose startup "$derived_id" --json --no-input > "$workdir/out/derived-diagnose.json"
+bin/vivero preview events "$derived_id" --json --no-input > "$workdir/out/derived-events.json"
 
 python3 - "$workdir/out" "$repo_root" "$fixture" <<'PY'
 import json
@@ -181,7 +181,7 @@ if [ "${VIVERO_INTEGRATION_BROWSER_QA:-0}" = "1" ]; then
     echo "VIVERO_INTEGRATION_BROWSER_QA=1 requires npm" >&2
     exit 127
   fi
-  bin/vivero qa final "$derived_id" --scope smoke --format webm --json --no-input > "$workdir/out/derived-browser-final.json"
+  bin/vivero preview qa final "$derived_id" --scope smoke --format webm --json --no-input > "$workdir/out/derived-browser-final.json"
   python3 - "$workdir/out/derived-browser-final.json" <<'PY'
 import json
 import pathlib
@@ -194,8 +194,8 @@ assert proof.get("videos"), proof
 PY
 fi
 
-bin/vivero down "$derived_id" --discard --json --no-input > "$workdir/out/derived-down.json"
-bin/vivero down "$baseline_id" --discard --json --no-input > "$workdir/out/baseline-discard.json"
+bin/vivero preview down "$derived_id" --discard --json --no-input > "$workdir/out/derived-down.json"
+bin/vivero preview down "$baseline_id" --discard --json --no-input > "$workdir/out/baseline-discard.json"
 cleanup_known_warm_volumes
 
 leftover_containers="$(

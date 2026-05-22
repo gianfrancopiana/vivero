@@ -69,6 +69,7 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	previewRef := "preview:" + p.ID
 
 	previewInfo := map[string]any{
 		"id":      p.ID,
@@ -99,11 +100,11 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 		"smokeTests":            agent.SmokeTests,
 		"scopes":                scopePlans,
 		"commands": map[string]any{
-			"smoke":       fmt.Sprintf("vivero smoke %s --json --no-input --quiet", p.ID),
-			"events":      fmt.Sprintf("vivero events %s --tail --json --no-input", p.ID),
-			"report":      fmt.Sprintf("vivero qa report %s --scope %s --json --no-input", p.ID, selectedScope),
-			"record":      fmt.Sprintf("vivero qa record %s --scope %s --json --no-input --quiet", p.ID, selectedScope),
-			"screenshots": qaCommandWithTarget(fmt.Sprintf("vivero screenshot %s %s <path> --breakpoints --json --no-input --quiet", p.ID, defaultPreviewService(agent, p)), target),
+			"smoke":       fmt.Sprintf("vivero preview smoke %s --json --no-input --quiet", previewRef),
+			"events":      fmt.Sprintf("vivero preview events %s --tail --json --no-input", previewRef),
+			"report":      fmt.Sprintf("vivero preview qa report %s --scope %s --json --no-input", previewRef, selectedScope),
+			"record":      fmt.Sprintf("vivero preview qa record %s --scope %s --json --no-input --quiet", previewRef, selectedScope),
+			"screenshots": qaCommandWithTarget(fmt.Sprintf("vivero preview screenshot %s %s <path> --breakpoints --json --no-input --quiet", previewRef, defaultPreviewService(agent, p)), target),
 		},
 		"agentInstructions": []string{
 			"Use this plan as the source of truth for preview URLs, services, scopes, and artifact paths.",
@@ -112,7 +113,7 @@ func (a *App) QAPlanWithTarget(previewID, scopeName, target string) (map[string]
 			"Use evidence.screenshots.commands and evidence.recordings.commands for YAML-backed screenshot and video evidence instead of hardcoding project-specific matrices.",
 			"Use Playwright for reproducible screenshots, recordings, traces, and CI-safe E2E evidence; use Chrome MCP or another browser driver only for exploratory/debug sessions.",
 			"Run project smoke tests before or during QA, then drive the listed pages and flows in a real browser.",
-			"Save screenshots, traces, and notes under artifacts.dir; generate the final markdown scaffold with `vivero qa report`.",
+			"Save screenshots, traces, and notes under artifacts.dir; generate the final markdown scaffold with `vivero preview qa report`.",
 			"Do not hardcode project-specific URLs or selectors in the generic agent skill; put them in vivero.yml under agent.qa.",
 		},
 	}, nil
@@ -684,7 +685,7 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		service := stringValue(page["service"])
 		path := stringValue(page["path"])
 		for _, colorScheme := range screenshotColorSchemes {
-			argv := []string{"vivero", "screenshot", previewID, service, path, "--breakpoints", "--json", "--no-input", "--quiet"}
+			argv := []string{"vivero", "preview", "screenshot", "preview:" + previewID, service, path, "--breakpoints", "--json", "--no-input", "--quiet"}
 			argv = appendArtifactTargetArgs(argv, target)
 			storageState := stringValue(page["storageState"])
 			if storageState != "" {
@@ -720,7 +721,7 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		recordingSession, hasRecordingAuth = qaAuthSessionForScope(scopes[0], authSessions)
 	}
 	for _, colorScheme := range recordingColorSchemes {
-		argv := []string{"vivero", "qa", "record", previewID, "--scope", scopeName, "--json", "--no-input", "--quiet"}
+		argv := []string{"vivero", "preview", "qa", "record", "preview:" + previewID, "--scope", scopeName, "--json", "--no-input", "--quiet"}
 		if hasRecordingAuth && recordingSession.StorageState != "" {
 			argv = append(argv, "--storage-state", recordingSession.StorageState)
 		}
@@ -1154,5 +1155,5 @@ func qaPlanHuman(v map[string]any) string {
 			checkCount += len(checks)
 		}
 	}
-	return fmt.Sprintf("qa plan %s: %d pages, %d flows, %d checks\nartifacts: %s\nnext: capture reproducible evidence with Playwright; use Chrome MCP/browser only for exploratory debugging, then run `vivero qa report %s`", stringValue(preview["id"]), pageCount, flowCount, checkCount, stringValue(artifacts["dir"]), stringValue(preview["id"]))
+	return fmt.Sprintf("qa plan %s: %d pages, %d flows, %d checks\nartifacts: %s\nnext: capture reproducible evidence with Playwright; use Chrome MCP/browser only for exploratory debugging, then run `vivero preview qa report preview:%s`", stringValue(preview["id"]), pageCount, flowCount, checkCount, stringValue(artifacts["dir"]), stringValue(preview["id"]))
 }

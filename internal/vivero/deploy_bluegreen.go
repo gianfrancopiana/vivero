@@ -1,11 +1,12 @@
 package vivero
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
 
-func (p *DeployPlan) configureBlueGreenDeploy(environment string, cfg BlueGreenDeployConfig) {
+func (p *DeployPlan) configureBlueGreenDeploy(ctx context.Context, environment string, cfg BlueGreenDeployConfig) {
 	base := "deploy.environments." + environment + ".blueGreen"
 	slots := normalizeBlueGreenSlots(cfg.Slots)
 	if len(slots) != 2 {
@@ -37,16 +38,24 @@ func (p *DeployPlan) configureBlueGreenDeploy(environment string, cfg BlueGreenD
 
 	activeSlot := ""
 	if activeSlotCommand != "" {
-		out, err := runCmd(p.Path, map[string]string{
+		result, err := runDeployCommand(ctx, p.Path, map[string]string{
 			"VIVERO_DEPLOY_PLAN_ID":   p.ID,
 			"VIVERO_PROJECT":          p.Project,
 			"VIVERO_ENVIRONMENT":      p.Environment,
 			"VIVERO_BLUE_GREEN_SLOTS": strings.Join(slots, ","),
 			"VIVERO_RELEASE_ACTION":   "blue_green_active_slot",
-		}, "/bin/sh", "-lc", activeSlotCommand)
-		activeSlot = strings.TrimSpace(string(out))
+		}, activeSlotCommand, deployCommandOptionsForPlan(*p, "blue_green_active_slot"))
+		activeSlot = strings.TrimSpace(result.Output)
 		if err != nil {
-			p.addDiagnostic("error", "blue-green-active-slot-failed", base+".activeSlotCommand", fmt.Sprintf("active slot command failed: %s", strings.TrimSpace(string(out))), "Fix activeSlotCommand so it prints the current live slot and exits zero.")
+			code := "blue-green-active-slot-failed"
+			if result.TimedOut {
+				code = "blue-green-active-slot-timeout"
+			}
+			message := strings.TrimSpace(result.Output)
+			if message == "" {
+				message = err.Error()
+			}
+			p.addDiagnostic("error", code, base+".activeSlotCommand", fmt.Sprintf("active slot command failed: %s", message), "Fix activeSlotCommand so it prints the current live slot and exits zero before statusTimeout.")
 		}
 	}
 	targetSlot := ""
@@ -109,7 +118,7 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 		if strings.TrimSpace(phase.Command) == "" {
 			continue
 		}
-		out, err := runDeployShell(plan, release, phase.Command, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_" + phase.Name})
+		out, err := runDeployShellContext(a.deployContext(), plan, release, phase.Command, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_" + phase.Name})
 		trimmed := strings.TrimSpace(string(out))
 		if trimmed != "" {
 			outputs = append(outputs, phase.Name+": "+trimmed)
@@ -119,7 +128,7 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 			record.Status = "failed"
 			release.Phases = append(release.Phases, record)
 			release.Status = phase.Name + "_failed"
-			release.Output = strings.Join(outputs, "\n")
+			release.Output = capDeployOutput(strings.Join(outputs, "\n"), deployCommandOutputLimit)
 			release.addAudit("blue_green_"+phase.Name, "failed", trimmed)
 			if artifact, artifactErr := a.saveDeployArtifact(release.ID, phase.Name, "phase-output", string(out)); artifactErr == nil {
 				release.Artifacts = append(release.Artifacts, artifact)
@@ -133,7 +142,7 @@ func (a *App) applyBlueGreenDeployPlan(plan DeployPlan) (ReleaseRecord, error) {
 	release.Status = "promoted"
 	release.ActiveSlot = plan.BlueGreen.TargetSlot
 	release.PreviousSlot = plan.BlueGreen.ActiveSlot
-	release.Output = strings.Join(outputs, "\n")
+	release.Output = capDeployOutput(strings.Join(outputs, "\n"), deployCommandOutputLimit)
 	release.addAudit("blue_green_apply", "succeeded", fmt.Sprintf("promoted %s", release.ActiveSlot))
 	if err := a.saveRelease(release); err != nil {
 		return ReleaseRecord{}, err
@@ -153,7 +162,7 @@ func (a *App) rollbackBlueGreenRelease(plan DeployPlan, release ReleaseRecord) (
 	if err := a.saveReleaseHistory(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}
-	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_rollback", "VIVERO_ROLLBACK_RELEASE_ID": release.ID})
+	out, err := runDeployShellContext(a.deployContext(), plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "blue_green_rollback", "VIVERO_ROLLBACK_RELEASE_ID": release.ID})
 	rollback.Output = strings.TrimSpace(string(out))
 	if err != nil {
 		rollback.Status = "rollback_failed"

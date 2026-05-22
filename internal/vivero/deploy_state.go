@@ -224,7 +224,7 @@ func (a *App) saveDeployArtifact(releaseID, name, kind, content string) (DeployA
 		return artifact, err
 	}
 	path := filepath.Join(dir, newDeployID(statePathComponent(name))+".log")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return artifact, err
 	}
 	artifact.Path = path
@@ -240,9 +240,21 @@ func (a *App) acquireDeployLock(project, environment string) (func(), error) {
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err == nil {
 			record := map[string]any{"project": project, "environment": environment, "pid": os.Getpid(), "createdAt": nowUTC()}
-			_ = json.NewEncoder(file).Encode(record)
-			_ = file.Close()
-			return func() { _ = os.Remove(path) }, nil
+			encodeErr := json.NewEncoder(file).Encode(record)
+			syncErr := file.Sync()
+			closeErr := file.Close()
+			if encodeErr != nil || syncErr != nil || closeErr != nil {
+				_ = os.Remove(path)
+				if encodeErr != nil {
+					return nil, encodeErr
+				}
+				if syncErr != nil {
+					return nil, syncErr
+				}
+				return nil, closeErr
+			}
+			syncParentDir(filepath.Dir(path))
+			return func() { _ = os.Remove(path); syncParentDir(filepath.Dir(path)) }, nil
 		}
 		if !os.IsExist(err) {
 			return nil, err
@@ -255,6 +267,7 @@ func (a *App) acquireDeployLock(project, environment string) (func(), error) {
 }
 
 func (a *App) removeStaleDeployLock(path string) bool {
+	info, statErr := os.Stat(path)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return false
@@ -264,6 +277,10 @@ func (a *App) removeStaleDeployLock(path string) bool {
 		CreatedAt time.Time `json:"createdAt"`
 	}
 	if err := json.Unmarshal(b, &record); err != nil {
+		if statErr == nil && time.Since(info.ModTime()) > 4*time.Hour {
+			_ = os.Remove(path)
+			return true
+		}
 		return false
 	}
 	if !record.CreatedAt.IsZero() && time.Since(record.CreatedAt) > 4*time.Hour {

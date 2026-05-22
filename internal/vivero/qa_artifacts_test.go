@@ -142,7 +142,7 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 	if len(recordingCommands) != 1 {
 		t.Fatalf("recording commands = %d; want configured light recording", len(recordingCommands))
 	}
-	wantRecordArgs := []string{"vivero", "qa", "record", "preview", "--scope", "core", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -175,7 +175,7 @@ func TestQAEvidencePlanRecordCommandsIgnorePublicPlanTarget(t *testing.T) {
 	}
 	recordings := evidence["recordings"].(map[string]any)
 	recordingCommands := recordings["commands"].([]map[string]any)
-	wantRecordArgs := []string{"vivero", "qa", "record", "preview", "--scope", "public", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "public", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -391,7 +391,7 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	qa := schemaFor("qa")["schema"].(map[string]any)
 	usage := qa["usage"].(string)
 	_, recordUsage, hasRecordUsage := strings.Cut(usage, ";")
-	if !hasRecordUsage || !strings.Contains(recordUsage, "vivero qa record") {
+	if !hasRecordUsage || !strings.Contains(recordUsage, "vivero preview qa record") {
 		t.Fatalf("qa schema usage should advertise record action: %s", usage)
 	}
 	if !strings.Contains(usage, "--public") {

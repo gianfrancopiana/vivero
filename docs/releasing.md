@@ -56,10 +56,16 @@ If a GitHub release was already published, do not silently reuse the same tag. E
 After the workflow succeeds, verify the exact surfaces users install:
 
 ```sh
-GH_CLI=gh scripts/release-postflight.sh v0.1.1 --install-homebrew
+GH_CLI=gh scripts/release-postflight.sh v0.1.1
 ```
 
-`--install-homebrew` mutates the maintainer machine by installing or reinstalling `gianfrancopiana/tap/vivero`; use it on a disposable CI runner or a machine where replacing the local Vivero formula is acceptable.
+Use opt-in flags for side-effecting or Docker-backed checks:
+
+```sh
+GH_CLI=gh scripts/release-postflight.sh v0.1.1 --example-e2e --install-homebrew
+```
+
+`--example-e2e` runs the certified `examples/agent-demo` preview E2E with the checksum-installed release binary by setting `VIVERO_BIN` for `scripts/example-e2e.sh`. `--install-homebrew` mutates the maintainer machine by installing or reinstalling `gianfrancopiana/tap/vivero`; use it on a disposable CI runner or a machine where replacing the local Vivero formula is acceptable.
 
 The postflight script checks:
 
@@ -68,6 +74,7 @@ The postflight script checks:
 - Downloaded archive checksums against `checksums.txt`.
 - GitHub artifact attestations for the host archive, `checksums.txt`, and `vivero.rb`.
 - The checksum-verifying installer into a temporary bin dir.
+- The certified preview E2E with that installed binary when `--example-e2e` is passed.
 - The Homebrew tap formula version.
 - The Homebrew-installed binary when `--install-homebrew` is passed.
 
@@ -77,19 +84,18 @@ You can also run it through Make:
 
 ```sh
 GH_CLI=gh VERSION=v0.1.1 make release-postflight
+GH_CLI=gh VERSION=v0.1.1 RELEASE_POSTFLIGHT_FLAGS="--example-e2e --install-homebrew" make release-postflight
 ```
 
 ## Smoke the released binary
 
-For a release intended to be called production-ready, also run a preview E2E with the released binary, not `go build`:
+For a release intended to be called production-ready, run a preview E2E with the released binary, not `go build`:
 
 ```sh
-brew reinstall gianfrancopiana/tap/vivero
-vivero version --json --no-input
-make example-e2e
+GH_CLI=gh VERSION=v0.1.1 RELEASE_POSTFLIGHT_FLAGS="--example-e2e" make release-postflight
 ```
 
-`make example-e2e` currently builds the local binary before running. If you need to prove the installed release binary specifically, use the commands from `scripts/example-e2e.sh` with `$(brew --prefix gianfrancopiana/tap/vivero)/bin/vivero` in a temporary `HOME`/`VIVERO_HOME`.
+`scripts/release-postflight.sh --example-e2e` installs the release via the checksum-verifying installer into a temporary bin dir, then runs `scripts/example-e2e.sh` through `VIVERO_BIN=<temp>/vivero`. This proves the installable artifact without rebuilding from the local checkout. Add `--install-homebrew` only when you also want to mutate-check the tap-installed binary.
 
 ## Upgrade cadence
 

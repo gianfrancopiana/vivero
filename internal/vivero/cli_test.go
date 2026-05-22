@@ -3,6 +3,7 @@ package vivero
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -511,8 +512,17 @@ func TestRunQASubcommandsJSONContract(t *testing.T) {
 	if plan["version"].(float64) != 1 || plan["target"] != "local" || plan["driver"] == nil || plan["auth"] == nil || plan["evidence"] == nil {
 		t.Fatalf("qa plan missing stable contract fields: %#v", plan)
 	}
+	commands := plan["commands"].(map[string]any)
+	for _, want := range []string{"vivero preview smoke preview:cli-pr", "vivero preview events preview:cli-pr", "vivero preview qa report preview:cli-pr", "vivero preview qa record preview:cli-pr", "vivero preview screenshot preview:cli-pr"} {
+		if !strings.Contains(fmt.Sprint(commands), want) {
+			t.Fatalf("qa plan should advertise namespaced preview command %q: %#v", want, commands)
+		}
+	}
 	if !strings.Contains(stdout, "--storage-state") {
 		t.Fatalf("authenticated qa plan should include generated storage-state commands: %s", stdout)
+	}
+	if strings.Contains(stdout, `"vivero smoke cli-pr`) || strings.Contains(stdout, `"vivero qa record cli-pr`) || strings.Contains(stdout, `"vivero screenshot cli-pr`) {
+		t.Fatalf("qa plan should not advertise legacy preview aliases: %s", stdout)
 	}
 
 	code, stdout, stderr = runCLITestCommand(t, home, "qa", "run", "cli-pr", "--scope", "auth", "--no-screenshots", "--json", "--no-input")

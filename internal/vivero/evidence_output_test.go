@@ -25,9 +25,9 @@ func TestAttachEvidenceShapeSuggestsPreviewAndReleaseDebugCommandsOnFailure(t *t
 	attachEvidenceShape(previewPayload, map[string]any{"kind": "preview", "id": "pr-1", "ref": "preview:pr-1"})
 	previewSuggestions := stringSliceFromAny(t, previewPayload["nextSuggestedCommands"])
 	for _, want := range []string{
-		"vivero inspect preview:pr-1 --json --no-input",
-		"vivero events preview:pr-1 --tail --json --no-input",
-		"vivero diagnose startup preview:pr-1 --json --no-input",
+		"vivero preview inspect preview:pr-1 --json --no-input",
+		"vivero preview events preview:pr-1 --tail --json --no-input",
+		"vivero preview diagnose startup preview:pr-1 --json --no-input",
 	} {
 		if !containsString(previewSuggestions, want) {
 			t.Fatalf("preview failure suggestions missing %q: %#v", want, previewSuggestions)

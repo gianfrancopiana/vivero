@@ -26,6 +26,8 @@ type DeployPlan struct {
 	StatusCommand   string                       `json:"statusCommand,omitempty"`
 	SmokeCommand    string                       `json:"smokeCommand,omitempty"`
 	RollbackCommand string                       `json:"rollbackCommand,omitempty"`
+	CommandTimeout  string                       `json:"commandTimeout,omitempty"`
+	StatusTimeout   string                       `json:"statusTimeout,omitempty"`
 	Phases          []DeployPhasePlan            `json:"phases,omitempty"`
 	Cache           *DeployCachePlan             `json:"cache,omitempty"`
 	BlueGreen       *BlueGreenDeployPlan         `json:"blueGreen,omitempty"`
@@ -143,6 +145,18 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 	if !ok {
 		plan.addDiagnostic("error", "deploy-environment-missing", "deploy.environments."+environment, fmt.Sprintf("deploy environment %s is not configured", environment), "Add deploy.environments.<name> with app-owned apply/status/rollback commands.")
 	} else {
+		plan.CommandTimeout = strings.TrimSpace(deployEnv.CommandTimeout)
+		plan.StatusTimeout = strings.TrimSpace(deployEnv.StatusTimeout)
+		validateDeployTimeout := func(raw, path string) {
+			if strings.TrimSpace(raw) == "" {
+				return
+			}
+			if _, err := durationValue(raw, path, 0); err != nil {
+				plan.addDiagnostic("error", "deploy-timeout-invalid", path, err.Error(), "Use a positive Go duration such as 30s, 5m, or 1h.")
+			}
+		}
+		validateDeployTimeout(plan.CommandTimeout, "deploy.environments."+environment+".commandTimeout")
+		validateDeployTimeout(plan.StatusTimeout, "deploy.environments."+environment+".statusTimeout")
 		strategy := normalizeDeployStrategy(deployEnv.Strategy)
 		plan.Strategy = strategy
 		plan.Changes = append(plan.Changes, DeployChange{Kind: "deploy-strategy", To: strategy, Summary: fmt.Sprintf("apply %s strategy in %s", strategy, environment)})
@@ -166,7 +180,7 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 				plan.addDiagnostic("error", "deploy-rollback-missing", "deploy.environments."+environment+".rollbackCommand", "deploy rollback command is not configured", "Set an app-owned rollbackCommand for this environment.")
 			}
 		case "blue-green":
-			plan.configureBlueGreenDeploy(environment, deployEnv.BlueGreen)
+			plan.configureBlueGreenDeploy(a.deployContext(), environment, deployEnv.BlueGreen)
 		default:
 			plan.addDiagnostic("error", "deploy-strategy-unsupported", "deploy.environments."+environment+".strategy", fmt.Sprintf("deploy strategy %q is not supported", deployEnv.Strategy), "Use strategy: blue-green or omit strategy for app-owned command deploys.")
 		}
@@ -344,30 +358,59 @@ func (a *App) CurrentRelease(project, environment string) (ReleaseRecord, error)
 	if err != nil {
 		return ReleaseRecord{}, err
 	}
-	if strings.TrimSpace(plan.StatusCommand) != "" {
-		out, runErr := runDeployShell(plan, release, plan.StatusCommand, map[string]string{"VIVERO_RELEASE_ACTION": "status"})
-		if runErr != nil {
-			trimmed := strings.TrimSpace(string(out))
-			release.Status = "status_failed"
-			release.Output = appendReleaseOutput(release.Output, trimmed)
-			release.addAudit("status", "failed", trimmed)
-			if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", string(out)); artifactErr == nil {
-				release.Artifacts = append(release.Artifacts, artifact)
-			}
-			_ = a.saveRelease(release)
-			return release, fmt.Errorf("release status failed: %w: %s", runErr, trimmed)
+	if strings.TrimSpace(plan.StatusCommand) == "" {
+		return release, nil
+	}
+	unlock, err := a.acquireDeployLock(project, environment)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	defer unlock()
+	release, err = a.loadCurrentRelease(project, environment)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	plan, err = a.loadDeployPlan(release.PlanID)
+	if err != nil {
+		return ReleaseRecord{}, err
+	}
+	if strings.TrimSpace(plan.StatusCommand) == "" {
+		return release, nil
+	}
+	result, runErr := runDeployShellResultContext(a.deployContext(), plan, release, plan.StatusCommand, map[string]string{"VIVERO_RELEASE_ACTION": "status"})
+	trimmed := strings.TrimSpace(result.Output)
+	if runErr != nil {
+		release.Status = "status_failed"
+		release.Output = appendReleaseOutput(release.Output, trimmed)
+		release.addAudit("status", "failed", trimmed)
+		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
+			release.Artifacts = append(release.Artifacts, artifact)
 		}
-		if status := strings.TrimSpace(string(out)); status != "" {
-			release.Status = status
-			release.Output = status
-			if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", string(out)); artifactErr == nil {
-				release.Artifacts = append(release.Artifacts, artifact)
-			}
-			release.addAudit("status", "succeeded", status)
-			if err := a.saveRelease(release); err != nil {
-				return ReleaseRecord{}, err
-			}
+		_ = a.saveRelease(release)
+		return release, fmt.Errorf("release status failed: %w: %s", runErr, trimmed)
+	}
+	if trimmed == "" {
+		return release, nil
+	}
+	status, statusErr := normalizeReleaseStatusOutput(result.Output)
+	if statusErr != nil {
+		release.Status = "status_failed"
+		release.Output = appendReleaseOutput(release.Output, "invalid release status output")
+		release.addAudit("status", "failed", statusErr.Error())
+		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
+			release.Artifacts = append(release.Artifacts, artifact)
 		}
+		_ = a.saveRelease(release)
+		return release, statusErr
+	}
+	release.Status = status
+	release.Output = status
+	if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
+		release.Artifacts = append(release.Artifacts, artifact)
+	}
+	release.addAudit("status", "succeeded", status)
+	if err := a.saveRelease(release); err != nil {
+		return ReleaseRecord{}, err
 	}
 	return release, nil
 }
@@ -416,7 +459,7 @@ func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRe
 	if err := a.saveReleaseHistory(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}
-	out, err := runDeployShell(plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "rollback", "VIVERO_ROLLBACK_RELEASE_ID": releaseID})
+	out, err := runDeployShellContext(a.deployContext(), plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "rollback", "VIVERO_ROLLBACK_RELEASE_ID": releaseID})
 	rollback.Output = strings.TrimSpace(string(out))
 	if err != nil {
 		rollback.Status = "rollback_failed"
