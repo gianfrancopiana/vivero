@@ -62,9 +62,9 @@ func TestProfileFiltersAgentQAScopesAndDefaultService(t *testing.T) {
 			"web": {Source: "web-src"},
 		},
 		Setup: SetupConfig{AfterSeeds: []SetupStep{
-			{Command: "api setup", Service: "api"},
-			{Command: "web setup", Service: "web"},
-			{Command: "global setup"},
+			{Command: RuntimeCommand{Shell: "api setup"}, Service: "api"},
+			{Command: RuntimeCommand{Shell: "web setup"}, Service: "web"},
+			{Command: RuntimeCommand{Shell: "global setup"}},
 		}},
 		Agent: AgentConfig{
 			DefaultPreviewService: "web",
@@ -123,7 +123,7 @@ func TestProfileFiltersAgentQAScopesAndDefaultService(t *testing.T) {
 	if got := profiled.Agent.SmokeTests; len(got) != 1 || got[0].Name != "api smoke" {
 		t.Fatalf("filtered smoke tests = %#v", got)
 	}
-	if got := profiled.Setup.AfterSeeds; len(got) != 2 || got[0].Command != "api setup" || got[1].Command != "global setup" {
+	if got := profiled.Setup.AfterSeeds; len(got) != 2 || got[0].Command.Display() != "api setup" || got[1].Command.Display() != "global setup" {
 		t.Fatalf("filtered setup steps = %#v", got)
 	}
 }

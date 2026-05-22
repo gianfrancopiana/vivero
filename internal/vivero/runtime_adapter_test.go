@@ -213,7 +213,7 @@ func TestDockerRunArgsMountSourceAndPublishPort(t *testing.T) {
 		PreviewID: "demo-pr-17",
 		Service:   "web",
 		Image:     "python:3.12-alpine",
-		Command:   "python3 -m http.server 3310 --bind 0.0.0.0",
+		Command:   RuntimeCommand{Shell: "python3 -m http.server 3310 --bind 0.0.0.0"},
 		Source:    "/tmp/demo-app",
 		Workdir:   "frontend",
 		Port:      3310,
@@ -380,7 +380,7 @@ func TestDockerRunOnceArgsUsesPreviewNetwork(t *testing.T) {
 		Image:     "python:3.12-alpine",
 		Source:    "/tmp/demo-app",
 		Network:   dockerNetworkName("demo-pr-17"),
-	}, "printf setup")
+	}, RuntimeCommand{Shell: "printf setup"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestStartDockerServiceParsesContainerIDFromStdoutOnly(t *testing.T) {
 	t.Setenv("FAKE_DOCKER_WARN", "Pulling alpine:latest...")
 	source := t.TempDir()
 	a := &App{Home: t.TempDir()}
-	id, err := a.startDockerService("demo", "demo-pr-17", "web", ServiceConfig{Source: "app", Image: "alpine:latest", Command: "sleep 60"}, map[string]PreviewSource{"app": {Path: source}}, map[string]string{"SECRET_TOKEN": "super-secret-value"})
+	id, err := a.startDockerService("demo", "demo-pr-17", "web", ServiceConfig{Source: "app", Image: "alpine:latest", Command: RuntimeCommand{Shell: "sleep 60"}}, map[string]PreviewSource{"app": {Path: source}}, map[string]string{"SECRET_TOKEN": "super-secret-value"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestUpValidatesNamedPublicRouteBeforeStartingDockerNetwork(t *testing.T) {
 		Project: ProjectMeta{Name: "demo"},
 		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
 		BackingServices: map[string]BackingConfig{
-			"redis": {Image: "redis:7-alpine", Command: "redis-server"},
+			"redis": {Image: "redis:7-alpine", Command: RuntimeCommand{Shell: "redis-server"}},
 		},
 		Services: map[string]ServiceConfig{
 			"web": {
@@ -917,7 +917,7 @@ func TestRunSetupStepsSkipsOncePerProjectAfterSuccessfulRun(t *testing.T) {
 			"web": {Source: "app", Image: "alpine:latest"},
 		},
 		Setup: SetupConfig{AfterSeeds: []SetupStep{
-			{Service: "web", Policy: "once-per-project", Command: "printf x >> setup-count.txt"},
+			{Service: "web", Policy: "once-per-project", Command: RuntimeCommand{Shell: "printf x >> setup-count.txt"}},
 		}},
 	}
 	sources := map[string]PreviewSource{"app": {Name: "app", Mode: "external", Path: source}}
@@ -939,7 +939,7 @@ func TestRunSetupStepsSkipsOncePerProjectAfterSuccessfulRun(t *testing.T) {
 func TestWaitDockerHealthCommandUsesHealthDeadline(t *testing.T) {
 	installFakeDocker(t)
 	started := time.Now()
-	err := waitDockerHealthCommand("fake-container", HealthConfig{Command: "sleep 5", Interval: "5ms"}, 100*time.Millisecond)
+	err := waitDockerHealthCommand("fake-container", HealthConfig{Command: RuntimeCommand{Shell: "sleep 5"}, Interval: "5ms"}, 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected health command timeout")
 	}
@@ -1342,7 +1342,7 @@ func TestStartDockerServiceDoesNotMergeServiceEnvIntoDockerClientEnv(t *testing.
 	t.Setenv("FAKE_DOCKER_REJECT_DOCKER_HOST", "tcp://evil.example:2375")
 	source := t.TempDir()
 	a := &App{Home: t.TempDir()}
-	id, err := a.startDockerService("demo", "demo-pr-17", "web", ServiceConfig{Source: "app", Image: "alpine:latest", Command: "sleep 60"}, map[string]PreviewSource{"app": {Path: source}}, map[string]string{"DOCKER_HOST": "tcp://evil.example:2375", "SECRET_TOKEN": "super-secret-value"})
+	id, err := a.startDockerService("demo", "demo-pr-17", "web", ServiceConfig{Source: "app", Image: "alpine:latest", Command: RuntimeCommand{Shell: "sleep 60"}}, map[string]PreviewSource{"app": {Path: source}}, map[string]string{"DOCKER_HOST": "tcp://evil.example:2375", "SECRET_TOKEN": "super-secret-value"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1358,7 +1358,7 @@ func TestDockerRunOnceArgsApplyResourceLimits(t *testing.T) {
 		Service:   "web",
 		Image:     "alpine:latest",
 		Resources: ResourceLimits{CPUs: "0.5", Memory: "256m"},
-	}, "echo setup")
+	}, RuntimeCommand{Shell: "echo setup"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1455,7 +1455,7 @@ func TestDownRemovesPreviewLabeledStrayContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := os.Getenv("FAKE_DOCKER_STATE")
-	stray := dockerOneShotContainerName("demo-pr-17", "web", "bundle install")
+	stray := dockerOneShotContainerName("demo-pr-17", "web", RuntimeCommand{Shell: "bundle install"})
 	for suffix, body := range map[string]string{
 		".pid":     "999999",
 		".preview": "demo-pr-17",
@@ -1581,7 +1581,7 @@ func TestRunSetupStepsSmartWarmMarkersProtectBranchDerivedVolumes(t *testing.T) 
 		Services: map[string]ServiceConfig{
 			"web": {Source: "app", Image: "alpine:latest"},
 		},
-		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: "printf x >> setup-count.txt"}}},
+		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: RuntimeCommand{Shell: "printf x >> setup-count.txt"}}}},
 	}
 	sources := map[string]PreviewSource{"app": {Name: "app", Mode: "external", Path: source}}
 	if err := a.runSetupSteps("main-preview", cfg.Setup.AfterSeeds, cfg, sources, warmRunState{Active: true, Project: "demo", PreviewID: "main-preview", Mode: warmModeBaseline, Fingerprint: "fp-main"}); err != nil {
@@ -1627,7 +1627,7 @@ func TestPrepareSmartWarmVolumesClearsStaleDerivedPreviewMarkers(t *testing.T) {
 		Services: map[string]ServiceConfig{
 			"web": {Source: "app", Image: "alpine:latest", DependencyVolumes: []VolumeConfig{{Name: "db", Target: "/db", Lifetime: "smart"}}},
 		},
-		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: "printf x >> setup-count.txt"}}},
+		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: RuntimeCommand{Shell: "printf x >> setup-count.txt"}}}},
 	}
 	project := ProjectRecord{Name: "demo", Path: t.TempDir(), Config: cfg}
 	sources := map[string]PreviewSource{"app": {Name: "app", Mode: "external", Path: source}}
@@ -1682,7 +1682,7 @@ func TestPrepareSmartWarmVolumesClearsStaleBaselineMarkers(t *testing.T) {
 		Services: map[string]ServiceConfig{
 			"web": {Source: "app", Image: "alpine:latest", DependencyVolumes: []VolumeConfig{{Name: "db", Target: "/db", Lifetime: "smart"}}},
 		},
-		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: "printf x >> setup-count.txt"}}},
+		Setup: SetupConfig{AfterSeeds: []SetupStep{{Service: "web", Policy: "once-per-project", Command: RuntimeCommand{Shell: "printf x >> setup-count.txt"}}}},
 	}
 	project := ProjectRecord{Name: "demo", Path: t.TempDir(), Config: cfg}
 	sources := map[string]PreviewSource{"app": {Name: "app", Mode: "external", Path: source}}

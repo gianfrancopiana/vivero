@@ -57,6 +57,9 @@ func readProjectConfigNode(configPath string) (yaml.Node, error) {
 
 func decodeProjectConfigNode(configPath string, node *yaml.Node) (ProjectConfig, error) {
 	var cfg ProjectConfig
+	if err := normalizeRuntimeCommandYAMLNodes(node); err != nil {
+		return ProjectConfig{}, fmt.Errorf("%s: %w", configPath, err)
+	}
 	if err := node.Decode(&cfg); err != nil {
 		return ProjectConfig{}, err
 	}
@@ -95,6 +98,12 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		return fmt.Errorf("%s resources.maxStartupConcurrency must be >= 0", configPath)
 	}
 	for name, svc := range cfg.Services {
+		if err := validateRuntimeCommand(configPath, "service", name, "command", svc.Command); err != nil {
+			return err
+		}
+		if err := validateRuntimeCommand(configPath, "service", name, "health.command", svc.Health.Command); err != nil {
+			return err
+		}
 		if _, err := servicePortPlan(svc); err != nil {
 			return fmt.Errorf("%s service %s has invalid port configuration: %w", configPath, name, err)
 		}
@@ -120,6 +129,12 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		}
 	}
 	for name, backing := range cfg.BackingServices {
+		if err := validateRuntimeCommand(configPath, "backing service", name, "command", backing.Command); err != nil {
+			return err
+		}
+		if err := validateRuntimeCommand(configPath, "backing service", name, "health.command", backing.Health.Command); err != nil {
+			return err
+		}
 		if _, exists := cfg.Services[name]; exists {
 			return fmt.Errorf("%s service name %s is declared in both services and backingServices", configPath, name)
 		}
@@ -140,7 +155,10 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if err := validateFingerprintPaths(configPath, fmt.Sprintf("setup.afterSeeds[%d].fingerprint.paths", i), step.Fingerprint.Paths); err != nil {
 			return err
 		}
-		if strings.TrimSpace(step.Command) == "" {
+		if err := validateRuntimeCommand(configPath, "setup.afterSeeds", fmt.Sprint(i), "command", step.Command); err != nil {
+			return err
+		}
+		if step.Command.IsZero() {
 			continue
 		}
 		service := strings.TrimSpace(step.Service)
@@ -159,6 +177,18 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 	}
 	if err := validateProfilesConfig(configPath, cfg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateRuntimeCommand(configPath, kind, name, field string, command RuntimeCommand) error {
+	if strings.ContainsAny(command.Shell, "\x00") {
+		return fmt.Errorf("%s %s %s %s contains unsupported NUL", configPath, kind, name, field)
+	}
+	for i, arg := range command.Args {
+		if strings.ContainsAny(arg, "\x00") {
+			return fmt.Errorf("%s %s %s %s[%d] contains unsupported NUL", configPath, kind, name, field, i)
+		}
 	}
 	return nil
 }

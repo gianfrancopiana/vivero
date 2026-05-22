@@ -61,7 +61,7 @@ func waitHTTP(baseURL string, h HealthConfig, timeout time.Duration) error {
 }
 
 func waitDockerHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error {
-	if strings.TrimSpace(h.Command) == "" {
+	if h.Command.IsZero() {
 		return nil
 	}
 	interval := healthCheckInterval(h)
@@ -72,7 +72,7 @@ func waitDockerHealthCommand(containerID string, h HealthConfig, timeout time.Du
 		if remaining <= 0 {
 			break
 		}
-		stdout, stderr, exit, err := dockerExecWithTimeout(containerID, []string{"/bin/sh", "-lc", h.Command}, remaining)
+		stdout, stderr, exit, err := dockerExecWithTimeout(containerID, h.Command.RuntimeArgs(), remaining)
 		combined := strings.TrimSpace(stderr + "\n" + stdout)
 		if err == nil && exit == 0 {
 			return nil

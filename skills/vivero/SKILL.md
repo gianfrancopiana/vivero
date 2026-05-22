@@ -37,6 +37,24 @@ App repo:
 
 Keep `vivero.yml` as thin orchestration metadata. Put project-specific routes, selectors, restart commands, QA scopes, browser flows, deploy commands, and release smoke checks there. Reference app-owned images, Dockerfiles, or prebuild commands instead; do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Inline Dockerfiles are intentionally unsupported.
 
+## App-agnostic runtime command contract
+
+Vivero does not know Rails, Node, Postgres, Redis, or any other app framework. It only runs commands declared by the app config:
+
+- `command: "npm run dev -- --host 0.0.0.0"` is shell form and runs as `/bin/sh -lc <command>` for compatibility.
+- `command: ["postgres", "-c", "max_connections=200"]` is exec/argv form and is passed to Docker without shell wrapping. Use this for commands with meaningful argument boundaries or shell-sensitive text.
+- The same scalar-or-array rule applies to service commands, backing-service commands, `health.command`, and `setup.afterSeeds[].command`.
+- Keep runtime behavior app-owned: prefer an app script, image entrypoint, or Dockerfile command when the repo already has one; Vivero should orchestrate and diagnose, not encode app recipes.
+
+When startup fails, inspect the generic diagnostics instead of adding framework-specific branches:
+
+```sh
+vivero preview diagnose startup preview:<id> --json --no-input
+vivero evidence logs preview:<id> <service> --json --no-input
+```
+
+Diagnostics should identify the service, runtime, image, container, command/health command, log path, and recent redacted container logs. Fix the app-owned command or image from that evidence.
+
 ## First checks
 
 Before operating on an unfamiliar install or project, inspect the live contract and config health:
