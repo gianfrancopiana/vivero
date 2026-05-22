@@ -424,7 +424,7 @@ func configDoctorSchema() map[string]any {
 
 func qaSchema() map[string]any {
 	return map[string]any{
-		"usage":       "vivero qa <plan|context|run|final|report> <preview-id|preview:<id>> [--scope <name|all>] [--public|--target local|public|origin] --json --no-input; vivero qa record <preview-id|preview:<id>> [--scope <name|all>] [--storage-state <path>] --json --no-input",
+		"usage":       "vivero preview qa <plan|context|run|final|report> <preview-id|preview:<id>> [--scope <name|all>] [--public|--target local|public|origin] --json --no-input; vivero preview qa record <preview-id|preview:<id>> [--scope <name|all>] [--storage-state <path>] --json --no-input",
 		"defaults":    map[string]any{"target": "local", "recordFormat": "mp4", "width": 1280, "height": 800},
 		"planReturns": "driver-agnostic QA context with local-by-default services, pages, flows, checks, authenticated storage-state context, artifact paths, and concrete evidence commands derived from agent.qa.evidence",
 		"run":         "runs deterministic smoke checks, captures declared page screenshots from the YAML-backed evidence matrix unless --no-screenshots is passed, and writes a report scaffold",

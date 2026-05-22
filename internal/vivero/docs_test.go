@@ -65,7 +65,7 @@ func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
 			t.Fatalf("certified examples docs should document fast-path signal %q", want)
 		}
 	}
-	for _, want := range []string{"preview/deploy lane contract", "build cache config", "cache commands", "deploy prepare/cache evidence"} {
+	for _, want := range []string{"preview/deploy lane contract", "build cache config", "cache commands", "deploy prepare/cache evidence", "--example-e2e"} {
 		if !strings.Contains(bodies["releasing"], want) {
 			t.Fatalf("releasing docs should mention release-note surface %q", want)
 		}
@@ -90,6 +90,7 @@ func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 		bodies[name] = string(body)
 	}
 	for _, want := range []string{
+		"RELEASE_POSTFLIGHT_FLAGS ?=",
 		"certify:\n\t$(MAKE) audit",
 		"\t$(MAKE) example-e2e",
 		"\t$(MAKE) integration-fixtures",
@@ -116,6 +117,13 @@ func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 		for _, want := range []string{"release-postflight", "checksums", "attestations", "installer", "Homebrew"} {
 			if !strings.Contains(bodies[doc], want) {
 				t.Fatalf("%s should document install trust postflight with %q", doc, want)
+			}
+		}
+	}
+	for _, doc := range []string{"readme", "releasing", "skill"} {
+		for _, want := range []string{"RELEASE_POSTFLIGHT_FLAGS", "--example-e2e", "checksum-installed release binary"} {
+			if !strings.Contains(bodies[doc], want) {
+				t.Fatalf("%s should document released-binary preview E2E with %q", doc, want)
 			}
 		}
 	}

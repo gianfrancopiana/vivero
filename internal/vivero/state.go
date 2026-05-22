@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 type App struct {
 	Home           string
+	Context        context.Context
 	db             *sql.DB
 	containers     containerRuntime
 	qaRecordRunner qaRecordRunner
@@ -39,7 +41,7 @@ func NewApp() (*App, error) {
 	// SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	a := &App{Home: home, db: db}
+	a := &App{Home: home, Context: context.Background(), db: db}
 	if err := a.initDB(); err != nil {
 		db.Close()
 		return nil, err

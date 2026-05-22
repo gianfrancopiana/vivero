@@ -13,7 +13,7 @@ Preview runtimes and production deploys optimize for different failure modes:
 - Previews can use mutable worktrees, branch-local volumes, quick tunnels, disposable state, and `down --discard`.
 - Production needs immutable releases, explicit environments, durable state, authenticated operations, conservative rollback, and incident recovery.
 
-Mixing those semantics into `vivero up` / `vivero down` would make a safe preview tool too easy to misuse.
+Mixing those semantics into `vivero preview up` / `vivero preview down` would make a safe preview tool too easy to misuse.
 
 ## Future tracks
 
@@ -39,7 +39,7 @@ These are intentionally not production primitives:
 - Mutable source paths and Git worktrees.
 - Quick tunnels as ingress.
 - Branch warm volumes and disposable preview volumes.
-- `down --discard` cleanup semantics.
+- `vivero preview down --discard` cleanup semantics.
 - Preview IDs as deploy/release identities.
 
 ## Production-only requirements
@@ -66,10 +66,10 @@ Production commands are separate and explicit:
 vivero deploy plan <project> --environment production --json --no-input
 vivero deploy apply <plan-id> --json --no-input
 vivero release status <project> --environment production --json --no-input
-vivero release rollback <project> <release-id> --json --no-input
+vivero release rollback <project> <release-id> --environment production --json --no-input
 ```
 
-Do not overload preview `up`, `down`, or quick-tunnel flows for production.
+Do not overload `vivero preview up`, `vivero preview down`, or quick-tunnel flows for production.
 
 ## Readiness doctor
 

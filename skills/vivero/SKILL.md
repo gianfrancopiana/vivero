@@ -65,19 +65,19 @@ vivero deploy plan <project-path> --environment production --json --no-input
 | Lane | Use when | Primary commands | Safety rule |
 | --- | --- | --- | --- |
 | Preview lane | You need a running local app, live source iteration, service exec, diffs, or teardown. | `vivero preview up`, `vivero preview inspect`, `vivero preview wait`, `vivero preview exec`, `vivero preview sync`, `vivero preview diff`, `vivero preview down` | URL means healthy. Never announce a preview URL until inspect/up reports the service healthy. |
-| Evidence/QA lane | You need logs, events, smoke, screenshots, recordings, QA reports, or startup diagnosis. | `vivero logs`, `vivero smoke`, `vivero screenshot`, `vivero qa plan`, `vivero qa run`, `vivero qa record`, `vivero qa final`, `vivero diagnose startup` | Report exact artifact paths and target refs. Do not substitute screenshots or manual browser notes for declared QA evidence. |
+| Evidence/QA lane | You need logs, events, smoke, screenshots, recordings, QA reports, release command output, or startup diagnosis. | `vivero evidence logs`, `vivero evidence events`, `vivero evidence smoke`, `vivero evidence screenshot`, `vivero evidence qa run`, `vivero preview qa final`, `vivero release logs`, `vivero preview diagnose startup` | Report exact artifact paths and target refs. Do not substitute screenshots or manual browser notes for declared QA evidence. |
 | Deploy/release lane | You need production readiness checks, deploy planning/apply, release status, release evidence, smoke, or rollback. | `vivero doctor production`, `vivero deploy plan`, `vivero deploy apply`, `vivero release status`, `vivero release events`, `vivero release logs`, `vivero release smoke`, `vivero release rollback` | Plan first. Apply/smoke/rollback can run app-owned commands and normally require human approval. |
 | Support lane | You need CLI discovery, schema, project sync/inspect, skill freshness, or secret-key management. | `vivero capabilities`, `vivero commands`, `vivero schema`, `vivero doctor`, `vivero projects sync`, `vivero project inspect`, `vivero skill doctor`, `vivero secrets list` | Treat secrets as write-only. Use schema/doctor output before guessing. |
 
-Prefer namespaced preview commands for new guidance. Root commands such as `vivero up`, `vivero inspect`, and `vivero down` remain compatibility aliases.
+Prefer namespaced preview commands for new guidance. Older root preview aliases may exist for compatibility, but new guidance should use the preview namespace.
 
 ## Tiny invariant fixture matrix
 
 Keep Vivero proof small and invariant-led. The bundled examples are not a framework zoo; they are a tiny matrix of behaviors frontier agents can trust across unfamiliar repos.
 
 - **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
-- **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs and cache hints; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent. Prove this with `make deploy-fixtures`.
-- **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --json --no-input` when collecting cross-lane evidence.
+- **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs, cache hints, timeouts, and capped/redacted output; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent. Prove this with `make deploy-fixtures`.
+- **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> <service> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` when collecting cross-lane evidence.
 
 Add or document a fixture only when it proves a distinct invariant failure mode. Otherwise extend the smallest existing fixture.
 
@@ -111,8 +111,8 @@ Keep Dockerfiles, compose files, migrations, deploy scripts, secrets, selectors,
 
 ```sh
 vivero preview up <project> --id <project>-local --wait --timeout 5m --json --no-input --quiet
-vivero evidence logs preview:<project>-local --json --no-input
-vivero evidence qa run preview:<project>-local --scope smoke --json --no-input --quiet
+vivero evidence logs preview:<project>-local web --json --no-input
+vivero evidence qa run preview:<project>-local --scope smoke --target local --json --no-input --quiet
 vivero evidence screenshot preview:<project>-local web / --target local --json --no-input --quiet
 ```
 
@@ -132,7 +132,7 @@ Stop at the plan unless the operator explicitly approves side-effect-capable pro
 
 ```sh
 vivero evidence events preview:<project>-local --tail --json --no-input
-vivero qa report preview:<project>-local --out qa/report.md --json --no-input --quiet
+vivero evidence qa report preview:<project>-local --out qa/report.md --json --no-input --quiet
 vivero preview down <project>-local --archive-patch --json --no-input --quiet
 ```
 
@@ -189,9 +189,9 @@ Inspect before reporting a URL or retrying a failed start:
 ```sh
 vivero preview inspect webapp-local --json --no-input
 vivero preview wait webapp-local --timeout 5m --json --no-input --quiet
-vivero diagnose startup webapp-local --json --no-input
-vivero preview events webapp-local --tail --json --no-input
-vivero logs webapp-local web --since 10m --json --no-input
+vivero preview diagnose startup preview:webapp-local --json --no-input
+vivero preview events preview:webapp-local --tail --json --no-input
+vivero evidence logs preview:webapp-local web --json --no-input
 ```
 
 Live iteration should mutate source through Vivero-managed worktrees or explicit external paths, not by editing container files:
@@ -240,19 +240,19 @@ Evidence commands operate against target refs and artifact targets:
 Run smoke and collect basic evidence first:
 
 ```sh
-vivero smoke webapp-local --json --no-input --quiet
-vivero screenshot webapp-local web /dashboard \
+vivero evidence smoke preview:webapp-local --json --no-input --quiet
+vivero evidence screenshot preview:webapp-local web /dashboard \
   --target local \
   --breakpoints \
   --json --no-input --quiet
-vivero events webapp-local --tail --json --no-input
-vivero logs webapp-local web --since 10m --json --no-input
+vivero evidence events preview:webapp-local --tail --json --no-input
+vivero evidence logs preview:webapp-local web --json --no-input
 ```
 
 Ask Vivero for the QA plan before choosing browser work manually:
 
 ```sh
-vivero qa plan webapp-local --scope public --target local --json --no-input --quiet
+vivero evidence qa plan preview:webapp-local --scope public --target local --json --no-input --quiet
 ```
 
 Treat the plan JSON as the source of truth for services and URLs, pages and flows, checks and severities, browser driver preference, artifact paths, screenshot commands, recording commands, and optional authenticated storage-state context.
@@ -260,13 +260,13 @@ Treat the plan JSON as the source of truth for services and URLs, pages and flow
 Run deterministic Vivero-owned QA and recordings:
 
 ```sh
-vivero qa run webapp-local --scope public --target local --json --no-input --quiet
-vivero qa record webapp-local --scope public --json --no-input --quiet
-vivero qa report webapp-local --out qa/report.md --json --no-input --quiet
-vivero qa final webapp-local --scope public --target local --json --no-input --quiet
+vivero evidence qa run preview:webapp-local --scope public --target local --json --no-input --quiet
+vivero evidence qa record preview:webapp-local --scope public --json --no-input --quiet
+vivero evidence qa report preview:webapp-local --out qa/report.md --json --no-input --quiet
+vivero evidence qa final preview:webapp-local --scope public --target local --json --no-input --quiet
 ```
 
-For authenticated QA, the app/operator provides a project-relative Playwright storage-state file under `agent.qa.auth.sessions.<name>.storageState` and attaches it to scopes with `scopes: [...]` on the session or `authSession: <name>` on the QA scope. Vivero includes resolved storage-state flags in `qa plan`; it does not store credentials or run app-specific login flows unless the app declares those commands in its own config.
+For authenticated QA, the app/operator provides a project-relative Playwright storage-state file under `agent.qa.auth.sessions.<name>.storageState` and attaches it to scopes with `scopes: [...]` on the session or `authSession: <name>` on the QA scope. Vivero includes resolved storage-state flags in `vivero evidence qa plan` / `vivero preview qa plan`; it does not store credentials or run app-specific login flows unless the app declares those commands in its own config.
 
 When reporting evidence, include the target ref, command, pass/fail status, and exact artifact paths. Do not say “screenshots taken” without paths.
 
@@ -320,22 +320,22 @@ Preview startup failure:
 
 ```sh
 vivero preview inspect webapp-local --json --no-input
-vivero diagnose startup webapp-local --json --no-input
-vivero preview events webapp-local --tail --json --no-input
-vivero logs webapp-local web --since 10m --json --no-input
+vivero preview diagnose startup preview:webapp-local --json --no-input
+vivero preview events preview:webapp-local --tail --json --no-input
+vivero evidence logs preview:webapp-local web --json --no-input
 vivero secrets list webapp --json --no-input
 ```
 
 Evidence/QA failure:
 
-- Re-read `vivero qa plan` and verify the scope, target, pages, flows, storage state, and generated commands.
+- Re-read `vivero evidence qa plan` or `vivero preview qa plan` and verify the scope, target, pages, flows, storage state, and generated commands.
 - If public screenshots fail, retry `--target local` to separate app health from tunnel/public-route behavior.
 - If recordings fail, check the browser driver from the plan and preserve partial artifact paths.
 
 ```sh
-vivero qa plan webapp-local --scope public --target local --json --no-input --quiet
-vivero qa run webapp-local --scope public --target local --json --no-input --quiet
-vivero diagnose startup webapp-local --json --no-input
+vivero evidence qa plan preview:webapp-local --scope public --target local --json --no-input --quiet
+vivero evidence qa run preview:webapp-local --scope public --target local --json --no-input --quiet
+vivero preview diagnose startup preview:webapp-local --json --no-input
 ```
 
 Deploy plan blocked:
@@ -381,7 +381,7 @@ Stale state or command confusion:
 ```sh
 vivero commands --json --no-input
 vivero schema deploy apply --json --no-input
-vivero schema qa final --json --no-input
+vivero schema preview qa final --json --no-input
 vivero skill doctor --json --no-input
 ```
 
@@ -466,4 +466,4 @@ vivero skill doctor --json --no-input
 vivero skill install --target /tmp/vivero-skill --force --json --no-input
 ```
 
-`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples. After a tag publishes, use `VERSION=vX.Y.Z make release-postflight` to verify release metadata, checksums, attestations, the installer, and the Homebrew tap formula.
+`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes. `make deploy-fixtures` proves deploy plan/apply/status/rollback, idempotency, audit records, locks, timeouts, output caps/redaction, and blue/green prepare/smoke/promote/rollback. `make release-smoke` validates packaged release artifacts and config examples. After a tag publishes, use `VERSION=vX.Y.Z make release-postflight` to verify release metadata, checksums, attestations, the installer, and the Homebrew tap formula; add `RELEASE_POSTFLIGHT_FLAGS="--example-e2e"` to run the certified preview E2E against the checksum-installed release binary.

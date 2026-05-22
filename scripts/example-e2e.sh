@@ -17,7 +17,15 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 127
 fi
 
-go build -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=e2e" -o bin/vivero ./cmd/vivero
+if [ -n "${VIVERO_BIN:-}" ]; then
+  if ! vivero_bin="$(command -v "$VIVERO_BIN" 2>/dev/null)"; then
+    echo "VIVERO_BIN is not executable or on PATH: $VIVERO_BIN" >&2
+    exit 127
+  fi
+else
+  go build -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=e2e" -o bin/vivero ./cmd/vivero
+  vivero_bin="$repo_root/bin/vivero"
+fi
 
 workdir="$(mktemp -d)"
 preview_id="agent-demo-e2e-$$"
@@ -26,7 +34,7 @@ up_started=0
 cleanup() {
   set +e
   if [ "$up_started" -eq 1 ]; then
-    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" bin/vivero preview down "$preview_id" --discard --json --no-input >/dev/null 2>&1
+    HOME="$workdir/home" VIVERO_HOME="$workdir/vivero-home" "$vivero_bin" preview down "$preview_id" --discard --json --no-input >/dev/null 2>&1
   fi
   rm -rf "$workdir"
 }
@@ -36,19 +44,19 @@ mkdir -p "$workdir/home" "$workdir/out"
 export HOME="$workdir/home"
 export VIVERO_HOME="$workdir/vivero-home"
 
-bin/vivero doctor config examples/agent-demo --json --no-input > "$workdir/out/config-doctor.json"
-bin/vivero projects sync examples/agent-demo --json --no-input > "$workdir/out/sync.json"
-bin/vivero preview up agent-demo --id "$preview_id" --wait --timeout 3m --json --no-input > "$workdir/out/up.json"
+"$vivero_bin" doctor config examples/agent-demo --json --no-input > "$workdir/out/config-doctor.json"
+"$vivero_bin" projects sync examples/agent-demo --json --no-input > "$workdir/out/sync.json"
+"$vivero_bin" preview up agent-demo --id "$preview_id" --wait --timeout 3m --json --no-input > "$workdir/out/up.json"
 up_started=1
-bin/vivero qa final "preview:$preview_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/final-smoke.json"
-bin/vivero diagnose startup "preview:$preview_id" --json --no-input > "$workdir/out/diagnose.json"
+"$vivero_bin" preview qa final "preview:$preview_id" --scope smoke --no-record --no-screenshots --json --no-input > "$workdir/out/final-smoke.json"
+"$vivero_bin" preview diagnose startup "preview:$preview_id" --json --no-input > "$workdir/out/diagnose.json"
 
 if [ "${VIVERO_EXAMPLE_BROWSER_QA:-0}" = "1" ]; then
   if ! command -v npm >/dev/null 2>&1; then
     echo "VIVERO_EXAMPLE_BROWSER_QA=1 requires npm" >&2
     exit 127
   fi
-  bin/vivero qa final "preview:$preview_id" --scope smoke --format webm --json --no-input > "$workdir/out/final-browser.json"
+  "$vivero_bin" preview qa final "preview:$preview_id" --scope smoke --format webm --json --no-input > "$workdir/out/final-browser.json"
 fi
 
 python3 - "$workdir/out" "$repo_root" <<'PY'
@@ -104,7 +112,7 @@ allowed = {"?? examples/agent-demo/"}
 assert status == "" or status in allowed, status
 PY
 
-bin/vivero preview down "$preview_id" --discard --json --no-input > "$workdir/out/down.json"
+"$vivero_bin" preview down "$preview_id" --discard --json --no-input > "$workdir/out/down.json"
 up_started=0
 
 if [ -n "$(git status --short -- examples/agent-demo ':(exclude)examples/agent-demo/README.md' | grep -v '^?? examples/agent-demo/' || true)" ]; then

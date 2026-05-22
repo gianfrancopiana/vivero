@@ -8,6 +8,7 @@ bin_dir=""
 skip_attestation=0
 skip_homebrew=0
 install_homebrew=0
+example_e2e=0
 version=""
 
 usage() {
@@ -24,12 +25,14 @@ Options:
   --skip-attestation       Skip gh attestation verification
   --skip-homebrew          Skip Homebrew tap checks
   --install-homebrew       Install/reinstall gianfrancopiana/tap/vivero and check the binary
+  --example-e2e            Run agent-demo preview E2E with the checksum-installed binary
   -h, --help               Show this help
 
 The script checks release metadata, downloads all assets, verifies checksums,
 optionally verifies GitHub attestations, runs the checksum-verifying installer,
-and verifies the Homebrew tap formula. Homebrew installation is opt-in so routine
-postflight checks do not install/reinstall Vivero unless requested.
+and verifies the Homebrew tap formula. Homebrew installation and Docker preview
+E2E are opt-in so routine postflight checks do not install/reinstall Vivero or
+require Docker unless requested.
 EOF
 }
 
@@ -57,6 +60,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --install-homebrew)
       install_homebrew=1
+      shift
+      ;;
+    --example-e2e)
+      example_e2e=1
       shift
       ;;
     -h|--help)
@@ -220,6 +227,11 @@ fi
 "$bin_dir/vivero" version --json --no-input > "$tmp/installer-version.json"
 json_version_check "$tmp/installer-version.json"
 echo "installer: ok"
+
+if [ "$example_e2e" -eq 1 ]; then
+  VIVERO_BIN="$bin_dir/vivero" "$script_dir/example-e2e.sh"
+  echo "installer example e2e: ok"
+fi
 
 if [ "$skip_homebrew" -eq 0 ]; then
   require_cmd brew

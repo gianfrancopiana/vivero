@@ -6,7 +6,7 @@ Certified examples are committed fixtures that CI or local Make targets prove. I
 
 - Path: `examples/agent-demo`
 - Shape: web app
-- Proves: config doctor, project sync, Docker preview, health wait, `qa final`, startup diagnosis, teardown, and clean tracked files
+- Proves: config doctor, project sync, Docker preview, health wait, `vivero preview qa final`, startup diagnosis, teardown, and clean tracked files
 - Gate: `make example-e2e`
 
 Use it when you want the smallest complete preview loop:
@@ -14,7 +14,7 @@ Use it when you want the smallest complete preview loop:
 ```sh
 vivero projects sync examples/agent-demo --json --no-input
 vivero preview up agent-demo --id agent-demo-local --wait --timeout 3m --json --no-input
-vivero qa final agent-demo-local --scope smoke --no-record --no-screenshots --json --no-input
+vivero preview qa final preview:agent-demo-local --scope smoke --no-record --no-screenshots --json --no-input
 vivero preview down agent-demo-local --discard --json --no-input
 ```
 
@@ -42,7 +42,7 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 Keep the matrix tiny and invariant-led. A fixture earns its place only when it proves a behavior class that a frontier agent must be able to rely on in unfamiliar repos.
 
 - **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, and teardown preserves or discards work intentionally. Covered by `make example-e2e`, `make integration-fixtures`, and `make nasty-integration-fixtures`.
-- **Deploy/release invariants:** production doctor runs before plan/apply, plans are reviewable before side effects, app-owned prepare/apply/smoke/status/rollback commands get the expected environment, release state is locked and auditable, failed smoke does not promote, and rollback keeps history consistent. Covered by `make deploy-fixtures`.
+- **Deploy/release invariants:** production doctor runs before plan/apply, plans are reviewable before side effects, app-owned prepare/apply/smoke/status/rollback commands get the expected environment, command execution has timeouts and capped/redacted output, release state is locked and auditable, failed smoke does not promote, and rollback keeps history consistent. Covered by `make deploy-fixtures`.
 - **Evidence invariants:** every lane returns target-aware JSON with artifact paths for events, logs, screenshots, QA reports, recordings, and release command output. Preview evidence should work through `preview:<id>` targets, and release evidence should work through `release:<id>` targets.
 
 Do not add a parallel example just because a framework is popular. Extend the smallest existing fixture unless the new case creates a distinct invariant failure mode.

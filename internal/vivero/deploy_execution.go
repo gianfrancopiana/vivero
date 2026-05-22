@@ -1,8 +1,8 @@
 package vivero
 
 import (
+	"context"
 	"strings"
-	"time"
 )
 
 func newReleaseRecord(plan DeployPlan, status, rollbackOf string) ReleaseRecord {
@@ -10,7 +10,7 @@ func newReleaseRecord(plan DeployPlan, status, rollbackOf string) ReleaseRecord 
 	return ReleaseRecord{StateVersion: deployStateVersion, ID: newDeployID("rel"), PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Strategy: plan.Strategy, Status: status, RollbackOf: rollbackOf, CreatedAt: now, UpdatedAt: now}
 }
 
-func runDeployShell(plan DeployPlan, release ReleaseRecord, command string, extra map[string]string) ([]byte, error) {
+func runDeployShellResultContext(ctx context.Context, plan DeployPlan, release ReleaseRecord, command string, extra map[string]string) (deployCommandResult, error) {
 	env := map[string]string{
 		"VIVERO_DEPLOY_PLAN_ID": plan.ID,
 		"VIVERO_RELEASE_ID":     release.ID,
@@ -43,7 +43,20 @@ func runDeployShell(plan DeployPlan, release ReleaseRecord, command string, extr
 	for k, v := range extra {
 		env[k] = v
 	}
-	return runCmd(plan.Path, env, "/bin/sh", "-lc", command)
+	action := extra["VIVERO_RELEASE_ACTION"]
+	return runDeployCommand(ctx, plan.Path, env, command, deployCommandOptionsForPlan(plan, action))
+}
+
+func runDeployShellContext(ctx context.Context, plan DeployPlan, release ReleaseRecord, command string, extra map[string]string) ([]byte, error) {
+	result, err := runDeployShellResultContext(ctx, plan, release, command, extra)
+	return []byte(result.Output), err
+}
+
+func (a *App) deployContext() context.Context {
+	if a != nil && a.Context != nil {
+		return a.Context
+	}
+	return context.Background()
 }
 
 func (a *App) runCommandDeployPhase(plan DeployPlan, release *ReleaseRecord, phase DeployPhasePlan) (DeployPhaseRecord, error) {
@@ -54,13 +67,12 @@ func (a *App) runCommandDeployPhase(plan DeployPlan, release *ReleaseRecord, pha
 		return record, nil
 	}
 	release.addAudit(name, "started", "running app-owned "+name+" command")
-	started := time.Now()
-	out, err := runDeployShell(plan, *release, command, map[string]string{"VIVERO_RELEASE_ACTION": name})
-	record.DurationMS = time.Since(started).Milliseconds()
-	record.Output = strings.TrimSpace(string(out))
+	result, err := runDeployShellResultContext(a.deployContext(), plan, *release, command, map[string]string{"VIVERO_RELEASE_ACTION": name})
+	record.DurationMS = result.Duration.Milliseconds()
+	record.Output = strings.TrimSpace(result.Output)
 	record.Status = "succeeded"
 	if record.Output != "" || err != nil {
-		if artifact, artifactErr := a.saveDeployArtifact(release.ID, name, "command-output", string(out)); artifactErr == nil {
+		if artifact, artifactErr := a.saveDeployArtifact(release.ID, name, "command-output", result.Output); artifactErr == nil {
 			release.Artifacts = append(release.Artifacts, artifact)
 			record.Artifact = &artifact
 		}

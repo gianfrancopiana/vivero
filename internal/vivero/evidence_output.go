@@ -105,9 +105,9 @@ func evidenceNextSuggestedCommands(targetRef map[string]any) []string {
 	case "preview":
 		ref := "preview:" + id
 		return []string{
-			fmt.Sprintf("vivero inspect %s --json --no-input", ref),
-			fmt.Sprintf("vivero events %s --tail --json --no-input", ref),
-			fmt.Sprintf("vivero diagnose startup %s --json --no-input", ref),
+			fmt.Sprintf("vivero preview inspect %s --json --no-input", ref),
+			fmt.Sprintf("vivero preview events %s --tail --json --no-input", ref),
+			fmt.Sprintf("vivero preview diagnose startup %s --json --no-input", ref),
 		}
 	case "release":
 		ref := "release:" + id

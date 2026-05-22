@@ -4,6 +4,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COVERPROFILE ?= /tmp/vivero-cover.out
 COVER_MIN ?= 75.0
+RELEASE_POSTFLIGHT_FLAGS ?=
 STATICCHECK ?= honnef.co/go/tools/cmd/staticcheck@v0.6.1
 DEADCODE ?= golang.org/x/tools/cmd/deadcode@v0.36.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION) -X github.com/gianfrancopiana/vivero/internal/vivero.Commit=$(COMMIT) -X github.com/gianfrancopiana/vivero/internal/vivero.BuildDate=$(DATE)"
@@ -82,7 +83,7 @@ release-smoke:
 
 release-postflight:
 	@if [ "$(VERSION)" = "dev" ]; then echo "set VERSION=vX.Y.Z" >&2; exit 2; fi
-	scripts/release-postflight.sh "$(VERSION)"
+	scripts/release-postflight.sh "$(VERSION)" $(RELEASE_POSTFLIGHT_FLAGS)
 
 certify:
 	$(MAKE) audit
