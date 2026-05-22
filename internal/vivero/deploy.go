@@ -350,69 +350,46 @@ func (a *App) CurrentRelease(project, environment string) (ReleaseRecord, error)
 	if strings.TrimSpace(environment) == "" {
 		environment = "production"
 	}
-	release, err := a.loadCurrentRelease(project, environment)
-	if err != nil {
-		return ReleaseRecord{}, err
-	}
-	plan, err := a.loadDeployPlan(release.PlanID)
+	release, plan, err := a.loadCurrentReleaseWithPlan(project, environment)
 	if err != nil {
 		return ReleaseRecord{}, err
 	}
 	if strings.TrimSpace(plan.StatusCommand) == "" {
 		return release, nil
 	}
-	unlock, err := a.acquireDeployLock(project, environment)
-	if err != nil {
-		return ReleaseRecord{}, err
-	}
-	defer unlock()
-	release, err = a.loadCurrentRelease(project, environment)
-	if err != nil {
-		return ReleaseRecord{}, err
-	}
-	plan, err = a.loadDeployPlan(release.PlanID)
-	if err != nil {
-		return ReleaseRecord{}, err
-	}
-	if strings.TrimSpace(plan.StatusCommand) == "" {
-		return release, nil
-	}
-	result, runErr := runDeployShellResultContext(a.deployContext(), plan, release, plan.StatusCommand, map[string]string{"VIVERO_RELEASE_ACTION": "status"})
-	trimmed := strings.TrimSpace(result.Output)
-	if runErr != nil {
-		release.Status = "status_failed"
-		release.Output = appendReleaseOutput(release.Output, trimmed)
-		release.addAudit("status", "failed", trimmed)
+	return a.withDeployLock(project, environment, func() (ReleaseRecord, error) {
+		release, plan, err := a.loadCurrentReleaseWithPlan(project, environment)
+		if err != nil {
+			return ReleaseRecord{}, err
+		}
+		if strings.TrimSpace(plan.StatusCommand) == "" {
+			return release, nil
+		}
+		result, runErr := runDeployShellResultContext(a.deployContext(), plan, release, plan.StatusCommand, deployCommandInvocation{Action: "status"})
+		trimmed := strings.TrimSpace(result.Output)
+		if runErr != nil {
+			a.markReleaseStatusFailed(&release, result, trimmed, trimmed)
+			return release, fmt.Errorf("release status failed: %w: %s", runErr, trimmed)
+		}
+		if trimmed == "" {
+			return release, nil
+		}
+		status, statusErr := normalizeReleaseStatusOutput(result.Output)
+		if statusErr != nil {
+			a.markReleaseStatusFailed(&release, result, "invalid release status output", statusErr.Error())
+			return release, statusErr
+		}
+		release.Status = status
+		release.Output = status
 		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
 			release.Artifacts = append(release.Artifacts, artifact)
 		}
-		_ = a.saveRelease(release)
-		return release, fmt.Errorf("release status failed: %w: %s", runErr, trimmed)
-	}
-	if trimmed == "" {
-		return release, nil
-	}
-	status, statusErr := normalizeReleaseStatusOutput(result.Output)
-	if statusErr != nil {
-		release.Status = "status_failed"
-		release.Output = appendReleaseOutput(release.Output, "invalid release status output")
-		release.addAudit("status", "failed", statusErr.Error())
-		if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
-			release.Artifacts = append(release.Artifacts, artifact)
+		release.addAudit("status", "succeeded", status)
+		if err := a.saveRelease(release); err != nil {
+			return ReleaseRecord{}, err
 		}
-		_ = a.saveRelease(release)
-		return release, statusErr
-	}
-	release.Status = status
-	release.Output = status
-	if artifact, artifactErr := a.saveDeployArtifact(release.ID, "status", "command-output", result.Output); artifactErr == nil {
-		release.Artifacts = append(release.Artifacts, artifact)
-	}
-	release.addAudit("status", "succeeded", status)
-	if err := a.saveRelease(release); err != nil {
-		return ReleaseRecord{}, err
-	}
-	return release, nil
+		return release, nil
+	})
 }
 
 func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRecord, error) {
@@ -459,19 +436,9 @@ func (a *App) RollbackRelease(project, releaseID, environment string) (ReleaseRe
 	if err := a.saveReleaseHistory(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}
-	out, err := runDeployShellContext(a.deployContext(), plan, rollback, plan.RollbackCommand, map[string]string{"VIVERO_RELEASE_ACTION": "rollback", "VIVERO_ROLLBACK_RELEASE_ID": releaseID})
-	rollback.Output = strings.TrimSpace(string(out))
-	if err != nil {
-		rollback.Status = "rollback_failed"
-		rollback.addAudit("rollback", "failed", strings.TrimSpace(string(out)))
-		if artifact, artifactErr := a.saveDeployArtifact(rollback.ID, "rollback", "command-output", string(out)); artifactErr == nil {
-			rollback.Artifacts = append(rollback.Artifacts, artifact)
-		}
-		_ = a.saveReleaseHistory(rollback)
-		return rollback, fmt.Errorf("release rollback failed: %w: %s", err, strings.TrimSpace(string(out)))
+	if err := a.runRollbackCommand(plan, &rollback, plan.RollbackCommand, "rollback", releaseID, "app-owned rollback command completed"); err != nil {
+		return rollback, err
 	}
-	rollback.Status = "rolled_back"
-	rollback.addAudit("rollback", "succeeded", "app-owned rollback command completed")
 	if err := a.saveRelease(rollback); err != nil {
 		return ReleaseRecord{}, err
 	}

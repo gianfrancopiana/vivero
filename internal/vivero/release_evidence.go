@@ -64,7 +64,7 @@ func (a *App) runReleaseSmoke(plan DeployPlan, release *ReleaseRecord) (ReleaseS
 		return ReleaseSmokeResult{OK: false, Error: err.Error()}, err
 	}
 	release.addAudit("smoke", "started", "running release smoke command")
-	out, err := runDeployShellContext(a.deployContext(), plan, *release, command, map[string]string{"VIVERO_RELEASE_ACTION": "smoke"})
+	out, err := runDeployShellContext(a.deployContext(), plan, *release, command, deployCommandInvocation{Action: "smoke"})
 	trimmed := strings.TrimSpace(string(out))
 	result := ReleaseSmokeResult{OK: err == nil, Output: trimmed}
 	if artifact, artifactErr := a.saveDeployArtifact(release.ID, "smoke", "command-output", string(out)); artifactErr == nil {

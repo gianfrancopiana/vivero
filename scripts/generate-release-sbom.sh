@@ -6,6 +6,9 @@ module_path="github.com/gianfrancopiana/vivero"
 dist_dir="dist"
 output=""
 version=""
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
 
 usage() {
   cat <<'EOF'
@@ -54,14 +57,8 @@ if [ -z "$version" ]; then
   usage >&2
   exit 2
 fi
-if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "version must look like vMAJOR.MINOR.PATCH, got: $version" >&2
-  exit 2
-fi
-if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-  echo "repo must look like OWNER/REPO, got: $repo" >&2
-  exit 2
-fi
+validate_semver_tag "$version" "version"
+validate_github_repo "$repo" "repo"
 if [ -z "$output" ]; then
   output="$dist_dir/vivero_sbom.spdx.json"
 fi
@@ -70,12 +67,8 @@ if [ ! -d "$dist_dir" ]; then
   exit 1
 fi
 
-for cmd in go python3; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "$cmd is required" >&2
-    exit 127
-  fi
-done
+require_cmd go
+require_cmd python3
 
 required_assets=(
   checksums.txt
@@ -92,7 +85,7 @@ for asset in "${required_assets[@]}"; do
   fi
 done
 
-tmp="$(mktemp -d)"
+tmp="$(mktemp_workdir)"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 

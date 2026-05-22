@@ -4,6 +4,8 @@ set -euo pipefail
 repo="gianfrancopiana/vivero"
 gh_cli="${GH_CLI:-gh}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
 bin_dir=""
 skip_attestation=0
 skip_homebrew=0
@@ -95,13 +97,10 @@ if [ "$skip_homebrew" -eq 1 ] && [ "$install_homebrew" -eq 1 ]; then
   echo "--skip-homebrew and --install-homebrew cannot be combined" >&2
   exit 2
 fi
-if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "version must look like vMAJOR.MINOR.PATCH, got: $version" >&2
-  exit 2
-fi
+validate_semver_tag "$version" "version"
 
 plain_version="${version#v}"
-tmp="$(mktemp -d)"
+tmp="$(mktemp_workdir)"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 assets_dir="$tmp/assets"
@@ -111,13 +110,6 @@ if [ -z "$bin_dir" ]; then
 fi
 mkdir -p "$bin_dir"
 
-require_cmd() {
-  local cmd="$1"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "$cmd is required" >&2
-    exit 127
-  fi
-}
 
 checksum_cmd() {
   if command -v sha256sum >/dev/null 2>&1; then

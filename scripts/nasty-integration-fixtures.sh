@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
+repo_root="$(cd "$script_dir/.." && pwd)"
 cd "$repo_root"
 original_gomodcache="$(go env GOMODCACHE)"
 original_gocache="$(go env GOCACHE)"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required for nasty integration fixtures" >&2
-  exit 127
-fi
+require_cmd python3
 
 go build -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=nasty-integration" -o bin/vivero ./cmd/vivero
 
-workdir="$(mktemp -d)"
+workdir="$(mktemp_workdir)"
 cleanup() {
   rm -rf "$workdir"
 }

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$script_dir/lib/common.sh"
+repo_root="$(cd "$script_dir/.." && pwd)"
 cd "$repo_root"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required for dogfood configs" >&2
-  exit 127
-fi
+require_cmd python3
 
 go build -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=dogfood" -o bin/vivero ./cmd/vivero
 
-workdir="$(mktemp -d)"
+workdir="$(mktemp_workdir)"
 cleanup() {
   rm -rf "$workdir"
 }
