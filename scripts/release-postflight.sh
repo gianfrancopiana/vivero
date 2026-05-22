@@ -29,10 +29,10 @@ Options:
   -h, --help               Show this help
 
 The script checks release metadata, downloads all assets, verifies checksums,
-optionally verifies GitHub attestations, runs the checksum-verifying installer,
-and verifies the Homebrew tap formula. Homebrew installation and Docker preview
-E2E are opt-in so routine postflight checks do not install/reinstall Vivero or
-require Docker unless requested.
+validates the SPDX SBOM, optionally verifies GitHub attestations, runs the
+checksum-verifying installer, and verifies the Homebrew tap formula. Homebrew
+installation and Docker preview E2E are opt-in so routine postflight checks do
+not install/reinstall Vivero or require Docker unless requested.
 EOF
 }
 
@@ -176,7 +176,7 @@ if errors:
 print(f"{payload['tagName']}\t{payload['url']}")
 PY
 "$gh_cli" release download "$version" --repo "$repo" --dir "$assets_dir"
-for required_asset in checksums.txt vivero.rb vivero_darwin_amd64.tar.gz vivero_darwin_arm64.tar.gz vivero_linux_amd64.tar.gz vivero_linux_arm64.tar.gz; do
+for required_asset in checksums.txt vivero.rb vivero_sbom.spdx.json vivero_darwin_amd64.tar.gz vivero_darwin_arm64.tar.gz vivero_linux_amd64.tar.gz vivero_linux_arm64.tar.gz; do
   if [ ! -f "$assets_dir/$required_asset" ]; then
     echo "missing release asset: $required_asset" >&2
     exit 1
@@ -196,6 +196,8 @@ done
   $cmd -c checksums.txt
 )
 echo "checksums: ok"
+
+"$script_dir/verify-release-sbom.py" --version "$version" --sbom "$assets_dir/vivero_sbom.spdx.json" --dist "$assets_dir"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$os" in
@@ -218,6 +220,7 @@ if [ "$skip_attestation" -eq 0 ]; then
   "$gh_cli" attestation verify "$host_asset" --repo "$repo" >/dev/null
   "$gh_cli" attestation verify "$assets_dir/checksums.txt" --repo "$repo" >/dev/null
   "$gh_cli" attestation verify "$assets_dir/vivero.rb" --repo "$repo" >/dev/null
+  "$gh_cli" attestation verify "$assets_dir/vivero_sbom.spdx.json" --repo "$repo" >/dev/null
   echo "attestations: ok"
 else
   echo "attestations: skipped"

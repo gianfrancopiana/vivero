@@ -6,20 +6,93 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARED_VERSION: "2026.5.0"
+  CLOUDFLARED_LINUX_AMD64_SHA256: "0095e46fdc88855d801c4d304cb1f5dd4bd656116c47ab94c2ad0ae7cda1c7ec"
+  PLAYWRIGHT_VERSION: "1.60.0"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  verify-release-tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Verify tag points at current main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          tag_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          main_commit="$(git rev-parse origin/main)"
+          if [ "$tag_commit" != "$main_commit" ]; then
+            echo "release tags must point at current origin/main" >&2
+            echo "tag:  $tag_commit" >&2
+            echo "main: $main_commit" >&2
+            exit 1
+          fi
+
+  live-cloud-browser-smoke:
+    needs: verify-release-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      # actions/setup-go v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: go.mod
+      - name: Install cloudflared
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /tmp/cloudflared
+          echo "${CLOUDFLARED_LINUX_AMD64_SHA256}  /tmp/cloudflared" | sha256sum -c -
+          sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+      - name: Verify browser tooling
+        run: |
+          set -euo pipefail
+          google-chrome --version
+          npm --version
+          npx --yes "playwright@${PLAYWRIGHT_VERSION}" --version
+      - name: Run live cloud/browser smoke
+        env:
+          VIVERO_LIVE_ARTIFACT_DIR: ${{ github.workspace }}/.tmp/live-cloud-browser-smoke
+        run: make live-cloud-browser-smoke
+      - name: Upload live smoke artifacts
+        if: always()
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: live-cloud-browser-smoke
+          path: .tmp/live-cloud-browser-smoke
+          if-no-files-found: ignore
+          retention-days: 3
+
+  release:
+    needs:
+      - verify-release-tag
+      - live-cloud-browser-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       # actions/checkout v6
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -41,6 +114,8 @@ jobs:
             echo "main: $main_commit" >&2
             exit 1
           fi
+      - name: Drop checkout token before repo scripts
+        run: git config --local --unset-all http.https://github.com/.extraheader || true
       # goreleaser/goreleaser-action v7
       - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89
         with:
@@ -56,10 +131,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Render Homebrew formula asset
         run: scripts/render-homebrew-formula.sh --version "${GITHUB_REF_NAME}" --dist dist --output dist/vivero.rb
+      - name: Generate release SBOM asset
+        run: scripts/generate-release-sbom.sh --version "${GITHUB_REF_NAME}" --dist dist --output dist/vivero_sbom.spdx.json
       - name: Upload Homebrew formula asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" dist/vivero.rb --clobber
+      - name: Upload release SBOM asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/vivero_sbom.spdx.json --clobber
       - name: Attest release archives
         # actions/attest-build-provenance v4
         uses: actions/attest-build-provenance@b3e506e8c389afc651c5bacf2b8f2a1ea0557215
@@ -72,7 +153,24 @@ jobs:
           subject-path: |
             dist/checksums.txt
             dist/vivero.rb
+            dist/vivero_sbom.spdx.json
       - name: Publish Homebrew tap formula
         env:
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
         run: scripts/publish-homebrew-tap.sh --formula dist/vivero.rb --repo git@github.com:gianfrancopiana/homebrew-tap.git --branch main --message "vivero ${GITHUB_REF_NAME}"
+
+  postflight:
+    needs: release
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Verify published installer and Homebrew surfaces
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/release-postflight.sh "${GITHUB_REF_NAME}" --install-homebrew
