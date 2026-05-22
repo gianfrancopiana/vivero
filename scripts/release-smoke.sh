@@ -94,6 +94,8 @@ esac
 
 dist_abs="$(cd "$dist_dir" && pwd)"
 scripts/render-homebrew-formula.sh --version v0.0.0 --dist "$dist_dir" --output "$dist_dir/vivero.rb" >/dev/null
+scripts/generate-release-sbom.sh --version v0.0.0 --dist "$dist_dir" --output "$dist_dir/vivero_sbom.spdx.json" >/dev/null
+scripts/verify-release-sbom.py --version v0.0.0 --sbom "$dist_dir/vivero_sbom.spdx.json" --dist "$dist_dir"
 
 tap_tmp="$(mktemp -d)"
 trap 'rm -rf "$tap_tmp"' EXIT

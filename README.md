@@ -213,7 +213,15 @@ Run the strongest local non-live ladder before release-facing changes:
 make certify
 ```
 
-`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. CI runs the same surfaces as split jobs. A scheduled/manual live smoke covers Docker + Cloudflare quick tunnels + Playwright evidence.
+`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, dogfood config validation, deploy/release fixtures, and snapshot release smoke. CI runs the same surfaces as split jobs. The Release workflow also gates tags on live Docker + Cloudflare quick tunnel + Playwright evidence before publishing.
+
+For maintainer real-app confidence against Chetear, run:
+
+```sh
+make chetear-real-dogfood
+```
+
+That target copies the local `chetear.com` repo into a temp workspace and proves preview startup, preview evidence, app-owned deploy/release/status/smoke, and rollback without mutating the source repo.
 
 After a tag publishes, run the install trust postflight against the exact release:
 
@@ -221,7 +229,7 @@ After a tag publishes, run the install trust postflight against the exact releas
 GH_CLI=gh VERSION=v0.1.1 make release-postflight
 ```
 
-That verifies release metadata, required assets, checksums, GitHub artifact attestations, the checksum-verifying installer, and the Homebrew tap formula. For release-candidate confidence, run the same postflight with the checksum-installed release binary through the certified preview E2E:
+That verifies release metadata, required assets, checksums, the SPDX SBOM, GitHub artifact attestations, the checksum-verifying installer, and the Homebrew tap formula. For release-candidate confidence, run the same postflight with the checksum-installed release binary through the certified preview E2E:
 
 ```sh
 GH_CLI=gh VERSION=v0.1.1 RELEASE_POSTFLIGHT_FLAGS="--example-e2e" make release-postflight

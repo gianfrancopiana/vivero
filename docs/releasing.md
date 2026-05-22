@@ -17,11 +17,14 @@ Run the local confidence ladder that proves the release path, not just unit test
 ```sh
 make certify
 make live-cloud-browser-smoke
+make chetear-real-dogfood
 ```
 
 `make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
 
-`make live-cloud-browser-smoke` is intentionally not required on every PR. Run it before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
+`make live-cloud-browser-smoke` is intentionally not required on every PR. It is now a required tag gate in the Release workflow; run it locally before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
+
+`make chetear-real-dogfood` is a maintainer-only real-app proof. It copies the local `chetear.com` repo into a temporary workspace, starts a Docker preview, collects preview evidence, runs app-owned deploy/release/status/smoke commands against the copied app, and proves rollback. It skips when the private dogfood repo is unavailable unless `VIVERO_REAL_DOGFOOD_REQUIRE=1` is set.
 
 ## Cut the tag
 
@@ -33,7 +36,7 @@ git tag -a "$version" -m "Vivero $version"
 git push origin "$version"
 ```
 
-The tag triggers the Release workflow. It refuses tags that do not point at current `origin/main`, installs GoReleaser, runs `make certify`, builds the GoReleaser archives, smokes the packaged binary, publishes the GitHub release, renders and uploads `vivero.rb`, creates GitHub artifact attestations, and publishes the formula to `gianfrancopiana/homebrew-tap`.
+The tag triggers the Release workflow. It first verifies the tag points at current `origin/main`, then runs live cloud/browser smoke with Chrome, Playwright, and Cloudflare quick tunnels. Only after that gate passes does it install GoReleaser, run `make certify`, build the GoReleaser archives, smoke the packaged binary, publish the GitHub release, render and upload `vivero.rb`, generate and upload `vivero_sbom.spdx.json`, create GitHub artifact attestations, and publish the formula to `gianfrancopiana/homebrew-tap`. A macOS postflight job then verifies the published installer and Homebrew surfaces from the user-facing release assets.
 
 ## Watch the workflow
 
@@ -70,9 +73,10 @@ GH_CLI=gh scripts/release-postflight.sh v0.1.1 --example-e2e --install-homebrew
 The postflight script checks:
 
 - GitHub release metadata.
-- Required release assets are present: all macOS/Linux archives, `checksums.txt`, and `vivero.rb`.
+- Required release assets are present: all macOS/Linux archives, `checksums.txt`, `vivero.rb`, and `vivero_sbom.spdx.json`.
 - Downloaded archive checksums against `checksums.txt`.
-- GitHub artifact attestations for the host archive, `checksums.txt`, and `vivero.rb`.
+- The SPDX SBOM structure, root package version, dependency package list, and release-asset SHA256 values.
+- GitHub artifact attestations for the host archive, `checksums.txt`, `vivero.rb`, and `vivero_sbom.spdx.json`.
 - The checksum-verifying installer into a temporary bin dir.
 - The certified preview E2E with that installed binary when `--example-e2e` is passed.
 - The Homebrew tap formula version.
@@ -111,4 +115,5 @@ Every release should leave these true:
 - `scripts/install.sh --version <tag>` installs the tagged version.
 - `vivero version --json --no-input` shows version, commit, and build date.
 - `checksums.txt` verifies all archives.
-- GitHub attestations verify for the host archive, `checksums.txt`, and `vivero.rb`.
+- GitHub attestations verify for the host archive, `checksums.txt`, `vivero.rb`, and `vivero_sbom.spdx.json`.
+- `vivero_sbom.spdx.json` validates with `scripts/verify-release-sbom.py` and matches the published release assets.

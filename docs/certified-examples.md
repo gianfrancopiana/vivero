@@ -86,6 +86,14 @@ Fixture gates should assert those fields and paths directly. They should not cla
 
 These are config-quality fixtures. They should keep project-specific selectors, routes, scripts, and runtime ownership in `vivero.yml` or app repos, not in Vivero core.
 
+## Real-app dogfood
+
+- Source: local `chetear.com` checkout copied into a temporary workspace
+- Shape: Astro/Node app with Docker preview, target-aware preview evidence, app-owned command deploy, release smoke/status/logs/events, and rollback
+- Gate: `make chetear-real-dogfood`
+
+This target is maintainer-only because it depends on the private/local Chetear workspace. It skips when that checkout is unavailable unless `VIVERO_REAL_DOGFOOD_REQUIRE=1` is set. It is deliberately outside `make certify` so public CI remains deterministic, but it should be run before release-facing changes that claim real-app confidence.
+
 ## Full local proof ladder
 
 ```sh
@@ -94,10 +102,16 @@ make certify
 
 `make certify` runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, dogfood config validation, deploy fixtures, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
 
-For external runtime confidence, run the live cloud/browser smoke manually or through the scheduled workflow:
+For external runtime confidence, run the live cloud/browser smoke manually or through the release/scheduled workflow:
 
 ```sh
 make live-cloud-browser-smoke
+```
+
+For private maintainer confidence against a real app, run:
+
+```sh
+make chetear-real-dogfood
 ```
 
 ## Certification rule

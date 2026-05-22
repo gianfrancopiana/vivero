@@ -61,12 +61,15 @@ The tap is the normal user-facing install path; the release asset is the generat
 
 ## Verify GitHub artifact attestations
 
-Release archives, `checksums.txt`, and the generated Homebrew formula are attested by GitHub Actions.
+Release archives, `checksums.txt`, the generated Homebrew formula, and the SPDX SBOM are attested by GitHub Actions.
 
 ```sh
 gh attestation verify ./vivero_darwin_arm64.tar.gz --repo gianfrancopiana/vivero
 gh attestation verify ./checksums.txt --repo gianfrancopiana/vivero
 gh attestation verify ./vivero.rb --repo gianfrancopiana/vivero
+gh attestation verify ./vivero_sbom.spdx.json --repo gianfrancopiana/vivero
 ```
+
+`vivero_sbom.spdx.json` is an SPDX 2.3 JSON document for the release. It records the Vivero Go module dependency graph plus SHA256 entries for the archives, `checksums.txt`, and the generated Homebrew formula.
 
 Use the attestation check together with checksum verification: attestations prove the artifact came from the release workflow; checksums prove the downloaded bytes match the release manifest. Checksum verification protects against corrupt or mismatched downloaded artifacts, but it does not replace trusting the release manifest source or verifying the GitHub attestation.
