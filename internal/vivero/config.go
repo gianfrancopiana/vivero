@@ -57,6 +57,9 @@ func readProjectConfigNode(configPath string) (yaml.Node, error) {
 
 func decodeProjectConfigNode(configPath string, node *yaml.Node) (ProjectConfig, error) {
 	var cfg ProjectConfig
+	if err := normalizeRuntimeCommandYAMLNodes(node); err != nil {
+		return ProjectConfig{}, fmt.Errorf("%s: %w", configPath, err)
+	}
 	if err := node.Decode(&cfg); err != nil {
 		return ProjectConfig{}, err
 	}
