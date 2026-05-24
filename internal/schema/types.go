@@ -84,9 +84,13 @@ type PublicRewriteTemplate struct {
 type PublicConfig struct {
 	Provider         string `yaml:"provider" json:"provider,omitempty"`
 	Mode             string `yaml:"mode" json:"mode,omitempty"`
+	Tunnel           string `yaml:"tunnel" json:"tunnel,omitempty"`
+	Zone             string `yaml:"zone" json:"zone,omitempty"`
 	BaseDomain       string `yaml:"baseDomain" json:"baseDomain,omitempty"`
+	Wildcard         string `yaml:"wildcard" json:"wildcard,omitempty"`
 	Hostname         string `yaml:"hostname" json:"hostname,omitempty"`
 	HostnameTemplate string `yaml:"hostnameTemplate" json:"hostnameTemplate,omitempty"`
+	RouterAddr       string `yaml:"routerAddr" json:"routerAddr,omitempty"`
 	InactiveBehavior string `yaml:"inactiveBehavior" json:"inactiveBehavior,omitempty"`
 }
 

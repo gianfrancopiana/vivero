@@ -103,7 +103,11 @@ func commandManifests() []CommandManifest {
 		withApproval(manifest([]string{"evidence", "smoke"}, "run smoke evidence for a preview or release", "vivero evidence smoke preview:my-preview --json --no-input", true, "stable", append(global, CommandFlag{Name: "--environment", ValueName: "NAME", Description: "release environment when targeting a release project", Default: "production"}), []CommandArg{evidenceTargetArg, {Name: "check", Description: "optional preview smoke check name"}}, map[string]any{"returns": "targetRef plus preview or release smoke result", "targetRefs": []string{"preview:<id>", "release:<id>"}}), "human-for-release-targets"),
 		manifest([]string{"evidence", "screenshot"}, "capture screenshot evidence for a preview", "vivero evidence screenshot preview:my-preview web / --target local --json --no-input", true, "stable", append(global, CommandFlag{Name: "--target", ValueName: "local|public|origin", Description: "evidence target", Default: "local"}, CommandFlag{Name: "--color-scheme", ValueName: "light|dark", Description: "browser color scheme"}, CommandFlag{Name: "--storage-state", ValueName: "PATH", Description: "Playwright storage state for authenticated evidence"}, CommandFlag{Name: "--breakpoint", ValueName: "NAME=WxH", Description: "extra screenshot size"}), []CommandArg{previewTargetArg, {Name: "service", Required: true}, {Name: "path"}}, map[string]any{"returns": "screenshot artifact paths with targetRef", "targetRefs": []string{"preview:<id>"}}),
 		manifest([]string{"evidence", "qa"}, "run preview QA evidence commands", "vivero evidence qa run preview:my-preview --scope all --target local --json --no-input", true, "stable", append(global, CommandFlag{Name: "--scope", ValueName: "NAME|all", Description: "QA scope"}, CommandFlag{Name: "--target", ValueName: "local|public|origin", Description: "QA target", Default: "local"}, CommandFlag{Name: "--no-screenshots", Description: "skip screenshot capture for run/final"}, CommandFlag{Name: "--no-record", Description: "skip walkthrough recording for final"}), []CommandArg{{Name: "subcommand", Description: "plan|context|run|record|final|report", Required: true}, previewTargetArg}, withTargetRefs(qaSchema())),
-		manifest([]string{"serve"}, "start the local HTTP control plane", "vivero serve --addr 127.0.0.1:7777", false, "none", []CommandFlag{{Name: "--addr", ValueName: "HOST:PORT", Description: "listen address", Default: "127.0.0.1:7777"}}, nil, map[string]any{"sideEffects": "starts a local server"}),
+		manifest([]string{"serve"}, "start the local HTTP control plane and public preview router", "vivero serve --public-router --addr 127.0.0.1:7777", false, "none", []CommandFlag{{Name: "--public-router", Description: "accept durable public preview host routing on this server"}, {Name: "--addr", ValueName: "HOST:PORT", Description: "listen address", Default: "127.0.0.1:7777"}}, nil, map[string]any{"sideEffects": "starts a local server"}),
+		withSideEffects(manifest([]string{"public", "setup"}, "configure durable Cloudflare named-tunnel preview URLs", "vivero public setup --project . --base-domain previews.example.com --tunnel vivero-preview --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}, CommandFlag{Name: "--base-domain", ValueName: "HOST", Description: "owned preview base domain, for example previews.example.com"}, CommandFlag{Name: "--tunnel", ValueName: "NAME", Description: "Cloudflare named tunnel name"}, CommandFlag{Name: "--zone", ValueName: "ZONE", Description: "Cloudflare zone name for operator reference"}, CommandFlag{Name: "--wildcard", ValueName: "HOST", Description: "wildcard hostname routed to the named tunnel", Default: "*.baseDomain"}, CommandFlag{Name: "--hostname-template", ValueName: "TEMPLATE", Description: "stable preview hostname template", Default: "{{ .PreviewID }}.{{ .BaseDomain }}"}, CommandFlag{Name: "--router-addr", ValueName: "HOST:PORT", Description: "local router address for cloudflared ingress", Default: "127.0.0.1:7777"}), nil, publicSchema(map[string]any{"returns": "updated public config plus local setup/cloudflared artifact paths", "secrets": "does not store API tokens or tunnel credentials"})), true, false, false),
+		manifest([]string{"public", "doctor"}, "validate durable public preview named-tunnel setup", "vivero public doctor --project . --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}), nil, publicSchema(map[string]any{"returns": "public setup diagnostics and finding list", "quickTunnel": "reported as non-durable"})),
+		manifest([]string{"public", "status"}, "summarize durable public preview named-tunnel state", "vivero public status --project . --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}), nil, publicSchema(map[string]any{"returns": "public setup status and finding counts"})),
+		withSideEffects(manifest([]string{"public", "start"}, "start the durable public preview router and named tunnel", "vivero public start --project . --dry-run --json --no-input", true, "stable", append(global, CommandFlag{Name: "--project", ValueName: "PATH", Description: "project directory or vivero.yml", Default: "."}, CommandFlag{Name: "--dry-run", Description: "return router/cloudflared commands without starting processes"}), nil, publicSchema(map[string]any{"returns": "router and cloudflared commands plus launched process IDs when not dry-run"})), true, true, false),
 		manifest([]string{"projects", "sync"}, "sync a project from vivero.yml", "vivero projects sync . --json --no-input", true, "stable", global, []CommandArg{{Name: "path", Description: "project directory or vivero.yml", Required: true}}, map[string]any{"returns": "project record"}),
 		manifest([]string{"projects"}, "list synced projects", "vivero projects --json --no-input", true, "stable", global, nil, map[string]any{"returns": "project records"}),
 		manifest([]string{"project", "inspect"}, "inspect one project", "vivero project inspect my-app --json --no-input", true, "stable", global, []CommandArg{{Name: "project", Description: "project name", Required: true}}, map[string]any{"returns": "project record and config"}),
@@ -212,6 +216,14 @@ func productionSchema(schema map[string]any) map[string]any {
 	return out
 }
 
+func publicSchema(schema map[string]any) map[string]any {
+	out := map[string]any{"featureStatus": "experimental", "featureLane": "public-preview", "provider": "cloudflare", "mode": "named-tunnel"}
+	for k, v := range schema {
+		out[k] = v
+	}
+	return out
+}
+
 func guardedProductionSchema(schema map[string]any) map[string]any {
 	out := productionSchema(schema)
 	out["requiresConfirmProduction"] = true
@@ -258,6 +270,8 @@ func commandCategory(path []string) string {
 		return "projects"
 	case "cache":
 		return "cache"
+	case "public":
+		return "public"
 	case "up", "wait", "down", "list", "inspect", "events", "logs", "smoke":
 		return "runtime"
 	case "sync", "rm", "diff", "exec":
@@ -298,7 +312,7 @@ func commandLane(path []string) string {
 		return CommandLaneSupport
 	case "events", "logs", "smoke", "screenshot", "qa", "evidence", "diagnose":
 		return CommandLaneEvidence
-	case "up", "wait", "down", "list", "inspect", "sync", "rm", "diff", "exec":
+	case "public", "up", "wait", "down", "list", "inspect", "sync", "rm", "diff", "exec":
 		return CommandLanePreview
 	default:
 		return CommandLaneSupport
