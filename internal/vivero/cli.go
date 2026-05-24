@@ -511,6 +511,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		output(stdout, jsonOut, v, "prebuild done")
 		return 0
+	case "public":
+		return a.runPublic(rest, stdout, stderr, jsonOut)
 	case "secrets":
 		return a.runSecrets(rest, stdout, stderr, jsonOut)
 	case "skill":
@@ -535,7 +537,7 @@ func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
 	}
 	group := args[0]
 	switch group {
-	case "cache", "deploy", "diagnose", "evidence", "preview", "project", "qa", "release", "secrets", "skill":
+	case "cache", "deploy", "diagnose", "evidence", "preview", "project", "public", "qa", "release", "secrets", "skill":
 	default:
 		return "", "", false
 	}
