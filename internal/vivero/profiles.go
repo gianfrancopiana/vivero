@@ -15,6 +15,17 @@ func projectConfigForRequestedProfile(cfg ProjectConfig, profile string) (Projec
 	return projectConfigForProfile(cfg, name)
 }
 
+func projectConfigForEnvironment(cfg ProjectConfig, environment string) (ProjectConfig, string, error) {
+	profile := strings.TrimSpace(environment)
+	if profile == "" {
+		return cfg, "", nil
+	}
+	if _, ok := cfg.Profiles[profile]; !ok {
+		return cfg, "", nil
+	}
+	return projectConfigForProfile(cfg, profile)
+}
+
 func projectConfigForPreview(project ProjectRecord, preview PreviewRecord) (ProjectConfig, error) {
 	cfg, _, err := projectConfigForProfile(project.Config, preview.Profile)
 	return cfg, err
@@ -54,7 +65,7 @@ func projectConfigForProfile(cfg ProjectConfig, profile string) (ProjectConfig, 
 }
 
 func selectServices(all map[string]ServiceConfig, names []string, context string) (map[string]ServiceConfig, error) {
-	if len(names) == 0 {
+	if names == nil {
 		selected := make(map[string]ServiceConfig, len(all))
 		for name, svc := range all {
 			selected[name] = svc
@@ -77,7 +88,7 @@ func selectServices(all map[string]ServiceConfig, names []string, context string
 }
 
 func selectBackingServices(all map[string]BackingConfig, names []string, context string) (map[string]BackingConfig, error) {
-	if len(names) == 0 {
+	if names == nil {
 		selected := make(map[string]BackingConfig, len(all))
 		for name, svc := range all {
 			selected[name] = svc

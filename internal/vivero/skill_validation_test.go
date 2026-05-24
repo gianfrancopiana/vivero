@@ -104,7 +104,7 @@ func TestBundledSkillDescribesAgentLaneDecisionFlow(t *testing.T) {
 		"Support lane",
 		"preview:<id>",
 		"release:<id>",
-		"normally require human approval",
+		"explicit operator approval",
 		"exact artifact paths",
 		"Plan is the safe entry point",
 	} {

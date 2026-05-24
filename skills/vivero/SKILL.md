@@ -5,17 +5,18 @@ vivero_cli: 0.1.0
 schema: 1
 license: MIT
 description: >
-  Use the `vivero` CLI for agent-safe app operations: preview, evidence, deploy, verify, and rollback. Trigger when a task needs a running local preview, health-checked URLs, Docker-compatible exec/logs/screenshots, QA artifacts, source iteration through worktrees, app-owned deploy plans/applies, or release evidence and rollback. Vivero owns orchestration, safety gates, state, and evidence; app repos own Dockerfiles, deploy scripts, migrations, secrets, and infra behavior.
+  Use the `vivero` CLI for preview-first app operations: isolated previews, public/local QA evidence, screenshots, recordings, reports, teardown, and guarded production readiness/release evidence. Trigger when a task needs a running preview, health-checked URLs, Docker-compatible exec/logs/screenshots, QA artifacts, source iteration through worktrees, app-owned deploy plans, or explicitly approved production apply/rollback. Vivero owns orchestration, safety gates, state, command contracts, and evidence; app repos own Dockerfiles, deploy scripts, migrations, secrets, provider behavior, and infra.
 ---
 
 # Vivero CLI
 
-Vivero is a local-first app-operations runtime for agents. It has two separate operating lanes:
+Vivero is a local-first, preview-first app-operations runtime for agents. Its primary lane is preview/evidence: start a realistic local or public app preview, run health/smoke/QA checks, collect screenshots and recordings, produce proof artifacts, and tear down cleanly. Production support is a separate experimental/guarded lane for app-owned readiness checks, deploy plans, release evidence, smoke, and rollback records.
 
 - preview: safe, disposable environments for development and QA;
-- deploy/release: app-owned production operations with Vivero plans, locks, audit records, evidence, and rollback handles.
+- evidence/QA: target-aware logs, events, smoke, screenshots, recordings, reports, and final proof bundles;
+- deploy/release: experimental app-owned production operations with Vivero plans, locks, audit records, evidence, and rollback handles.
 
-Do not treat deploy as “preview, but public.” Production work must use the deploy/release commands and the app-owned deploy config in `vivero.yml`.
+Do not treat deploy as “preview, but public.” Production work must use the deploy/release commands and the app-owned deploy config in `vivero.yml`. Treat production commands as experimental unless the live manifest says otherwise; never run `deploy apply` or `release rollback` without explicit operator approval and `--confirm-production`.
 
 ## Mental model
 
@@ -84,7 +85,7 @@ vivero deploy plan <project-path> --environment production --json --no-input
 | --- | --- | --- | --- |
 | Preview lane | You need a running local app, live source iteration, service exec, diffs, or teardown. | `vivero preview up`, `vivero preview inspect`, `vivero preview wait`, `vivero preview exec`, `vivero preview sync`, `vivero preview diff`, `vivero preview down` | URL means healthy. Never announce a preview URL until inspect/up reports the service healthy. |
 | Evidence/QA lane | You need logs, events, smoke, screenshots, recordings, QA reports, release command output, or startup diagnosis. | `vivero evidence logs`, `vivero evidence events`, `vivero evidence smoke`, `vivero evidence screenshot`, `vivero evidence qa run`, `vivero preview qa final`, `vivero release logs`, `vivero preview diagnose startup` | Report exact artifact paths and target refs. Do not substitute screenshots or manual browser notes for declared QA evidence. |
-| Deploy/release lane | You need production readiness checks, deploy planning/apply, release status, release evidence, smoke, or rollback. | `vivero doctor production`, `vivero deploy plan`, `vivero deploy apply`, `vivero release status`, `vivero release events`, `vivero release logs`, `vivero release smoke`, `vivero release rollback` | Plan first. Apply/smoke/rollback can run app-owned commands and normally require human approval. |
+| Deploy/release lane | You need experimental production readiness checks, deploy planning, release status/evidence, smoke, or rollback. | `vivero doctor production`, `vivero deploy plan`, `vivero deploy apply`, `vivero release status`, `vivero release events`, `vivero release logs`, `vivero release smoke`, `vivero release rollback` | Plan first. Read-only doctor/plan/status/smoke are for evidence; `deploy apply` and `release rollback` require explicit operator approval and `--confirm-production`. |
 | Support lane | You need CLI discovery, schema, project sync/inspect, skill freshness, or secret-key management. | `vivero capabilities`, `vivero commands`, `vivero schema`, `vivero doctor`, `vivero projects sync`, `vivero project inspect`, `vivero skill doctor`, `vivero secrets list` | Treat secrets as write-only. Use schema/doctor output before guessing. |
 
 Prefer namespaced preview commands for new guidance. Older root preview aliases may exist for compatibility, but new guidance should use the preview namespace.
@@ -94,7 +95,7 @@ Prefer namespaced preview commands for new guidance. Older root preview aliases 
 Keep Vivero proof small and invariant-led. The bundled examples are not a framework zoo; they are a tiny matrix of behaviors frontier agents can trust across unfamiliar repos.
 
 - **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
-- **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs, cache hints, timeouts, and capped/redacted output; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent. Prove this with `make deploy-fixtures`.
+- **Deploy/release invariants:** production doctor precedes planning; plans are reviewable before side effects; app-owned prepare/apply/smoke/status/rollback commands run with Vivero IDs, cache hints, timeouts, and capped/redacted output; release state is locked and auditable; failed smoke does not promote; rollback keeps history consistent; apply/rollback CLI calls require `--confirm-production`. Prove this with `make deploy-fixtures`.
 - **Evidence invariants:** every lane reports target-aware JSON and artifact paths for events, logs, screenshots, QA reports, recordings, release command output, and handoff files. Prefer `vivero evidence logs preview:<id> <service> --json --no-input` and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` when collecting cross-lane evidence.
 
 Add or document a fixture only when it proves a distinct invariant failure mode. Otherwise extend the smallest existing fixture.
@@ -144,7 +145,7 @@ vivero deploy plan /path/to/project --environment production --json --no-input -
 vivero release status <project> --environment production --json --no-input
 ```
 
-Stop at the plan unless the operator explicitly approves side-effect-capable production commands such as `deploy apply`, `release smoke`, or `release rollback`.
+Stop at the plan unless the operator explicitly approves side-effect-capable production commands. `deploy apply` and `release rollback` must include `--confirm-production`; `--no-input` only prevents prompts and is not approval.
 
 ### Leave a handoff
 
@@ -302,7 +303,7 @@ vivero deploy plan <project-path> --environment production --json --no-input --q
 Only apply a non-blocked plan after reviewing diagnostics, app-owned commands, target environment, and expected release behavior. In normal agent workflows, ask for human approval before `vivero deploy apply` because it can run app-owned production commands:
 
 ```sh
-vivero deploy apply deploy-plan-123 --json --no-input --quiet
+vivero deploy apply deploy-plan-123 --confirm-production --json --no-input --quiet
 ```
 
 Check release status and release-scoped evidence after apply:
@@ -319,7 +320,7 @@ vivero release smoke webapp --environment production --json --no-input --quiet
 Rollback is also approval-gated. Prefer Vivero rollback over manual state edits so release history, current pointers, locks, and audit records remain consistent:
 
 ```sh
-vivero release rollback webapp release:release-123 --environment production --json --no-input --quiet
+vivero release rollback webapp release:release-123 --environment production --confirm-production --json --no-input --quiet
 ```
 
 Default deploy strategy means Vivero runs `applyCommand`, optional `smokeCommand`, optional `statusCommand`, and `rollbackCommand`. If `smokeCommand` is set, deploy apply must pass smoke before the release becomes current. For `strategy: blue-green`, Vivero models two slots and enforces prepare → smoke → promote before recording the new live slot. If smoke fails, Vivero exits before promote and records release history without moving current release.
@@ -379,7 +380,7 @@ Deploy apply or smoke failure:
 vivero release events release:release-123 --environment production --json --no-input
 vivero release logs release:release-123 --environment production --json --no-input
 vivero release status webapp --environment production --json --no-input
-vivero release rollback webapp release:release-123 --environment production --json --no-input --quiet
+vivero release rollback webapp release:release-123 --environment production --confirm-production --json --no-input --quiet
 ```
 
 Rollback failure:

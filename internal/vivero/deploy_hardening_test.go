@@ -30,7 +30,7 @@ func TestDeployApplyCommandTimeoutPersistsFailedEvidenceAndReleasesLock(t *testi
 	}
 
 	start := time.Now()
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--confirm-production", "--json", "--no-input")
 	elapsed := time.Since(start)
 	if code == 0 {
 		t.Fatalf("deploy apply should fail on timeout, stdout=%s stderr=%s", stdout, stderr)
@@ -69,7 +69,7 @@ func TestDeployApplyCommandTimeoutPersistsFailedEvidenceAndReleasesLock(t *testi
 	if err := json.Unmarshal([]byte(stdout), &planPayload2); err != nil {
 		t.Fatalf("invalid second plan JSON: %v stdout=%s", err, stdout)
 	}
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload2.Plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload2.Plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy lock should be released after timeout; second apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -92,7 +92,7 @@ func TestDeployCommandOutputIsCappedAndRedactedInJSONLogsAndArtifacts(t *testing
 		t.Fatalf("invalid deploy plan JSON: %v stdout=%s", err, stdout)
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--confirm-production", "--json", "--no-input")
 	if code == 0 || stderr != "" {
 		t.Fatalf("sensitive deploy should fail with stdout JSON only, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -152,7 +152,7 @@ func TestReleaseStatusRejectsUnsafeOutputAndDoesNotPersistRawStatus(t *testing.T
 	if err := json.Unmarshal([]byte(stdout), &planPayload); err != nil {
 		t.Fatalf("invalid plan JSON: %v stdout=%s", err, stdout)
 	}
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -192,7 +192,7 @@ func TestReleaseStatusHonorsDeployLockBeforeRunningAppOwnedStatusCommand(t *test
 	if err := json.Unmarshal([]byte(stdout), &planPayload); err != nil {
 		t.Fatalf("invalid plan JSON: %v stdout=%s", err, stdout)
 	}
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}

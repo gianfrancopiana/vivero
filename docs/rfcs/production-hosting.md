@@ -64,9 +64,9 @@ Production commands are separate and explicit:
 
 ```sh
 vivero deploy plan <project> --environment production --json --no-input
-vivero deploy apply <plan-id> --json --no-input
+vivero deploy apply <plan-id> --confirm-production --json --no-input
 vivero release status <project> --environment production --json --no-input
-vivero release rollback <project> <release-id> --environment production --json --no-input
+vivero release rollback <project> <release-id> --environment production --confirm-production --json --no-input
 ```
 
 Do not overload `vivero preview up`, `vivero preview down`, or quick-tunnel flows for production.
