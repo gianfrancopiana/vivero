@@ -525,17 +525,28 @@ func TestPublicPreviewRouterProxiesActiveNamedTunnelHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest("GET", "http://pr-17.preview.example.com/products", nil)
-	req.Host = "pr-17.preview.example.com"
-	req.Header.Set("X-Forwarded-Host", "localhost")
-	rec := httptest.NewRecorder()
-	a.controlPlaneHandler().ServeHTTP(rec, req)
+	for _, tc := range []struct {
+		name          string
+		host          string
+		forwardedHost string
+	}{
+		{name: "preserved host", host: "pr-17.preview.example.com", forwardedHost: "localhost"},
+		{name: "cloudflared loopback origin host", host: "127.0.0.1:7777", forwardedHost: "pr-17.preview.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "http://"+tc.host+"/products", nil)
+			req.Host = tc.host
+			req.Header.Set("X-Forwarded-Host", tc.forwardedHost)
+			rec := httptest.NewRecorder()
+			a.controlPlaneHandler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.String() != "active preview" {
-		t.Fatalf("body = %q", rec.Body.String())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if rec.Body.String() != "active preview" {
+				t.Fatalf("body = %q", rec.Body.String())
+			}
+		})
 	}
 }
 

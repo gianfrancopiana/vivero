@@ -176,11 +176,6 @@ func previewStatusMayOwnPublicRoutes(status string) bool {
 func (a *App) servePublicPreview(w http.ResponseWriter, r *http.Request) bool {
 	host := publicRouteHost(r)
 	if !isRoutablePublicHost(host) {
-		forwardedHost := strings.ToLower(hostnameOnly(firstForwardedValue(r.Header.Get("X-Forwarded-Host"))))
-		if isRoutablePublicHost(forwardedHost) {
-			http.NotFound(w, r)
-			return true
-		}
 		return false
 	}
 	p, svcName, svc, ok := a.previewServiceForPublicHost(host)
@@ -225,14 +220,24 @@ func (a *App) servePublicPreview(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func publicRouteHost(r *http.Request) string {
-	host := r.Host
-	if host == "" && r.URL != nil {
-		host = r.URL.Host
+	host := ""
+	if r != nil {
+		host = r.Host
+		if host == "" && r.URL != nil {
+			host = r.URL.Host
+		}
 	}
-	if host == "" {
-		host = firstForwardedValue(r.Header.Get("X-Forwarded-Host"))
+	host = strings.ToLower(hostnameOnly(host))
+	if isRoutablePublicHost(host) {
+		return host
 	}
-	return strings.ToLower(hostnameOnly(host))
+	if r != nil {
+		forwardedHost := strings.ToLower(hostnameOnly(firstForwardedValue(r.Header.Get("X-Forwarded-Host"))))
+		if isRoutablePublicHost(forwardedHost) {
+			return forwardedHost
+		}
+	}
+	return host
 }
 
 func isRoutablePublicHost(host string) bool {
