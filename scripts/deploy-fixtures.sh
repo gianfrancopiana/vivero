@@ -107,7 +107,7 @@ print(plan["id"])
 PY
 )"
 
-run_json apply bin/vivero deploy apply "$plan_id" --json --no-input
+run_json apply bin/vivero deploy apply "$plan_id" --confirm-production --json --no-input
 release_id="$(python3 - "$out/apply.json" "$ready_project/deploy-prepare.txt" "$ready_project/deploy-applied.txt" "$ready_project/deploy-smoke.txt" "$plan_id" <<'PY'
 import json
 import pathlib
@@ -177,7 +177,7 @@ assert payload.get("smoke", {}).get("ok") is True, payload
 assert release_id in proof, proof
 PY
 
-run_json apply-repeat bin/vivero deploy apply "$plan_id" --json --no-input
+run_json apply-repeat bin/vivero deploy apply "$plan_id" --confirm-production --json --no-input
 python3 - "$out/apply-repeat.json" "$ready_project/deploy-count.txt" "$release_id" <<'PY'
 import json
 import pathlib
@@ -205,7 +205,7 @@ assert any(event.get("action") == "status" and event.get("status") == "succeeded
 assert release_id in proof, proof
 PY
 
-run_json apply-after-status bin/vivero deploy apply "$plan_id" --json --no-input
+run_json apply-after-status bin/vivero deploy apply "$plan_id" --confirm-production --json --no-input
 python3 - "$out/apply-after-status.json" "$ready_project/deploy-count.txt" "$release_id" <<'PY'
 import json
 import pathlib
@@ -218,7 +218,7 @@ assert release.get("status") == "live-status", release
 assert count == "1", count
 PY
 
-run_json rollback bin/vivero release rollback deploy-ready "$release_id" --environment production --json --no-input
+run_json rollback bin/vivero release rollback deploy-ready "$release_id" --environment production --confirm-production --json --no-input
 rollback_id="$(python3 - "$out/rollback.json" "$ready_project/deploy-rollback.txt" "$release_id" <<'PY'
 import json
 import pathlib
@@ -234,7 +234,7 @@ print(release["id"])
 PY
 )"
 
-run_json rollback-repeat bin/vivero release rollback deploy-ready "$release_id" --environment production --json --no-input
+run_json rollback-repeat bin/vivero release rollback deploy-ready "$release_id" --environment production --confirm-production --json --no-input
 python3 - "$out/rollback-repeat.json" "$rollback_id" <<'PY'
 import json
 import pathlib
@@ -264,7 +264,7 @@ print(plan["id"])
 PY
 )"
 
-run_json apply-blue-green bin/vivero deploy apply "$blue_green_plan_id" --json --no-input
+run_json apply-blue-green bin/vivero deploy apply "$blue_green_plan_id" --confirm-production --json --no-input
 blue_green_release_id="$(python3 - "$out/apply-blue-green.json" "$blue_green_project/blue-green.log" "$blue_green_plan_id" <<'PY'
 import json
 import pathlib
@@ -298,7 +298,7 @@ assert release.get("activeSlot") == "green", release
 assert "status:green" in proof, proof
 PY
 
-run_json rollback-blue-green bin/vivero release rollback deploy-blue-green "$blue_green_release_id" --environment production --json --no-input
+run_json rollback-blue-green bin/vivero release rollback deploy-blue-green "$blue_green_release_id" --environment production --confirm-production --json --no-input
 python3 - "$out/rollback-blue-green.json" "$blue_green_project/blue-green-rollback.txt" "$blue_green_release_id" <<'PY'
 import json
 import pathlib
@@ -345,7 +345,7 @@ PY
 )"
 
 set +e
-VIVERO_HOME="$home/.vivero" HOME="$home" bin/vivero deploy apply "$blocked_plan_id" --json --no-input > "$out/apply-blocked.json" 2> "$out/apply-blocked.stderr"
+VIVERO_HOME="$home/.vivero" HOME="$home" bin/vivero deploy apply "$blocked_plan_id" --confirm-production --json --no-input > "$out/apply-blocked.json" 2> "$out/apply-blocked.stderr"
 apply_blocked_exit=$?
 set -e
 if [ "$apply_blocked_exit" -eq 0 ]; then

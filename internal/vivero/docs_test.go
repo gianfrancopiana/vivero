@@ -13,12 +13,12 @@ func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
 	}
 	body := string(readme)
 	for _, want := range []string{
-		"agent app-ops runtime",
+		"preview-first app-ops runtime",
 		"Preview lane",
-		"Deploy/release lane",
+		"Experimental deploy/release lane",
 		"Evidence/cache lane",
 		"the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
-		"Golden paths: preview fast, prove, deploy fast",
+		"Golden path: preview, prove, then guarded deploy-readiness",
 		"vivero preview up",
 		"vivero deploy plan",
 		"vivero release events",
@@ -50,7 +50,7 @@ func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
 		bodies[name] = string(body)
 	}
 
-	for _, want := range []string{"Preview lane", "Deploy/release lane", "Evidence/cache lane"} {
+	for _, want := range []string{"Preview lane", "Experimental deploy/release lane", "Evidence/cache lane"} {
 		if !strings.Contains(bodies["readme"], want) {
 			t.Fatalf("README should teach lane %q", want)
 		}

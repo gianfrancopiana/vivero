@@ -11,6 +11,7 @@ type ProductionDoctorResult struct {
 	OK          bool                         `json:"ok"`
 	Path        string                       `json:"path"`
 	Project     string                       `json:"project,omitempty"`
+	Profile     string                       `json:"profile,omitempty"`
 	Verdict     string                       `json:"verdict"`
 	Diagnostics []ProductionDoctorDiagnostic `json:"diagnostics"`
 }
@@ -41,7 +42,10 @@ func doctorProjectPath(args []string) string {
 	return "."
 }
 
-func (a *App) ProductionDoctor(path string) (ProductionDoctorResult, error) {
+func (a *App) ProductionDoctorForEnvironment(path, environment string) (ProductionDoctorResult, error) {
+	if strings.TrimSpace(environment) == "" {
+		environment = "production"
+	}
 	if strings.TrimSpace(path) == "" {
 		path = "."
 	}
@@ -57,6 +61,15 @@ func (a *App) ProductionDoctor(path string) (ProductionDoctorResult, error) {
 		report.addDiagnostic("error", "config-load", "", err.Error(), "Fix vivero.yml first, then rerun the production readiness doctor.")
 		report.finish()
 		return report, nil
+	}
+	if profiled, profile, profileErr := projectConfigForEnvironment(cfg, environment); profileErr != nil {
+		report.Project = cfg.Project.Name
+		report.addDiagnostic("error", "profile-load", "profiles", profileErr.Error(), "Fix the environment profile in vivero.yml before rerunning the production readiness doctor.")
+		report.finish()
+		return report, nil
+	} else {
+		cfg = profiled
+		report.Profile = profile
 	}
 	report.Project = cfg.Project.Name
 	report.addDiagnostic("info", "deploy-surface", "", "Vivero production deploys are app-owned commands gated by this read-only readiness check.", "Use deploy plan first; apply only plans whose production doctor diagnostics are not blocked.")

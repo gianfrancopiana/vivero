@@ -34,9 +34,13 @@ func (a *App) runDeploy(args []string, stdout, stderr io.Writer, jsonOut bool) i
 		}
 		return 0
 	case "apply":
-		pos := positionalArgs(args[1:])
+		cmdArgs := args[1:]
+		pos := positionalArgs(cmdArgs)
 		if len(pos) == 0 {
 			return errOut(stderr, jsonOut, missingArgError("deploy apply", "plan-id"))
+		}
+		if err := requireProductionConfirmation(cmdArgs, "deploy apply"); err != nil {
+			return errOut(stderr, jsonOut, err)
 		}
 		release, err := a.ApplyDeployPlan(pos[0])
 		if err != nil {
@@ -122,11 +126,15 @@ func (a *App) runRelease(args []string, stdout, stderr io.Writer, jsonOut bool) 
 		}
 		return 0
 	case "rollback":
-		pos := positionalArgs(args[1:])
+		cmdArgs := args[1:]
+		pos := positionalArgs(cmdArgs)
 		if len(pos) < 2 {
 			return errOut(stderr, jsonOut, missingRequiredError("release rollback", "project and release-id", "vivero help release rollback"))
 		}
-		environment, _ := flagValue(args[1:], "--environment")
+		if err := requireProductionConfirmation(cmdArgs, "release rollback"); err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		environment, _ := flagValue(cmdArgs, "--environment")
 		release, err := a.RollbackRelease(pos[0], pos[1], environment)
 		if err != nil {
 			if jsonOut && strings.TrimSpace(release.ID) != "" {
@@ -195,4 +203,11 @@ func releaseSmokeHuman(release ReleaseRecord, smoke ReleaseSmokeResult) string {
 
 func releaseFailurePayload(release ReleaseRecord, err error) map[string]any {
 	return attachEvidenceShape(map[string]any{"release": release, "error": cliErrorPayload(err).Error}, releaseTargetRef(release))
+}
+
+func requireProductionConfirmation(args []string, command string) error {
+	if hasArg(args, "--confirm-production") {
+		return nil
+	}
+	return newCLIError("production_confirmation_required", command+" requires --confirm-production", "Review the deploy plan or release target, get explicit operator approval, then rerun with --confirm-production. This is not implied by --no-input.", map[string]string{"command": command, "required": "--confirm-production"})
 }

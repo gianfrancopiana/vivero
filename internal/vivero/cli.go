@@ -137,7 +137,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		if len(rest) > 0 && rest[0] == "production" {
 			path := doctorProjectPath(rest[1:])
-			report, err := a.ProductionDoctor(path)
+			environment, _ := flagValue(rest[1:], "--environment")
+			report, err := a.ProductionDoctorForEnvironment(path, environment)
 			if err != nil {
 				return errOut(stderr, jsonOut, err)
 			}
@@ -149,7 +150,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		if hasArg(rest, "--production") {
 			path := doctorProjectPath(rest)
-			report, err := a.ProductionDoctor(path)
+			environment, _ := flagValue(rest, "--environment")
+			report, err := a.ProductionDoctorForEnvironment(path, environment)
 			if err != nil {
 				return errOut(stderr, jsonOut, err)
 			}

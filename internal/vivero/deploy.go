@@ -114,10 +114,15 @@ func (a *App) DeployPlan(path, environment string) (DeployPlan, error) {
 	if err != nil {
 		return DeployPlan{}, err
 	}
+	if profiled, _, profileErr := projectConfigForEnvironment(cfg, environment); profileErr != nil {
+		return DeployPlan{}, profileErr
+	} else {
+		cfg = profiled
+	}
 	if abs, absErr := filepath.Abs(root); absErr == nil {
 		root = abs
 	}
-	doctor, err := a.ProductionDoctor(root)
+	doctor, err := a.ProductionDoctorForEnvironment(root, environment)
 	if err != nil {
 		return DeployPlan{}, err
 	}

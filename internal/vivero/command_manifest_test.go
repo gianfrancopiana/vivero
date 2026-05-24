@@ -148,6 +148,25 @@ func TestCommandManifestProductionCommandsDiscloseRemoteEffects(t *testing.T) {
 	}
 }
 
+func TestCommandManifestFramesProductionLaneAsExperimentalAndGuarded(t *testing.T) {
+	commands := commandManifests()
+	for _, name := range []string{"doctor production", "deploy plan", "deploy apply", "release status", "release smoke", "release rollback"} {
+		cmd := mustManifestForTest(t, commands, name)
+		if got := cmd.Schema["featureStatus"]; got != "experimental" {
+			t.Fatalf("%s should mark production lane featureStatus=experimental, got %#v", name, got)
+		}
+	}
+	for _, name := range []string{"deploy apply", "release rollback"} {
+		cmd := mustManifestForTest(t, commands, name)
+		if got := cmd.Schema["requiresConfirmProduction"]; got != true {
+			t.Fatalf("%s should require --confirm-production in schema, got %#v", name, got)
+		}
+		if !manifestHasFlag(cmd, "--confirm-production") || !strings.Contains(cmd.Usage, "--confirm-production") {
+			t.Fatalf("%s should publish --confirm-production in flags and usage: %#v", name, cmd)
+		}
+	}
+}
+
 func TestCommandManifestExamplesResolveToManifestCommands(t *testing.T) {
 	commands := commandManifests()
 	for _, cmd := range commands {
@@ -272,4 +291,13 @@ func stringSet(values []string) map[string]bool {
 		out[value] = true
 	}
 	return out
+}
+
+func manifestHasFlag(cmd CommandManifest, name string) bool {
+	for _, flag := range cmd.Flags {
+		if flag.Name == name {
+			return true
+		}
+	}
+	return false
 }

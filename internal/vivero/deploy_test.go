@@ -31,7 +31,7 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 		t.Fatalf("plan should include immutable service image: %#v", plan.Services)
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -71,7 +71,7 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 		t.Fatalf("unexpected release status: %#v", statusPayload)
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", applyPayload.Release.ID, "--environment", "production", "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", applyPayload.Release.ID, "--environment", "production", "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("release rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -94,7 +94,7 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 		t.Fatalf("rollback proof should include release id: %s", rollbackBytes)
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", applyPayload.Release.ID, "--environment", "production", "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", applyPayload.Release.ID, "--environment", "production", "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("repeat release rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -106,6 +106,36 @@ func TestRunDeployPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	}
 	if repeatRollbackPayload.Release.ID != rollbackPayload.Release.ID {
 		t.Fatalf("repeat rollback should return existing rollback release, got %#v want %#v", repeatRollbackPayload.Release, rollbackPayload.Release)
+	}
+}
+
+func TestProductionMutationsRequireExplicitConfirmation(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeDeployFixture(t, true)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var planPayload struct {
+		Plan DeployPlan `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &planPayload); err != nil {
+		t.Fatalf("invalid deploy plan JSON: %v stdout=%s", err, stdout)
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planPayload.Plan.ID, "--json", "--no-input")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "production_confirmation_required") || !strings.Contains(stderr, "--confirm-production") {
+		t.Fatalf("deploy apply without confirmation should fail with actionable JSON, code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	release, err := (&App{Home: home}).ApplyDeployPlan(planPayload.Plan.ID)
+	if err != nil {
+		t.Fatalf("test setup apply failed: %v", err)
+	}
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo", release.ID, "--environment", "production", "--json", "--no-input")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "production_confirmation_required") || !strings.Contains(stderr, "--confirm-production") {
+		t.Fatalf("release rollback without confirmation should fail with actionable JSON, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 }
 
@@ -123,7 +153,7 @@ func TestRunReleaseEvidenceCommandsExposeEventsLogsAndSmoke(t *testing.T) {
 	}
 
 	planID := plan["id"].(string)
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -247,7 +277,7 @@ func TestRunReleaseSmokeFailureReturnsEvidenceJSON(t *testing.T) {
 		t.Fatalf("release smoke failure should update release evidence: %s", stdout)
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "unsafe status smoke_failed") {
 		t.Fatalf("reapplying a plan with unsafe current release should be blocked, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -285,7 +315,7 @@ func TestRunReleaseSmokeFailureReturnsEvidenceJSON(t *testing.T) {
 		seenPaths[path] = true
 	}
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("reapplying recovered release should return existing release, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -311,7 +341,7 @@ func TestRunReleaseSmokeMissingCommandReturnsActionableJSON(t *testing.T) {
 		t.Fatalf("deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -360,7 +390,7 @@ func TestCommandDeployPrepareCachePhasesAndEvidence(t *testing.T) {
 	}
 
 	planID := planMap["id"].(string)
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -436,7 +466,7 @@ func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	}
 
 	planID := plan["id"].(string)
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("blue/green deploy apply exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -473,7 +503,7 @@ func TestRunDeployBlueGreenPlanApplyStatusRollbackJSONContract(t *testing.T) {
 	}
 
 	releaseID := applyRelease["id"].(string)
-	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo-bg", releaseID, "--environment", "production", "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "release", "rollback", "demo-bg", releaseID, "--environment", "production", "--confirm-production", "--json", "--no-input")
 	if code != 0 || stderr != "" {
 		t.Fatalf("blue/green rollback exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -528,7 +558,7 @@ func TestRunDeployBlueGreenApplyStopsBeforePromoteWhenSmokeFails(t *testing.T) {
 	}
 	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 1 || stderr != "" {
 		t.Fatalf("blue/green apply with failing smoke should return release evidence JSON before promote, exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -569,6 +599,102 @@ func TestRunDeployPlanBlocksMutablePreviewConfig(t *testing.T) {
 	}
 	if !codes["mutable-source"] || !codes["mutable-build"] {
 		t.Fatalf("blocked plan should include production doctor diagnostics, got %#v", planPayload.Plan.Diagnostics)
+	}
+}
+
+func TestDeployPlanUsesEnvironmentProfileForProductionReadiness(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeProfiledDeployFixture(t)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "doctor", "production", "--project", projectDir, "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("profiled production doctor default environment exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var doctorPayload struct {
+		ProductionDoctor struct {
+			OK          bool                         `json:"ok"`
+			Profile     string                       `json:"profile,omitempty"`
+			Diagnostics []ProductionDoctorDiagnostic `json:"diagnostics"`
+		} `json:"productionDoctor"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &doctorPayload); err != nil {
+		t.Fatalf("invalid production doctor JSON: %v stdout=%s", err, stdout)
+	}
+	if !doctorPayload.ProductionDoctor.OK || doctorPayload.ProductionDoctor.Profile != "production" {
+		t.Fatalf("production doctor should apply environment profile: %#v", doctorPayload.ProductionDoctor)
+	}
+	for _, diagnostic := range doctorPayload.ProductionDoctor.Diagnostics {
+		if diagnostic.Code == "mutable-source" || diagnostic.Code == "mutable-build" || diagnostic.Code == "backup-policy-missing" {
+			t.Fatalf("production doctor should ignore preview-only mutable services under environment profile: %#v", doctorPayload.ProductionDoctor.Diagnostics)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("profiled deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var planPayload struct {
+		Plan DeployPlan `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &planPayload); err != nil {
+		t.Fatalf("invalid profiled deploy plan JSON: %v stdout=%s", err, stdout)
+	}
+	plan := planPayload.Plan
+	if !plan.OK || plan.Verdict != "ready" || len(plan.Services) != 1 || plan.Services[0].Name != "prod-web" || !strings.Contains(plan.Services[0].Image, "@sha256:") {
+		t.Fatalf("deploy plan should use only production-profile services: %#v", plan)
+	}
+	for _, diagnostic := range plan.Diagnostics {
+		if diagnostic.Code == "mutable-source" || diagnostic.Code == "mutable-build" || diagnostic.Code == "backup-policy-missing" {
+			t.Fatalf("deploy plan should not inherit preview-only diagnostics: %#v", plan.Diagnostics)
+		}
+	}
+}
+
+func TestDeployPlanAllowsEnvironmentProfileWithoutProductionServices(t *testing.T) {
+	home := t.TempDir()
+	projectDir := writeProfiledPaaSDeployFixture(t)
+
+	code, stdout, stderr := runCLITestCommand(t, home, "doctor", "production", "--project", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("paas production doctor exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var doctorPayload struct {
+		ProductionDoctor struct {
+			OK          bool                         `json:"ok"`
+			Profile     string                       `json:"profile,omitempty"`
+			Diagnostics []ProductionDoctorDiagnostic `json:"diagnostics"`
+		} `json:"productionDoctor"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &doctorPayload); err != nil {
+		t.Fatalf("invalid production doctor JSON: %v stdout=%s", err, stdout)
+	}
+	if !doctorPayload.ProductionDoctor.OK || doctorPayload.ProductionDoctor.Profile != "production" {
+		t.Fatalf("production doctor should allow an app-owned PaaS profile with no Vivero production services: %#v", doctorPayload.ProductionDoctor)
+	}
+	for _, diagnostic := range doctorPayload.ProductionDoctor.Diagnostics {
+		if diagnostic.Code == "mutable-source" || diagnostic.Code == "mutable-build" || diagnostic.Code == "backup-policy-missing" {
+			t.Fatalf("production doctor should ignore preview-only services/backing services under empty production profile: %#v", doctorPayload.ProductionDoctor.Diagnostics)
+		}
+	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "plan", projectDir, "--environment", "production", "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("paas deploy plan exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var planPayload struct {
+		Plan DeployPlan `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &planPayload); err != nil {
+		t.Fatalf("invalid paas deploy plan JSON: %v stdout=%s", err, stdout)
+	}
+	plan := planPayload.Plan
+	if !plan.OK || plan.Verdict != "ready" || len(plan.Services) != 0 || plan.ApplyCommand == "" || plan.RollbackCommand == "" {
+		t.Fatalf("deploy plan should support app-owned PaaS deploys without Vivero production service artifacts: %#v", plan)
+	}
+	for _, diagnostic := range plan.Diagnostics {
+		if diagnostic.Code == "mutable-source" || diagnostic.Code == "mutable-build" || diagnostic.Code == "backup-policy-missing" {
+			t.Fatalf("deploy plan should not inherit preview-only diagnostics from empty production profile: %#v", plan.Diagnostics)
+		}
 	}
 }
 
@@ -666,7 +792,7 @@ func TestRunDeployApplyFailureReturnsReleaseEvidenceJSON(t *testing.T) {
 	}
 	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 1 || stderr != "" {
 		t.Fatalf("failed deploy apply should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -699,7 +825,7 @@ func TestRunDeployBlueGreenPromoteFailureReturnsEvidenceJSON(t *testing.T) {
 	}
 	planID := decodeJSONMap(t, stdout)["plan"].(map[string]any)["id"].(string)
 
-	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--json", "--no-input")
+	code, stdout, stderr = runCLITestCommand(t, home, "deploy", "apply", planID, "--confirm-production", "--json", "--no-input")
 	if code != 1 || stderr != "" {
 		t.Fatalf("blue/green promote failure should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -779,7 +905,7 @@ func TestRunReleaseRollbackFailureReturnsEvidenceJSONAndKeepsCurrent(t *testing.
 		t.Fatal(err)
 	}
 
-	code, stdout, stderr := runCLITestCommand(t, home, "release", "rollback", "demo-evidence", release.ID, "--environment", "production", "--json", "--no-input")
+	code, stdout, stderr := runCLITestCommand(t, home, "release", "rollback", "demo-evidence", release.ID, "--environment", "production", "--confirm-production", "--json", "--no-input")
 	if code != 1 || stderr != "" {
 		t.Fatalf("failed rollback should return release evidence JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -859,7 +985,7 @@ func TestDeployApplyLockContentionReturnsStableJSONError(t *testing.T) {
 	}
 	defer unlock()
 
-	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--json", "--no-input")
+	code, stdout, stderr := runCLITestCommand(t, home, "deploy", "apply", plan.ID, "--confirm-production", "--json", "--no-input")
 	if code != 1 || stdout != "" {
 		t.Fatalf("lock contention should return a JSON error on stderr only, code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -874,7 +1000,7 @@ func TestDeployAndReleaseCommandsAreDiscoverable(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("deploy plan help exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "plan a production deploy") || !strings.Contains(stdout, "vivero deploy plan") || !strings.Contains(stdout, "--environment NAME") {
+	if !strings.Contains(stdout, "plan an experimental production deploy") || !strings.Contains(stdout, "vivero deploy plan") || !strings.Contains(stdout, "--environment NAME") {
 		t.Fatalf("deploy plan help is not discoverable/actionable:\n%s", stdout)
 	}
 
@@ -1158,6 +1284,121 @@ deploy:
             - type=local,src=.vivero/cache/build/web
           to:
             - type=local,dest=.vivero/cache/build/web,mode=max
+`
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeProfiledDeployFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	config := `project:
+  name: demo-profiled
+sources:
+  app:
+    mode: external
+    path: .
+backingServices:
+  preview-db:
+    image: postgres:16-alpine
+    dependencyVolumes:
+      - name: preview_pgdata
+        target: /var/lib/postgresql/data
+        lifetime: smart
+    health:
+      command: pg_isready -U postgres
+      timeout: 30s
+services:
+  preview-web:
+    source: app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+  prod-web:
+    image: registry.example.com/demo-profiled@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+profiles:
+  preview:
+    services: [preview-web]
+    backingServices: [preview-db]
+  production:
+    services: [prod-web]
+    backingServices: []
+deploy:
+  environments:
+    production:
+      applyCommand: 'printf applied'
+      statusCommand: 'printf applied'
+      rollbackCommand: 'printf rollback'
+`
+	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeProfiledPaaSDeployFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	config := `project:
+  name: demo-paas
+sources:
+  app:
+    mode: external
+    path: .
+backingServices:
+  preview-db:
+    image: postgres:16-alpine
+    dependencyVolumes:
+      - name: preview_pgdata
+        target: /var/lib/postgresql/data
+        lifetime: smart
+    health:
+      command: pg_isready -U postgres
+      timeout: 30s
+services:
+  web:
+    source: app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    port: 3000
+    health:
+      path: /
+      timeout: 30s
+    resources:
+      cpus: '1'
+      memory: 512m
+profiles:
+  preview:
+    services: [web]
+    backingServices: [preview-db]
+  production:
+    services: []
+    backingServices: []
+deploy:
+  environments:
+    production:
+      prepareCommand: 'printf prepare'
+      applyCommand: 'printf deploy'
+      statusCommand: 'printf status'
+      smokeCommand: 'printf smoke'
+      rollbackCommand: 'printf rollback'
 `
 	if err := os.WriteFile(filepath.Join(dir, "vivero.yml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)

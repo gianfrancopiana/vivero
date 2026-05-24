@@ -32,7 +32,7 @@ services:
         lifetime: project
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ services:
       timeout: 30s
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ services:
       timeout: 30s
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ services:
       timeout: 30s
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ services:
       timeout: 30s
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ backingServices:
         lifetime: project
 `)
 	a := &App{Home: t.TempDir()}
-	report, err := a.ProductionDoctor(root)
+	report, err := a.ProductionDoctorForEnvironment(root, "production")
 	if err != nil {
 		t.Fatal(err)
 	}

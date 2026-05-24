@@ -2,15 +2,15 @@
 
 Vivero is Spanish for “nursery”: a place to grow app changes until they are ready.
 
-For coding agents, Vivero is an agent app-ops runtime. It has two first-class lanes — preview and deploy/release — plus one shared evidence/cache lane for logs, health checks, screenshots, QA reports, recordings, release events, command output artifacts, and cache visibility.
+For coding agents, Vivero is a preview-first app-ops runtime. Its core job is to start a realistic local or public preview, run health and smoke checks, collect screenshots/recordings/QA reports, produce a final proof bundle, and tear down cleanly. The deploy/release lane is experimental and guarded: it records app-owned production readiness and release evidence, but Vivero does not become your production platform.
 
-Vivero is local-first. The boundary is simple: **the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence.** Keep Dockerfiles, scripts, migrations, env contracts, secrets, and infra logic in the app repo. Use `vivero.yml` to point at them and describe how agents should operate the app.
+Vivero is local-first. The boundary is simple: **the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence.** Keep Dockerfiles, scripts, migrations, env contracts, secrets, provider behavior, and infra logic in the app repo. Use `vivero.yml` to point at them and describe how agents should operate the app.
 
 ## What Vivero gives agents
 
-- **Preview lane:** isolated, disposable previews for local repos, branches, or worktrees.
-- **Deploy/release lane:** explicit `deploy` and `release` commands for app-owned production logic.
+- **Preview lane:** isolated, disposable previews for local repos, branches, worktrees, and public QA proof.
 - **Evidence/cache lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, release artifacts, and cache controls.
+- **Experimental deploy/release lane:** explicit, guarded `deploy` and `release` commands for app-owned production readiness, status, smoke evidence, and rollback records.
 - JSON output for every agent-facing workflow.
 - Unique ports, networks, and state per preview.
 - Fast-path primitives: Docker build cache, warm dependency volumes, setup/prebuild reuse, deploy prepare/cache hints, and timing evidence.
@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/gianfrancopiana/vivero/main/scripts
 
 See [docs/install.md](docs/install.md) for pinned installs, manual checksum verification, Homebrew, and `gh attestation verify`. Maintainers should use [docs/releasing.md](docs/releasing.md) for tag, postflight, and upgrade-cadence checks.
 
-## Golden paths: preview fast, prove, deploy fast
+## Golden path: preview, prove, then guarded deploy-readiness
 
 Start with the certified example. It is small, local, and CI-proven:
 
@@ -49,7 +49,7 @@ That target runs `examples/agent-demo` through config doctor, project sync, Dock
 VIVERO_EXAMPLE_BROWSER_QA=1 make example-e2e
 ```
 
-Then use the same lane shape on your app: start a preview, collect evidence, and only then plan or apply a deploy.
+Then use the same shape on your app: start a preview, collect evidence, and only then run read-only production doctor/plan commands. Mutating production commands stay behind explicit operator approval and `--confirm-production`.
 
 ### 1. Preview a change
 
@@ -82,16 +82,16 @@ vivero release logs release:<release-id> --json --no-input
 vivero release smoke deploy-ready --environment production --json --no-input
 ```
 
-### 3. Plan and apply a deploy
+### 3. Plan production readiness (experimental)
 
-Vivero does not own your production infrastructure. It plans and records app-owned deploy commands.
+Vivero does not own your production infrastructure. Production commands are experimental evidence/readiness tooling around app-owned deploy scripts. `doctor production`, `deploy plan`, `release status`, and `release smoke` are for reviewable readiness and evidence; `deploy apply` and `release rollback` require explicit operator approval plus `--confirm-production`.
 
 ```sh
 vivero doctor production --project examples/deploy-command --json --no-input
 vivero deploy plan examples/deploy-command --environment production --json --no-input
-vivero deploy apply <plan-id> --json --no-input
+vivero deploy apply <plan-id> --confirm-production --json --no-input
 vivero release status deploy-ready --environment production --json --no-input
-vivero release rollback deploy-ready <release-id> --environment production --json --no-input
+vivero release rollback deploy-ready <release-id> --environment production --confirm-production --json --no-input
 ```
 
 For blue/green deploys, configure app-owned slot commands and let Vivero enforce prepare → smoke → promote → rollback state transitions. The certified example lives at `examples/deploy-blue-green`.
@@ -123,7 +123,7 @@ Certified examples are real committed fixtures, not aspirational snippets. See [
 The fixture set stays intentionally small. Each fixture exists because it proves an invariant class that frontier agents can reuse without memorizing project-specific behavior.
 
 - **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, and cleanup. Prove the boring path with `make example-e2e`; prove messy preview shapes with `make nasty-integration-fixtures`.
-- **Deploy/release invariants:** production doctor, read-only plan, app-owned prepare/apply/smoke/status/rollback commands, locks, idempotency, release history, and blue/green slot transitions. Prove them with `make deploy-fixtures`.
+- **Deploy/release invariants:** production doctor and read-only plan are reviewable before side effects; app-owned apply/smoke/status/rollback commands run with Vivero IDs, locks, idempotency, release history, and blue/green slot transitions; mutating apply/rollback commands require `--confirm-production`. Prove them with `make deploy-fixtures`.
 - **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
 
 Add a new fixture only when it proves a new invariant class. Do not grow a framework zoo of example apps that all prove the same thing.

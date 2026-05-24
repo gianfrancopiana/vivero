@@ -7,7 +7,7 @@ import (
 
 func rootHelp() string {
 	var b strings.Builder
-	b.WriteString("vivero - local-first app operations for agents\n\n")
+	b.WriteString("vivero - preview-first app operations for agents\n\n")
 	b.WriteString("Examples:\n")
 	for _, line := range []string{
 		"  # Preview: start, inspect, prove, and tear down an isolated app runtime",
@@ -17,9 +17,9 @@ func rootHelp() string {
 		"  vivero preview qa run my-app-local --scope all --target local --json --no-input",
 		"  vivero preview down my-app-local --discard --json --no-input",
 		"",
-		"  # Deploy/release: plan, apply, inspect, and roll back app-owned production logic",
+		"  # Experimental deploy/release: plan, inspect, and guard app-owned production logic",
 		"  vivero deploy plan . --environment production --json --no-input",
-		"  vivero deploy apply <plan-id> --json --no-input",
+		"  vivero deploy apply <plan-id> --confirm-production --json --no-input",
 		"  vivero release status my-app --environment production --json --no-input",
 		"  vivero release events release:<release-id> --json --no-input",
 		"  vivero release logs release:<release-id> --json --no-input",
