@@ -439,6 +439,51 @@ func TestNamedTunnelPublicURLUsesStableHostnameTemplate(t *testing.T) {
 	}
 }
 
+func TestNamedTunnelPublicURLSupportsBranchProjectHostname(t *testing.T) {
+	url, err := publicURLForService(PublicConfig{
+		Provider:         "cloudflare",
+		Mode:             "named-tunnel",
+		BaseDomain:       "pocketmake.com",
+		HostnameTemplate: "{{ .BranchSlug }}-{{ .ProjectSlug }}.{{ .BaseDomain }}",
+	}, UpRequest{
+		Project:  "Gumroad Preview",
+		ID:       "ignored-preview-id",
+		Metadata: map[string]string{"branch": "feature/Checkout Flow"},
+	}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "https://feature-checkout-flow-gumroad-preview.pocketmake.com" {
+		t.Fatalf("url = %s", url)
+	}
+}
+
+func TestEnsureCanonicalPreviewMetadataSetsBranchFromSourceRefOrDefaultRef(t *testing.T) {
+	t.Run("source ref override wins", func(t *testing.T) {
+		req := UpRequest{Sources: map[string]string{"app.ref": "feature/Checkout Flow"}}
+		ensureCanonicalPreviewMetadata(&req, ProjectConfig{Sources: map[string]SourceConfig{"app": {DefaultRef: "main"}}})
+		if got := req.Metadata["branch"]; got != "feature/Checkout Flow" {
+			t.Fatalf("branch metadata = %q", got)
+		}
+	})
+
+	t.Run("default ref fills missing branch", func(t *testing.T) {
+		req := UpRequest{}
+		ensureCanonicalPreviewMetadata(&req, ProjectConfig{Sources: map[string]SourceConfig{"app": {DefaultRef: "main"}}})
+		if got := req.Metadata["branch"]; got != "main" {
+			t.Fatalf("branch metadata = %q", got)
+		}
+	})
+
+	t.Run("explicit branch is preserved", func(t *testing.T) {
+		req := UpRequest{Metadata: map[string]string{"branch": "release"}, Sources: map[string]string{"app.ref": "feature"}}
+		ensureCanonicalPreviewMetadata(&req, ProjectConfig{Sources: map[string]SourceConfig{"app": {DefaultRef: "main"}}})
+		if got := req.Metadata["branch"]; got != "release" {
+			t.Fatalf("branch metadata = %q", got)
+		}
+	})
+}
+
 func TestFixedPublicHostnameOverridesTemplate(t *testing.T) {
 	url, err := publicURLForService(PublicConfig{
 		Provider:         "cloudflare",

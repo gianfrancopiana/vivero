@@ -25,6 +25,7 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		return PreviewRecord{}, err
 	}
 	req.Profile = activeProfile
+	ensureCanonicalPreviewMetadata(&req, runtimeConfig)
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
 	}
