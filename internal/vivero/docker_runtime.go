@@ -219,6 +219,9 @@ func (a *App) startDockerService(projectName, previewID, service string, svc Ser
 }
 
 func startDockerService(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error) {
+	if serviceRuntime(svc) == "compose" {
+		return startDockerComposeService(home, previewID, service, svc, sources, env)
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return "", fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
 	}
@@ -254,6 +257,9 @@ func (a *App) runDockerOneShot(projectName, previewID, service string, svc Servi
 }
 
 func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
+	if serviceRuntime(svc) == "compose" {
+		return nil, fmt.Errorf("setup.afterSeeds does not support runtime compose for service %s; keep setup in the app-owned Compose entrypoint or scripts", service)
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
 	}

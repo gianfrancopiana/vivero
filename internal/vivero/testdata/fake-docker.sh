@@ -64,6 +64,32 @@ case "$cmd" in
         echo "$name"
         exit 0
         ;;
+      ls)
+        compose_filter=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -q) shift ;;
+            --filter)
+              case "$2" in
+                label=com.docker.compose.project=*) compose_filter="${2#label=com.docker.compose.project=}" ;;
+              esac
+              shift 2
+              ;;
+            *) shift ;;
+          esac
+        done
+        for f in "$state"/compose-volume-*; do
+          [ -e "$f" ] || continue
+          volume="$(basename "$f")"
+          volume="${volume#compose-volume-}"
+          if [ -n "$compose_filter" ]; then
+            [ -f "$state/$volume.compose-project" ] || continue
+            [ "$(cat "$state/$volume.compose-project")" = "$compose_filter" ] || continue
+          fi
+          echo "$volume"
+        done
+        exit 0
+        ;;
     esac
     echo "unsupported docker volume command $sub" >&2
     exit 2
@@ -122,14 +148,96 @@ case "$cmd" in
     echo "unsupported docker buildx command $sub" >&2
     exit 2
     ;;
+  compose)
+    files=""
+    project=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -f|--file) files="$files $2"; shift 2 ;;
+        -p|--project-name) project="$2"; shift 2 ;;
+        --project-directory) shift 2 ;;
+        *) break ;;
+      esac
+    done
+    sub="${1:-}"
+    if [ $# -gt 0 ]; then shift; fi
+    case "$sub" in
+      config)
+        if [ "${1:-}" = "--services" ]; then
+          printf '%s\n' ${FAKE_DOCKER_COMPOSE_SERVICES:-web}
+          exit 0
+        fi
+        ;;
+      up)
+        service=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -d|--detach|--remove-orphans|--build) shift ;;
+            --*) shift ;;
+            *) service="$1"; shift ;;
+          esac
+        done
+        [ -n "$service" ] || service="web"
+        [ -n "$project" ] || project="fake-compose"
+        name="compose-${project}-${service}"
+        preview=""
+        override=""
+        for f in $files; do override="$f"; done
+        if [ -n "$override" ] && [ -f "$override" ]; then
+          preview="$(sed -n 's/.*vivero.preview: *["'\'' ]*\([^"'\'' ]*\).*/\1/p' "$override" | head -n1)"
+        fi
+        [ -n "$preview" ] && printf '%s' "$preview" > "$state/$name.preview"
+        printf '%s' "$project" > "$state/$name.compose-project"
+        printf '%s' "$service" > "$state/$name.service"
+        printf '%s' "$(pwd)" > "$state/$name.cwd"
+        : > "$state/$name.ports"
+        if [ -n "$override" ] && [ -f "$override" ]; then
+          sed -n 's/.*127\.0\.0\.1::\([0-9][0-9]*\).*/\1/p' "$override" | while IFS= read -r port; do
+            [ -n "$port" ] || continue
+            printf '%s/tcp|127.0.0.1:%s\n' "$port" "$port" >> "$state/$name.ports"
+          done
+        fi
+        if [ ! -s "$state/$name.ports" ]; then
+          printf '3000/tcp|127.0.0.1:3000\n' >> "$state/$name.ports"
+        fi
+        (sleep 3600) > "$state/$name.log" 2>&1 &
+        echo $! > "$state/$name.pid"
+        echo "$name"
+        exit 0
+        ;;
+      ps)
+        if [ "${1:-}" = "-q" ]; then shift; fi
+        service="${1:-web}"
+        [ -n "$project" ] || project="fake-compose"
+        name="compose-${project}-${service}"
+        if [ -f "$state/$name.pid" ]; then echo "$name"; exit 0; fi
+        exit 1
+        ;;
+      down)
+        [ -n "$project" ] || project="fake-compose"
+        for f in "$state"/*.compose-project; do
+          [ -e "$f" ] || continue
+          name="$(basename "$f" .compose-project)"
+          [ "$(cat "$f")" = "$project" ] || continue
+          if [ -f "$state/$name.pid" ]; then kill "$(cat "$state/$name.pid")" 2>/dev/null || true; fi
+          rm -f "$state/$name.pid" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
+        done
+        exit 0
+        ;;
+    esac
+    echo "unsupported docker compose command $sub" >&2
+    exit 2
+    ;;
   ps)
     preview_filter=""
+    compose_filter=""
     while [ $# -gt 0 ]; do
       case "$1" in
         -a|-q|-aq|-qa) shift ;;
         --filter)
           case "$2" in
             label=vivero.preview=*) preview_filter="${2#label=vivero.preview=}" ;;
+            label=com.docker.compose.project=*) compose_filter="${2#label=com.docker.compose.project=}" ;;
           esac
           shift 2
           ;;
@@ -143,6 +251,10 @@ case "$cmd" in
         [ -f "$state/$name.preview" ] || continue
         [ "$(cat "$state/$name.preview")" = "$preview_filter" ] || continue
       fi
+      if [ -n "$compose_filter" ]; then
+        [ -f "$state/$name.compose-project" ] || continue
+        [ "$(cat "$state/$name.compose-project")" = "$compose_filter" ] || continue
+      fi
       echo "$name"
     done
     exit 0
@@ -154,7 +266,7 @@ case "$cmd" in
       name="${1:-}"
       if [ -n "$name" ] && [ -f "$state/$name.pid" ]; then
         kill "$(cat "$state/$name.pid")" 2>/dev/null || true
-        rm -f "$state/$name.pid" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd"
+        rm -f "$state/$name.pid" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
       fi
       shift || true
     done

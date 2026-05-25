@@ -12,6 +12,7 @@ type containerRuntime interface {
 	ContainerLogs(containerID string, limit int) ([]string, error)
 	ContainerExists(containerID string) bool
 	RemoveContainer(containerID string) (missing bool, output string, err error)
+	RemoveComposeProject(previewID, service string) error
 	RemoveContainersForPreview(previewID string) error
 	RemoveNetwork(previewID string) error
 	VolumeExists(name string) bool
@@ -69,6 +70,10 @@ func (dockerContainerRuntime) RemoveContainer(containerID string) (bool, string,
 		return false, string(out), nil
 	}
 	return isDockerNoSuchContainer(string(out)), string(out), err
+}
+
+func (dockerContainerRuntime) RemoveComposeProject(previewID, service string) error {
+	return removeDockerComposeProject(previewID, service)
 }
 
 func (dockerContainerRuntime) RemoveContainersForPreview(previewID string) error {

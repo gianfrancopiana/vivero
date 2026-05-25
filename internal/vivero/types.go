@@ -23,6 +23,7 @@ type ProjectMeta = schema.ProjectMeta
 type SourceConfig = schema.SourceConfig
 type RuntimeCommand = schema.RuntimeCommand
 type ServiceConfig = schema.ServiceConfig
+type ComposeConfig = schema.ComposeConfig
 type PortConfig = schema.PortConfig
 type ImageBuildConfig = schema.ImageBuildConfig
 type ImageBuildCacheConfig = schema.ImageBuildCacheConfig

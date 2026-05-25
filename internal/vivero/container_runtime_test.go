@@ -19,23 +19,24 @@ type fakeContainerRuntime struct {
 	containerID string
 	published   []PreviewPort
 
-	built             []dockerBuildSpec
-	ensuredNetworks   []string
-	startedServices   []string
-	runOnceCommands   []string
-	publishedRequests []string
-	healthCommands    []string
-	removedContainers []string
-	removedPreviews   []string
-	removedNetworks   []string
-	ensuredVolumes    []string
-	removedVolumes    []string
-	removedImages     []string
-	copiedVolumes     []string
-	containers        map[string]bool
-	volumes           map[string]bool
-	images            map[string]bool
-	logs              map[string][]string
+	built                  []dockerBuildSpec
+	ensuredNetworks        []string
+	startedServices        []string
+	runOnceCommands        []string
+	publishedRequests      []string
+	healthCommands         []string
+	removedContainers      []string
+	removedComposeProjects []string
+	removedPreviews        []string
+	removedNetworks        []string
+	ensuredVolumes         []string
+	removedVolumes         []string
+	removedImages          []string
+	copiedVolumes          []string
+	containers             map[string]bool
+	volumes                map[string]bool
+	images                 map[string]bool
+	logs                   map[string][]string
 
 	startErr               error
 	publishedErr           error
@@ -112,6 +113,11 @@ func (f *fakeContainerRuntime) RemoveContainer(containerID string) (bool, string
 		delete(f.containers, containerID)
 	}
 	return f.removeContainerMissing, f.removeContainerOutput, f.removeContainerErr
+}
+
+func (f *fakeContainerRuntime) RemoveComposeProject(previewID, service string) error {
+	f.removedComposeProjects = append(f.removedComposeProjects, previewID+":"+service)
+	return nil
 }
 
 func (f *fakeContainerRuntime) RemoveContainersForPreview(previewID string) error {

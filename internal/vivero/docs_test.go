@@ -197,6 +197,40 @@ func TestCertifiedDeployExamplesUseAppOwnedScripts(t *testing.T) {
 	}
 }
 
+func TestGumroadExampleStaysThinAgainstAppOwnedCompose(t *testing.T) {
+	bodyBytes, err := os.ReadFile("../../examples/gumroad/vivero.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	for _, forbidden := range []string{
+		"backingServices:",
+		"setup:",
+		"DATABASE_HOST:",
+		"ELASTICSEARCH_HOST:",
+		"bundle install",
+		"npm install",
+		"mysql:",
+		"redis:",
+		"memcached:",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("gumroad example should not duplicate app runtime internals %q", forbidden)
+		}
+	}
+	_, cfg, err := loadProjectConfig("../../examples/gumroad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := cfg.Services["gumroad-web"]
+	if serviceRuntime(svc) != "compose" || svc.Compose.File != "docker-compose.yml" || svc.Compose.Service != "web" {
+		t.Fatalf("gumroad example should delegate runtime to app-owned compose stack: %#v", svc)
+	}
+	if svc.Image != "" || imageBuildConfigured(svc.Build) || !svc.Command.IsZero() || len(svc.DependencyVolumes) > 0 {
+		t.Fatalf("gumroad example should only keep preview-layer fields in Vivero YAML: %#v", svc)
+	}
+}
+
 func TestCertifiedFastPathExamplesExposeCacheContracts(t *testing.T) {
 	_, previewCfg, err := loadProjectConfig("../../examples/nasty-integration")
 	if err != nil {
@@ -281,8 +315,8 @@ func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 	body := string(skill)
 	for _, want := range []string{
 		"Keep `vivero.yml` as thin orchestration metadata",
-		"do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them",
-		"Reference app-owned images, Dockerfiles, or prebuild commands instead",
+		"do not copy Dockerfiles, compose files, dependency services, env contracts, volumes, or setup scripts into YAML when the app repo already owns them",
+		"app-owned Compose stack (`runtime: compose` + `compose.file`/`compose.service`)",
 		"Inline Dockerfiles are intentionally unsupported",
 	} {
 		if !strings.Contains(body, want) {
@@ -322,8 +356,8 @@ func TestGumroadExampleReferencesAppOwnedRuntimeAssets(t *testing.T) {
 	body := string(bodyBytes)
 	for _, want := range []string{
 		"Vivero owns preview orchestration",
-		"Gumroad owns the",
-		"instead of copying",
+		"Gumroad owns runtime assets",
+		"rather than copying Gumroad runtime internals",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("gumroad example should document thin runtime boundary with %q", want)
@@ -337,9 +371,9 @@ func TestGumroadExampleReferencesAppOwnedRuntimeAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	build := cfg.Services["gumroad-web"].Build
-	if build.Dockerfile != "docker/web/Dockerfile" {
-		t.Fatalf("bundled gumroad example should reference Gumroad's app-owned Dockerfile, got %q", build.Dockerfile)
+	svc := cfg.Services["gumroad-web"]
+	if serviceRuntime(svc) != "compose" || svc.Compose.File != "docker-compose.yml" || svc.Compose.Service != "web" {
+		t.Fatalf("bundled gumroad example should reference Gumroad's app-owned Compose stack, got %#v", svc.Compose)
 	}
 	if strings.Contains(body, "dockerfileInline") {
 		t.Fatal("bundled gumroad example should not inline Dockerfiles")

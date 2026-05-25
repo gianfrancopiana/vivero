@@ -122,6 +122,118 @@ services:
 	}
 }
 
+func TestLoadProjectConfigAllowsComposeRuntimeWithoutImage(t *testing.T) {
+	root := t.TempDir()
+	cfg := []byte(`project:
+  name: compose-app
+sources:
+  app:
+    path: .
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: rails
+    ports:
+      http:
+        container: 3000
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, loaded, err := loadProjectConfig(root)
+	if err != nil {
+		t.Fatalf("compose runtime should satisfy the container runtime requirement without duplicating image/build: %v", err)
+	}
+	if serviceRuntime(loaded.Services["web"]) != "compose" {
+		t.Fatalf("compose runtime not normalized: %#v", loaded.Services["web"])
+	}
+	if loaded.Services["web"].Compose.Service != "rails" {
+		t.Fatalf("compose service config not loaded: %#v", loaded.Services["web"].Compose)
+	}
+}
+
+func TestLoadProjectConfigRejectsComposeRuntimeDuplication(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "image", body: "    image: app/web:latest\n", want: "image/build"},
+		{name: "build", body: "    build:\n      context: .\n", want: "image/build"},
+		{name: "command", body: "    command: bundle exec rails s\n", want: "service command"},
+		{name: "dependency volume", body: "    dependencyVolumes:\n      - name: bundle\n        target: /bundle\n", want: "dependency volumes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfg := []byte(`project:
+  name: compose-duplication
+sources:
+  app:
+    path: .
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    ports:
+      http:
+        container: 3000
+` + tt.body)
+			if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := loadProjectConfig(root)
+			if err == nil {
+				t.Fatal("expected compose runtime duplication to be rejected")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error should mention %q: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadProjectConfigRejectsComposeRuntimeSetupSteps(t *testing.T) {
+	root := t.TempDir()
+	cfg := []byte(`project:
+  name: compose-setup
+sources:
+  app:
+    path: .
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    ports:
+      http:
+        container: 3000
+setup:
+  afterSeeds:
+    - service: web
+      command: bin/setup
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := loadProjectConfig(root)
+	if err == nil {
+		t.Fatal("expected compose setup step to be rejected")
+	}
+	if !strings.Contains(err.Error(), "app-owned Compose stack") {
+		t.Fatalf("error should point setup back to app-owned compose: %v", err)
+	}
+}
+
 func TestLoadProjectConfigRejectsInvalidBuildCacheSpecs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -205,6 +317,81 @@ backingServices:
 	}
 	if !strings.Contains(err.Error(), "service name redis is declared in both services and backingServices") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
+	home := t.TempDir()
+	spec := dockerComposeServiceSpec{
+		PreviewID:      "preview-pr-9",
+		Service:        "web-preview",
+		ComposeService: "web",
+		OverrideFile:   dockerComposeOverridePath(home, "preview-pr-9", "web-preview"),
+		Network:        dockerNetworkName("preview-pr-9"),
+		Ports:          []ServicePort{{Name: "http", Container: 3000, Protocol: "tcp"}},
+		Env:            map[string]string{"VIVERO_PUBLIC_URL": "https://preview.example"},
+	}
+	if err := writeDockerComposeOverride(spec, []string{"web", "db"}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(spec.OverrideFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yml := string(body)
+	for _, want := range []string{
+		"vivero.preview: preview-pr-9",
+		"vivero.service: web-preview",
+		"127.0.0.1::3000",
+		"VIVERO_PUBLIC_URL: https://preview.example",
+		"external: true",
+		"name: " + dockerNetworkName("preview-pr-9"),
+	} {
+		if !strings.Contains(yml, want) {
+			t.Fatalf("compose override missing %q:\n%s", want, yml)
+		}
+	}
+	for _, forbidden := range []string{"image:", "build:", "command:"} {
+		if strings.Contains(yml, forbidden) {
+			t.Fatalf("compose override should not duplicate app runtime field %q:\n%s", forbidden, yml)
+		}
+	}
+}
+
+func TestStartDockerServiceSupportsComposeRuntime(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_COMPOSE_SERVICES", "web db")
+	home := t.TempDir()
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "docker-compose.yml"), []byte("services:\n  web:\n    image: app/web\n  db:\n    image: postgres\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := ServiceConfig{
+		Source:  "app",
+		Runtime: "compose",
+		Compose: ComposeConfig{File: "docker-compose.yml", Service: "web"},
+		Ports:   map[string]PortConfig{"http": {Container: 3310}},
+	}
+	containerID, err := startDockerService(home, "compose-app", "preview-compose", "web", svc, map[string]PreviewSource{"app": {Path: source}}, map[string]string{"VIVERO_PUBLIC_URL": "https://preview.example"})
+	if err != nil {
+		t.Fatalf("start compose service: %v", err)
+	}
+	if !strings.Contains(containerID, "preview-compose") || !strings.Contains(containerID, "web") {
+		t.Fatalf("unexpected compose container id: %s", containerID)
+	}
+	ports, err := dockerContainerRuntime{}.PublishedPorts(containerID, []ServicePort{{Name: "http", Container: 3310, Protocol: "tcp"}})
+	if err != nil {
+		t.Fatalf("published ports: %v", err)
+	}
+	if len(ports) != 1 || ports[0].Name != "http" || ports[0].HostIP != "127.0.0.1" || ports[0].Host != 3310 {
+		t.Fatalf("unexpected published port: %#v", ports)
+	}
+	overrideBody, err := os.ReadFile(dockerComposeOverridePath(home, "preview-compose", "web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(overrideBody), "vivero.preview: preview-compose") || !strings.Contains(string(overrideBody), "VIVERO_PUBLIC_URL") {
+		t.Fatalf("compose override did not include Vivero metadata/env:\n%s", overrideBody)
 	}
 }
 
