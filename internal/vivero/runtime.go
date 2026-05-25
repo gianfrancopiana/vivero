@@ -29,6 +29,13 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
 	}
+	if req.Reuse {
+		if existing, reused, err := a.reusablePreviewForUp(req, project, runtimeConfig); err != nil {
+			return existing, err
+		} else if reused {
+			return existing, nil
+		}
+	}
 	if existing, found, err := a.cleanupExistingPreviewForUp(req.ID); err != nil {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return existing, err

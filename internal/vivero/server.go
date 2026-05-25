@@ -100,6 +100,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 			Wait     bool              `json:"wait"`
 			Timeout  string            `json:"timeout"`
 			Public   bool              `json:"public"`
+			Reuse    bool              `json:"reuse"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			return nil, 400, err
@@ -108,7 +109,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 		if err != nil {
 			return nil, 400, err
 		}
-		p, err := a.Up(UpRequest{Project: body.Project, ID: body.ID, Profile: body.Profile, Sources: body.Sources, Labels: body.Labels, Metadata: body.Metadata, Wait: body.Wait, Timeout: d, Public: body.Public})
+		p, err := a.Up(UpRequest{Project: body.Project, ID: body.ID, Profile: body.Profile, Sources: body.Sources, Labels: body.Labels, Metadata: body.Metadata, Wait: body.Wait, Timeout: d, Public: body.Public, Reuse: body.Reuse})
 		return map[string]any{"preview": p}, 200, err
 	}))
 	mux.HandleFunc("GET /previews", jsonHandler(func(r *http.Request) (any, int, error) {

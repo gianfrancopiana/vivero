@@ -252,7 +252,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return errOut(stderr, jsonOut, err)
 		}
 		profile, _ := flagValue(rest, "--profile")
-		p, err := a.Up(UpRequest{Project: pos[0], ID: id, Profile: profile, Sources: sources, Labels: labels, Metadata: metadata, Wait: hasArg(rest, "--wait"), Timeout: timeout, Public: hasArg(rest, "--public")})
+		p, err := a.Up(UpRequest{Project: pos[0], ID: id, Profile: profile, Sources: sources, Labels: labels, Metadata: metadata, Wait: hasArg(rest, "--wait"), Timeout: timeout, Public: hasArg(rest, "--public"), Reuse: hasArg(rest, "--reuse")})
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}

@@ -432,4 +432,5 @@ type UpRequest struct {
 	Wait     bool              `json:"wait"`
 	Timeout  time.Duration     `json:"-"`
 	Public   bool              `json:"public"`
+	Reuse    bool              `json:"reuse,omitempty"`
 }

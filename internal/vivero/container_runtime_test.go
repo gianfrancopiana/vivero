@@ -267,6 +267,79 @@ setup:
 	}
 }
 
+func TestUpReuseReturnsHealthyExistingPreviewWithoutRestart(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	fake := &fakeContainerRuntime{containers: map[string]bool{"container-123": true}}
+	a.containers = fake
+
+	root := t.TempDir()
+	cfg := []byte(`project:
+  name: reusable-runtime
+sources:
+  app:
+    path: .
+services:
+  web:
+    runtime: docker
+    source: app
+    image: alpine:latest
+    port: 8080
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SyncProject(root); err != nil {
+		t.Fatal(err)
+	}
+	existing := PreviewRecord{
+		ID:       "demo-pr-17",
+		Project:  "reusable-runtime",
+		Status:   "running",
+		Metadata: map[string]string{"branch": "feature/demo"},
+		Sources:  map[string]PreviewSource{},
+		Services: map[string]PreviewService{},
+	}
+	if err := a.upsertPreview(existing); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveSource("demo-pr-17", PreviewSource{Name: "app", Mode: "external", Path: root, Owned: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("demo-pr-17", PreviewService{Name: "web", Runtime: "docker", Source: "app", ContainerID: "container-123", Status: "healthy", URL: "http://127.0.0.1:3310", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := a.Up(UpRequest{Project: "reusable-runtime", ID: "demo-pr-17", Sources: map[string]string{"app.path": root}, Metadata: map[string]string{"branch": "feature/demo"}, Reuse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := preview.Services["web"].ContainerID; got != "container-123" {
+		t.Fatalf("container id = %q; want existing container", got)
+	}
+	if len(fake.startedServices) != 0 || len(fake.removedContainers) != 0 || len(fake.removedPreviews) != 0 || len(fake.ensuredNetworks) != 0 {
+		t.Fatalf("reuse should not restart or clean resources; started=%#v removed=%#v removedPreviews=%#v networks=%#v", fake.startedServices, fake.removedContainers, fake.removedPreviews, fake.ensuredNetworks)
+	}
+	events, err := a.events("demo-pr-17", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundReuseEvent := false
+	for _, event := range events {
+		if event.Type == "preview.reused" {
+			foundReuseEvent = true
+			break
+		}
+	}
+	if !foundReuseEvent {
+		t.Fatalf("missing preview.reused event: %#v", events)
+	}
+}
+
 func TestBuildServiceImagesRecordsBuildCacheMetadata(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	a, err := NewApp()
