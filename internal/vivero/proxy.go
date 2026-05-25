@@ -98,7 +98,7 @@ func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHo
 		_ = resp.Body.Close()
 		rewrittenText := rewriter.rewrite(string(body), publicOrigin)
 		if isHTMLResponse(resp.Header) {
-			rewrittenText = injectPublicPreviewRuntime(rewrittenText, publicOrigin, contentSecurityPolicyNonce(resp.Header))
+			rewrittenText = injectPublicPreviewRuntime(rewrittenText, publicOrigin, rewriter.rewriteBasePublicOrigin(publicOrigin), contentSecurityPolicyNonce(resp.Header))
 		}
 		rewritten := []byte(rewrittenText)
 		resp.Body = io.NopCloser(bytes.NewReader(rewritten))
@@ -434,16 +434,20 @@ func isHTMLResponse(headers http.Header) bool {
 	return strings.HasPrefix(strings.ToLower(headers.Get("Content-Type")), "text/html")
 }
 
-func injectPublicPreviewRuntime(input, publicOrigin, nonce string) string {
+func injectPublicPreviewRuntime(input, publicOrigin, basePublicOrigin, nonce string) string {
 	publicHost := hostFromOrigin(publicOrigin)
 	publicScheme := schemeFromOrigin(publicOrigin)
+	if basePublicOrigin == "" {
+		basePublicOrigin = publicOrigin
+	}
+	basePublicHost := hostFromOrigin(basePublicOrigin)
 	if input == "" || publicHost == "" || publicScheme != "https" {
 		return input
 	}
 	if strings.Contains(input, "data-vivero-public-preview-runtime") {
 		return input
 	}
-	script := publicPreviewRuntimeScript(publicOrigin, publicHost, nonce)
+	script := publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost, nonce)
 	lower := strings.ToLower(input)
 	for _, marker := range []string{"</head>", "</body>"} {
 		if idx := strings.Index(lower, marker); idx >= 0 {
@@ -453,19 +457,24 @@ func injectPublicPreviewRuntime(input, publicOrigin, nonce string) string {
 	return script + input
 }
 
-func publicPreviewRuntimeScript(publicOrigin, publicHost, nonce string) string {
+func publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost, nonce string) string {
 	originJSON, _ := json.Marshal(publicOrigin)
 	hostJSON, _ := json.Marshal(publicHost)
+	baseOriginJSON, _ := json.Marshal(basePublicOrigin)
+	baseHostJSON, _ := json.Marshal(basePublicHost)
 	nonceAttr := ""
 	if nonce != "" {
 		nonceAttr = ` nonce="` + html.EscapeString(nonce) + `"`
 	}
 	return "<script data-vivero-public-preview-runtime" + nonceAttr + ">(()=>{" +
-		"window.__viveroPublicPreviewRuntime={origin:" + string(originJSON) + ",host:" + string(hostJSON) + "};" +
+		"window.__viveroPublicPreviewRuntime={origin:" + string(originJSON) + ",host:" + string(hostJSON) + ",baseOrigin:" + string(baseOriginJSON) + ",baseHost:" + string(baseHostJSON) + "};" +
 		"const publicOrigin=" + string(originJSON) + ";" +
 		"const publicHost=" + string(hostJSON) + ";" +
-		"const insecureOrigin=\"http://\"+publicHost;" +
-		"const toPublic=(value)=>{if(value==null)return value;const text=String(value);if(text.startsWith(insecureOrigin))return publicOrigin+text.slice(insecureOrigin.length);try{const url=new URL(text,document.baseURI);if(url.protocol===\"http:\"&&(url.hostname===publicHost||url.hostname.endsWith(\".\"+publicHost)))return publicOrigin+url.pathname+url.search+url.hash;}catch{}return value;};" +
+		"const basePublicOrigin=" + string(baseOriginJSON) + ";" +
+		"const basePublicHost=" + string(baseHostJSON) + ";" +
+		"const hostNameOnly=(host)=>(host||\"\").split(\":\")[0];" +
+		"const publicHosts=[{origin:publicOrigin,host:publicHost,subdomains:true},{origin:basePublicOrigin,host:basePublicHost,subdomains:false}].filter((item,index,all)=>item.origin&&item.host&&all.findIndex((other)=>other.host===item.host)===index);" +
+		"const toPublic=(value)=>{if(value==null)return value;const text=String(value);for(const item of publicHosts){const insecureOrigin=\"http://\"+item.host;if(text.startsWith(insecureOrigin))return item.origin+text.slice(insecureOrigin.length);}try{const url=new URL(text,document.baseURI);if(url.protocol===\"http:\"){for(const item of publicHosts){const hostName=hostNameOnly(item.host);if(url.host===item.host||url.hostname===hostName||(item.subdomains&&url.hostname.endsWith(\".\"+hostName)))return item.origin+url.pathname+url.search+url.hash;}}}catch{}return value;};" +
 		"const attrs=[\"href\",\"src\",\"action\"];" +
 		"const valueSelector=\"input,textarea\";" +
 		"const selector=attrs.map((attr)=>\"[\"+attr+\"]\").concat(valueSelector).join(\",\");" +

@@ -1055,13 +1055,46 @@ func TestHeaderRewriteProxyInjectsRuntimeForClientGeneratedPublicLinks(t *testin
 	if !strings.Contains(body, `const publicOrigin="https://preview.trycloudflare.com"`) {
 		t.Fatalf("runtime normalizer did not include the public origin: %s", body)
 	}
-	for _, expected := range []string{"window.fetch=function", "XMLHttpRequest.prototype.open=function", "navigator.sendBeacon", "input,textarea", "endsWith(\".\"+publicHost)", "el.value=fixedValue"} {
+	for _, expected := range []string{"window.fetch=function", "XMLHttpRequest.prototype.open=function", "navigator.sendBeacon", "input,textarea", "publicHosts", "hostNameOnly", "el.value=fixedValue"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("runtime normalizer missing client request rewrite %q: %s", expected, body)
 		}
 	}
 	if strings.Index(body, "data-vivero-public-preview-runtime") > strings.Index(body, "document.body.innerHTML") {
 		t.Fatalf("runtime normalizer must load before client-side DOM mutations: %s", body)
+	}
+}
+
+func TestPublicRouteHeaderRewriteProxyInjectsBasePublicRuntime(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><head><title>Preview</title></head><body><script>document.body.innerHTML = '<a href="http://main.preview.example.com/discover">Logo</a>';</script></body></html>`))
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := newPublicRouteHeaderRewriteProxy(target, "seller.localhost", "localhost", "https://main.preview.example.com", PublicRewriteConfig{})
+	req := httptest.NewRequest("GET", "https://seller-main.preview.example.com/l/demo", nil)
+	req.Host = "seller-main.preview.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`data-vivero-public-preview-runtime`,
+		`const publicOrigin="https://seller-main.preview.example.com"`,
+		`const basePublicOrigin="https://main.preview.example.com"`,
+		`const basePublicHost="main.preview.example.com"`,
+		`"http://"+item.host`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("runtime missing %q: %s", expected, body)
+		}
 	}
 }
 
