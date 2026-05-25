@@ -36,7 +36,7 @@ App repo:
   secrets, provider behavior, and production infrastructure.
 ```
 
-Keep `vivero.yml` as thin orchestration metadata. Put project-specific routes, selectors, restart commands, QA scopes, browser flows, deploy commands, and release smoke checks there. Reference app-owned images, Dockerfiles, or prebuild commands instead; do not copy Dockerfiles, compose files, env contracts, or setup scripts into YAML when the app repo already owns them. Inline Dockerfiles are intentionally unsupported.
+Keep `vivero.yml` as thin orchestration metadata. Put project-specific routes, selectors, restart commands, QA scopes, browser flows, deploy commands, and release smoke checks there. Reference app-owned images, Dockerfiles, prebuild commands, or the app-owned Compose stack (`runtime: compose` + `compose.file`/`compose.service`) instead; do not copy Dockerfiles, compose files, dependency services, env contracts, volumes, or setup scripts into YAML when the app repo already owns them. Inline Dockerfiles are intentionally unsupported.
 
 ## App-agnostic runtime command contract
 

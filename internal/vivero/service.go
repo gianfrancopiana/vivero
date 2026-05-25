@@ -133,7 +133,17 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 	for _, name := range sortedMapKeys(cfg.Services) {
 		svc := cfg.Services[name]
 		b.WriteString("  " + name + ":\n")
-		if svc.Image != "" {
+		if serviceRuntime(svc) == "compose" {
+			b.WriteString("    # Runtime delegated to app-owned Compose stack.\n")
+			b.WriteString("    x-vivero-runtime: compose\n")
+			if files := composeFiles(svc.Compose); len(files) > 0 {
+				b.WriteString("    x-vivero-compose-files:\n")
+				for _, file := range files {
+					b.WriteString("      - " + quoteYAML(file) + "\n")
+				}
+			}
+			b.WriteString("    x-vivero-compose-service: " + quoteYAML(composeServiceName(svc.Compose, name)) + "\n")
+		} else if svc.Image != "" {
 			b.WriteString("    image: " + svc.Image + "\n")
 		} else {
 			b.WriteString("    image: scratch\n")
@@ -155,7 +165,7 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 				}
 			}
 		}
-		if svc.Source != "" {
+		if svc.Source != "" && serviceRuntime(svc) != "compose" {
 			if src, ok := sources[svc.Source]; ok {
 				b.WriteString("    volumes:\n      - " + src.Path + ":/app\n")
 			}
@@ -268,7 +278,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 	if err := ensureDir(filepath.Dir(logPath)); err != nil {
 		return ps, err
 	}
-	if runtime != "docker" {
+	if runtime != "docker" && runtime != "compose" {
 		return ps, fmt.Errorf("service %s has unsupported runtime %q; Vivero runs app services in containers only", name, runtime)
 	}
 	containerID, err := a.startDockerService(cfg.Project.Name, previewID, name, svc, sources, env)
@@ -304,8 +314,12 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.URL = originURL
 		}
 	}
-	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via docker\n"), 0o644)
-	a.recordEvent(previewID, "info", "service.started", "container started", name, serviceTimer.metadata(map[string]string{"container": containerID, "image": svc.Image, "command": svc.Command.Display()}))
+	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via "+runtime+"\n"), 0o644)
+	startMetadata := map[string]string{"container": containerID, "runtime": runtime, "command": svc.Command.Display()}
+	if svc.Image != "" {
+		startMetadata["image"] = svc.Image
+	}
+	a.recordEvent(previewID, "info", "service.started", "container started", name, serviceTimer.metadata(startMetadata))
 	if workdir != "" {
 		a.recordEvent(previewID, "info", "service.workdir", "container source mounted", name, map[string]string{"hostPath": workdir})
 	}

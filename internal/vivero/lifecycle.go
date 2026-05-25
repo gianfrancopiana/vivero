@@ -108,6 +108,13 @@ func (a *App) stopPreviewServiceResources(previewID, name string, svc PreviewSer
 			a.recordEvent(previewID, "info", "service.stopped", "service process stopped", name, map[string]string{"pid": fmt.Sprint(pid)})
 		}
 	}
+	if svc.Runtime == "compose" {
+		if err := a.containerRuntime().RemoveComposeProject(previewID, name); err != nil {
+			errs = append(errs, fmt.Sprintf("compose cleanup %s/%s: %v", previewID, name, err))
+		} else {
+			a.recordEvent(previewID, "info", "service.stopped", "compose project stopped", name, map[string]string{"project": dockerComposeProjectName(previewID, name)})
+		}
+	}
 	if svc.ContainerID != "" {
 		containerID := svc.ContainerID
 		missing, out, err := a.containerRuntime().RemoveContainer(containerID)

@@ -122,10 +122,26 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 			if strings.TrimSpace(svc.Image) == "" && !imageBuildConfigured(svc.Build) {
 				return fmt.Errorf("%s service %s must declare image or build; Vivero app services run in containers only", configPath, name)
 			}
+		case "compose":
+			if strings.TrimSpace(svc.Source) == "" {
+				return fmt.Errorf("%s service %s uses runtime compose and must declare source", configPath, name)
+			}
+			if len(composeFiles(svc.Compose)) == 0 {
+				return fmt.Errorf("%s service %s uses runtime compose and must declare compose.file or compose.files", configPath, name)
+			}
+			if strings.TrimSpace(svc.Image) != "" || imageBuildConfigured(svc.Build) {
+				return fmt.Errorf("%s service %s uses runtime compose; keep image/build definitions in the app-owned Compose file", configPath, name)
+			}
+			if !svc.Command.IsZero() {
+				return fmt.Errorf("%s service %s uses runtime compose; keep the service command in the app-owned Compose file", configPath, name)
+			}
+			if len(svc.DependencyVolumes) > 0 {
+				return fmt.Errorf("%s service %s uses runtime compose; keep dependency volumes in the app-owned Compose file", configPath, name)
+			}
 		case "host":
 			return fmt.Errorf("%s service %s uses runtime host; Vivero runs app services in containers only", configPath, name)
 		default:
-			return fmt.Errorf("%s service %s has unsupported runtime %q; use docker", configPath, name, runtime)
+			return fmt.Errorf("%s service %s has unsupported runtime %q; use docker or compose", configPath, name, runtime)
 		}
 	}
 	for name, backing := range cfg.BackingServices {
@@ -165,8 +181,12 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if service == "" {
 			return fmt.Errorf("%s setup.afterSeeds[%d] must target a service", configPath, i)
 		}
-		if _, ok := cfg.Services[service]; !ok {
+		svc, ok := cfg.Services[service]
+		if !ok {
 			return fmt.Errorf("%s setup.afterSeeds[%d] references unknown service %s", configPath, i, service)
+		}
+		if serviceRuntime(svc) == "compose" {
+			return fmt.Errorf("%s setup.afterSeeds[%d] targets compose service %s; keep setup scripts in the app-owned Compose stack", configPath, i, service)
 		}
 	}
 	if err := validateWarmConfig(configPath, cfg.Warm); err != nil {
@@ -291,6 +311,8 @@ func serviceRuntime(s ServiceConfig) string {
 	switch runtime {
 	case "", "container", "containers", "docker", "docker-cli", "orbstack":
 		return "docker"
+	case "compose", "docker-compose", "docker compose":
+		return "compose"
 	default:
 		return runtime
 	}
@@ -304,8 +326,8 @@ func (a *App) capabilities() map[string]any {
 		"home":                  a.Home,
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
-		"runtimes":              []string{"docker"},
-		"features":              []string{"preview-runtime", "projects", "thin-config-init", "worktrees", "health-gated-up", "events", "startup-diagnostics", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "blue-green-deploy", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance"},
+		"runtimes":              []string{"docker", "compose"},
+		"features":              []string{"preview-runtime", "projects", "thin-config-init", "worktrees", "health-gated-up", "events", "startup-diagnostics", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "app-owned-compose-runtime", "blue-green-deploy", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

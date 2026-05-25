@@ -35,6 +35,7 @@ type ServiceConfig struct {
 	Runtime           string                `yaml:"runtime" json:"runtime,omitempty"`
 	Image             string                `yaml:"image" json:"image,omitempty"`
 	Build             ImageBuildConfig      `yaml:"build" json:"build,omitempty"`
+	Compose           ComposeConfig         `yaml:"compose" json:"compose,omitempty"`
 	Command           RuntimeCommand        `yaml:"command" json:"command,omitempty"`
 	WorkingDir        string                `yaml:"workingDir" json:"workingDir,omitempty"`
 	Port              int                   `yaml:"port" json:"port,omitempty"`
@@ -48,6 +49,12 @@ type ServiceConfig struct {
 	Env               map[string]string     `yaml:"env" json:"env,omitempty"`
 	DependencyVolumes []VolumeConfig        `yaml:"dependencyVolumes" json:"dependencyVolumes,omitempty"`
 	ResourceLimits    ResourceLimits        `yaml:"resources" json:"resources,omitempty"`
+}
+
+type ComposeConfig struct {
+	File    string   `yaml:"file" json:"file,omitempty"`
+	Files   []string `yaml:"files" json:"files,omitempty"`
+	Service string   `yaml:"service" json:"service,omitempty"`
 }
 
 type PortConfig struct {
