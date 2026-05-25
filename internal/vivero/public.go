@@ -11,12 +11,17 @@ import (
 )
 
 type publicURLTemplateData struct {
-	Project    string
-	PreviewID  string
-	Service    string
-	BaseDomain string
-	Labels     map[string]string
-	Metadata   map[string]string
+	Project       string
+	ProjectSlug   string
+	PreviewID     string
+	PreviewIDSlug string
+	Service       string
+	ServiceSlug   string
+	Branch        string
+	BranchSlug    string
+	BaseDomain    string
+	Labels        map[string]string
+	Metadata      map[string]string
 }
 
 func publicURLForService(cfg PublicConfig, req UpRequest, service string) (string, error) {
@@ -38,7 +43,23 @@ func publicURLForService(cfg PublicConfig, req UpRequest, service string) (strin
 			return "", err
 		}
 		var b bytes.Buffer
-		data := publicURLTemplateData{Project: req.Project, PreviewID: req.ID, Service: service, BaseDomain: cfg.BaseDomain, Labels: req.Labels, Metadata: req.Metadata}
+		branch := canonicalBranchFromMetadata(req.Metadata)
+		if branch == "" {
+			branch = req.ID
+		}
+		data := publicURLTemplateData{
+			Project:       req.Project,
+			ProjectSlug:   publicDNSLabelSlug(req.Project, "project"),
+			PreviewID:     req.ID,
+			PreviewIDSlug: publicDNSLabelSlug(req.ID, "preview"),
+			Service:       service,
+			ServiceSlug:   publicDNSLabelSlug(service, "service"),
+			Branch:        branch,
+			BranchSlug:    publicDNSLabelSlug(branch, req.ID),
+			BaseDomain:    cfg.BaseDomain,
+			Labels:        req.Labels,
+			Metadata:      req.Metadata,
+		}
 		if err := tpl.Execute(&b, data); err != nil {
 			return "", err
 		}
