@@ -192,8 +192,10 @@ func runtimeCommandYAML(command RuntimeCommand) string {
 
 func serviceConfigForBacking(backing BackingConfig) ServiceConfig {
 	return ServiceConfig{
-		Runtime:           "docker",
+		Source:            backing.Source,
+		Runtime:           backingRuntime(backing),
 		Image:             backing.Image,
+		Compose:           backing.Compose,
 		Command:           backing.Command,
 		Env:               backing.Env,
 		Health:            backing.Health,

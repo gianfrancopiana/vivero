@@ -1,10 +1,11 @@
 # Gumroad preview fixture.
 #
-# Vivero owns preview orchestration: isolated sources, dynamic ports, service
-# wiring, health checks, URLs, and QA metadata. Gumroad owns runtime assets:
-# Dockerfiles, Compose files, dependency services, env contracts, setup, and
-# boot commands. This file must stay thin and reference those app-owned assets
-# rather than copying Gumroad runtime internals into Vivero YAML.
+# Vivero owns preview orchestration: isolated sources, dynamic ports, preview
+# service wiring, health checks, URLs, warm volumes, and QA metadata. Gumroad
+# owns runtime assets: Dockerfiles, Compose files, dependency service images,
+# volumes, env contracts, setup, and boot behavior. This fixture references
+# Gumroad-owned Docker/Compose assets instead of copying dependency containers
+# into Vivero YAML.
 project:
   name: gumroad-main
 
@@ -17,14 +18,44 @@ sources:
 services:
   gumroad-web:
     source: gumroad
-    runtime: compose
-    compose:
-      # App-owned file in the Gumroad repo. It should define web, db, redis,
-      # elasticsearch, memcached, mongo, volumes, env, and setup/boot behavior.
-      file: docker-compose.yml
-      service: web
-    # Vivero overlays only preview-specific networking: a dynamic 127.0.0.1
-    # host port for the app-owned web container port.
+    runtime: docker
+    # App-owned runtime image built from Gumroad's Dockerfiles. Vivero only
+    # mounts the selected source/worktree and publishes the preview port.
+    image: vivero/gumroad-dev-runtime:3.4.3-node22
+    workingDir: .
+    command: rm -f tmp/pids/server.pid && bundle exec rails server -b 0.0.0.0 -p 3310
+    env:
+      BUNDLE_PATH: /bundle_path
+      DATABASE_HOST: db
+      DATABASE_NAME: gumroad_development
+      DATABASE_PORT: "3306"
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: password
+      DISABLE_SPRING: "1"
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      GRPC_RUBY_BUILD_PROCS: "4"
+      IN_DOCKER: "true"
+      MEMCACHE_SERVERS: memcached
+      MONGO_DATABASE_URL: mongo:27017
+      MONGO_SECONDARY_DATABASE_URL: mongo:27017
+      MONGO_DATABASE_NAME: gumroad_log_development
+      MONGO_DATABASE_USERNAME: username
+      MONGO_DATABASE_PASSWORD: password
+      MONGO_REPLICA_SET: empty_replica_set
+      RACK_ATTACK_REDIS_HOST: redis:6379/3
+      RACK_ENV: development
+      RAILS_ENV: development
+      REDIS_HOST: redis:6379/0
+      RPUSH_REDIS_HOST: redis:6379/2
+      SIDEKIQ_REDIS_HOST: redis:6379/1
+      SKIP_NATIVE_MYSQL_RECONNECT: "true"
+    dependencyVolumes:
+      - name: bundle_path
+        target: /bundle_path
+        lifetime: smart
+      - name: node_modules
+        target: /app/node_modules
+        lifetime: smart
     ports:
       http:
         container: 3310
@@ -59,6 +90,83 @@ services:
       expectStatus: 200
       timeout: 2m
       interval: 2s
+
+backingServices:
+  # These delegate to Gumroad's app-owned Compose file. Vivero starts each
+  # selected service in an isolated Compose project and overlays only preview
+  # labels plus network aliases (for example db_test is reachable as `db`).
+  db:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: db_test
+    health:
+      command: mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent
+      timeout: 2m
+      interval: 2s
+  redis:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: redis
+    health:
+      command: redis-cli ping | grep PONG
+      timeout: 2m
+      interval: 2s
+  mongo:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: mongo
+    health:
+      command: "mongo --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"
+      timeout: 2m
+      interval: 2s
+  elasticsearch:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: elasticsearch
+    health:
+      command: curl -fsS http://127.0.0.1:9200 >/dev/null
+      timeout: 2m
+      interval: 2s
+  memcached:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: memcached
+
+warm:
+  baselineRefs:
+    - main
+  fingerprint:
+    paths:
+      - Gemfile.lock
+      - package-lock.json
+      - pnpm-lock.yaml
+      - db/migrate
+      - db/schema.rb
+      - db/seeds.rb
+
+setup:
+  afterSeeds:
+    - service: gumroad-web
+      command: bundle install && bundle exec rails db:prepare
+    - service: gumroad-web
+      policy: once-per-project
+      command: >-
+        bundle exec rails runner 'load Rails.root.join("db/seeds/020_development_staging/gumroad_posts.rb") unless User.exists?(username: "gumroad")'
+    - service: gumroad-web
+      command: npm install && bundle exec rails js:export && (npm run build || test -f public/packs/manifest.json)
+    - service: gumroad-web
+      policy: once-per-project
+      command: bundle exec rails runner 'DevTools.delete_all_indices_and_reindex_all'
 
 agent:
   defaultPreviewService: gumroad-web
@@ -211,7 +319,7 @@ agent:
   iteration:
     restartCommand:
       service: gumroad-web
-      command: bin/vivero/restart
+      command: touch tmp/restart.txt
     dependencyChangedCommand:
       service: gumroad-web
-      command: bin/vivero/bootstrap
+      command: bundle install && npm install

@@ -134,7 +134,10 @@ type BlueGreenDeployConfig struct {
 }
 
 type BackingConfig struct {
+	Source            string            `yaml:"source" json:"source,omitempty"`
+	Runtime           string            `yaml:"runtime" json:"runtime,omitempty"`
 	Image             string            `yaml:"image" json:"image,omitempty"`
+	Compose           ComposeConfig     `yaml:"compose" json:"compose,omitempty"`
 	Command           RuntimeCommand    `yaml:"command" json:"command,omitempty"`
 	Env               map[string]string `yaml:"env" json:"env,omitempty"`
 	Health            HealthConfig      `yaml:"health" json:"health,omitempty"`

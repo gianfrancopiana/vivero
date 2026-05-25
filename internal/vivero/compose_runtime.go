@@ -19,6 +19,7 @@ type dockerComposeServiceSpec struct {
 	Files          []string
 	OverrideFile   string
 	Network        string
+	NetworkAliases []string
 	Ports          []ServicePort
 	Env            map[string]string
 }
@@ -41,6 +42,20 @@ func composeServiceName(cfg ComposeConfig, service string) string {
 		return name
 	}
 	return service
+}
+
+func composeNetworkAliases(service, composeService string) []string {
+	aliases := []string{}
+	seen := map[string]bool{}
+	for _, value := range []string{service, composeService} {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		aliases = append(aliases, trimmed)
+		seen[trimmed] = true
+	}
+	return aliases
 }
 
 func dockerComposeProjectName(previewID, service string) string {
@@ -78,6 +93,7 @@ func startDockerComposeService(home, previewID, service string, svc ServiceConfi
 		Files:          resolved,
 		OverrideFile:   dockerComposeOverridePath(home, previewID, service),
 		Network:        dockerNetworkName(previewID),
+		NetworkAliases: composeNetworkAliases(service, composeServiceName(svc.Compose, service)),
 		Ports:          ports,
 		Env:            env,
 	}
@@ -175,6 +191,9 @@ func writeDockerComposeOverride(spec dockerComposeServiceSpec, services []string
 		entry := map[string]any{"labels": labels}
 		if service == spec.ComposeService {
 			labels["vivero.service"] = spec.Service
+			if len(spec.NetworkAliases) > 0 {
+				entry["networks"] = map[string]any{"default": map[string]any{"aliases": spec.NetworkAliases}}
+			}
 			if len(spec.Ports) > 0 {
 				entry["ports"] = dockerComposePortBindings(spec.Ports)
 			}
