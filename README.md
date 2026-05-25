@@ -165,7 +165,7 @@ agent:
 
 Add `profiles:` for small/full preview modes, `warm:` for expensive dependency volumes, `agent.qa:` for browser evidence, and `public:` only when a preview should expose a non-local URL. Routes, selectors, QA flows, and restart commands belong in project config, not in the generic skill or Vivero core.
 
-For apps that already own a Compose stack, keep runtime internals in the app repo and let Vivero overlay only preview networking/health. This works for app services and backing services:
+For apps that already own a Compose stack, keep runtime internals in the app repo and let Vivero overlay only preview networking/health. The thinnest shape is one app-owned preview service that starts its own dependencies:
 
 ```yaml
 services:
@@ -173,7 +173,7 @@ services:
     source: app
     runtime: compose
     compose:
-      file: docker-compose.yml
+      file: docker/docker-compose-preview.yml
       service: web
     ports:
       http:
@@ -181,19 +181,9 @@ services:
     health:
       path: /
       expectStatus: 200
-
-backingServices:
-  db:
-    source: app
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: db_test
-    health:
-      command: mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent
 ```
 
-Vivero generates a temporary Compose override with the per-preview network, labels, network aliases, and dynamic loopback port mappings. Do not duplicate Compose services, env contracts, volumes, or setup scripts in `vivero.yml`.
+Use separate `backingServices:` entries only when the app does not have a single Compose service that owns dependency startup. Vivero generates a temporary Compose override with the per-preview network, labels, network aliases, and dynamic loopback port mappings. Do not duplicate Compose services, env contracts, volumes, or setup scripts in `vivero.yml`.
 
 Deploy config points to app-owned commands:
 

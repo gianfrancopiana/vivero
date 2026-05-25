@@ -1,11 +1,10 @@
 # Gumroad preview fixture.
 #
-# Vivero owns preview orchestration: isolated sources, dynamic ports, preview
-# service wiring, health checks, URLs, warm volumes, and QA metadata. Gumroad
-# owns runtime assets: Dockerfiles, Compose files, dependency service images,
-# volumes, env contracts, setup, and boot behavior. This fixture references
-# Gumroad-owned Docker/Compose assets instead of copying dependency containers
-# into Vivero YAML.
+# Vivero owns preview orchestration: source selection, dynamic ports, public URL
+# rewriting, health checks, and QA evidence. Gumroad owns runtime assets:
+# images, Compose topology, dependency services, env contracts, volumes, setup,
+# and boot behavior. Keep this file thin by delegating runtime to one
+# app-owned Compose service.
 project:
   name: gumroad-main
 
@@ -18,44 +17,10 @@ sources:
 services:
   gumroad-web:
     source: gumroad
-    runtime: docker
-    # App-owned runtime image built from Gumroad's Dockerfiles. Vivero only
-    # mounts the selected source/worktree and publishes the preview port.
-    image: vivero/gumroad-dev-runtime:3.4.3-node22
-    workingDir: .
-    command: rm -f tmp/pids/server.pid && bundle exec rails server -b 0.0.0.0 -p 3310
-    env:
-      BUNDLE_PATH: /bundle_path
-      DATABASE_HOST: db
-      DATABASE_NAME: gumroad_development
-      DATABASE_PORT: "3306"
-      DATABASE_USERNAME: root
-      DATABASE_PASSWORD: password
-      DISABLE_SPRING: "1"
-      ELASTICSEARCH_HOST: http://elasticsearch:9200
-      GRPC_RUBY_BUILD_PROCS: "4"
-      IN_DOCKER: "true"
-      MEMCACHE_SERVERS: memcached
-      MONGO_DATABASE_URL: mongo:27017
-      MONGO_SECONDARY_DATABASE_URL: mongo:27017
-      MONGO_DATABASE_NAME: gumroad_log_development
-      MONGO_DATABASE_USERNAME: username
-      MONGO_DATABASE_PASSWORD: password
-      MONGO_REPLICA_SET: empty_replica_set
-      RACK_ATTACK_REDIS_HOST: redis:6379/3
-      RACK_ENV: development
-      RAILS_ENV: development
-      REDIS_HOST: redis:6379/0
-      RPUSH_REDIS_HOST: redis:6379/2
-      SIDEKIQ_REDIS_HOST: redis:6379/1
-      SKIP_NATIVE_MYSQL_RECONNECT: "true"
-    dependencyVolumes:
-      - name: bundle_path
-        target: /bundle_path
-        lifetime: smart
-      - name: node_modules
-        target: /app/node_modules
-        lifetime: smart
+    runtime: compose
+    compose:
+      file: docker/docker-compose-vivero-preview.yml
+      service: gumroad-web
     ports:
       http:
         container: 3310
@@ -73,6 +38,7 @@ services:
         - http://api.localhost:3000
         - http://s.localhost:3000
         - http://analytics.localhost:3000
+        - ws://cable.localhost:8080
       hosts:
         - localhost:3000
         - localhost:3310
@@ -80,7 +46,10 @@ services:
         - api.localhost:3000
         - s.localhost:3000
         - analytics.localhost:3000
+        - cable.localhost:8080
       replacements:
+        - from: ws://cable.localhost:8080/cable
+          to: wss://{publicHost}/cable
         - from: '&quot;scheme&quot;:&quot;http&quot;'
           to: '&quot;scheme&quot;:&quot;{publicScheme}&quot;'
         - from: '"scheme":"http"'
@@ -88,85 +57,8 @@ services:
     health:
       path: /
       expectStatus: 200
-      timeout: 2m
+      timeout: 10m
       interval: 2s
-
-backingServices:
-  # These delegate to Gumroad's app-owned Compose file. Vivero starts each
-  # selected service in an isolated Compose project and overlays only preview
-  # labels plus network aliases (for example db_test is reachable as `db`).
-  db:
-    source: gumroad
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: db_test
-    health:
-      command: mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent
-      timeout: 2m
-      interval: 2s
-  redis:
-    source: gumroad
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: redis
-    health:
-      command: redis-cli ping | grep PONG
-      timeout: 2m
-      interval: 2s
-  mongo:
-    source: gumroad
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: mongo
-    health:
-      command: "mongo --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"
-      timeout: 2m
-      interval: 2s
-  elasticsearch:
-    source: gumroad
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: elasticsearch
-    health:
-      command: curl -fsS http://127.0.0.1:9200 >/dev/null
-      timeout: 2m
-      interval: 2s
-  memcached:
-    source: gumroad
-    runtime: compose
-    compose:
-      file: docker/docker-compose-test-and-ci.yml
-      service: memcached
-
-warm:
-  baselineRefs:
-    - main
-  fingerprint:
-    paths:
-      - Gemfile.lock
-      - package-lock.json
-      - pnpm-lock.yaml
-      - db/migrate
-      - db/schema.rb
-      - db/seeds.rb
-
-setup:
-  afterSeeds:
-    - service: gumroad-web
-      command: bundle install && bundle exec rails db:prepare
-    - service: gumroad-web
-      policy: once-per-project
-      command: >-
-        bundle exec rails runner 'load Rails.root.join("db/seeds/020_development_staging/gumroad_posts.rb") unless User.exists?(username: "gumroad")'
-    - service: gumroad-web
-      command: npm install && bundle exec rails js:export && (npm run build || test -f public/packs/manifest.json)
-    - service: gumroad-web
-      policy: once-per-project
-      command: bundle exec rails runner 'DevTools.delete_all_indices_and_reindex_all'
 
 agent:
   defaultPreviewService: gumroad-web
@@ -174,9 +66,6 @@ agent:
     - name: desktop
       width: 1440
       height: 900
-    - name: tablet
-      width: 834
-      height: 1112
     - name: mobile
       width: 390
       height: 844
@@ -209,103 +98,17 @@ agent:
   qa:
     defaultScope: public-preview
     artifactRoot: ~/.vivero/qa/gumroad
-    driver:
-      preferred: playwright
-      evidence: playwright
-      exploratory: chrome-mcp
-      allowed:
-        - playwright
-        - browser
-        - chrome-mcp
-      notes: >-
-        Vivero owns preview context, smoke checks, screenshots, recordings,
-        traces, and artifact paths through Playwright. Chrome MCP is reserved
-        for exploratory agent debugging against a live browser session.
     evidence:
       screenshots:
         colorSchemes:
           - light
           - dark
-      recordings:
-        colorSchemes:
-          - light
     scopes:
-      - name: gumroad-core
-        description: >-
-          Core Gumroad QA surface for public preview rewriting, public pages, and the
-          authenticated products area when the operator agent has a valid browser session.
-        pages:
-          - home
-          - login
-          - blog
-          - products
-        checks:
-          - name: smoke-tests-pass
-            category: runtime
-            severity: critical
-            method: vivero-smoke
-            description: Run the project-declared HTTP smoke tests before browser QA.
-          - name: no-console-errors
-            category: browser
-            severity: high
-            method: browser-console
-            description: Fail on uncaught exceptions, severe console errors, or mixed-content blocks.
-          - name: no-network-failures
-            category: browser
-            severity: high
-            method: browser-network
-            description: Inspect failed document/script/fetch/XHR requests on visited pages.
-          - name: responsive-breakpoints
-            category: visual
-            severity: medium
-            method: vivero-screenshot-breakpoints
-            description: Capture desktop, tablet, and mobile viewport evidence with Vivero.
-          - name: public-preview-origin-rewrite
-            category: preview
-            severity: high
-            method: browser-url-inspection
-            description: Public tunnel navigation should stay on the public preview host and HTTPS scheme.
-        flows:
-          - name: public-navigation
-            description: Public pages render and link without leaking localhost origins.
-            start: home
-            steps:
-              - visit: home
-              - expectText: Gumroad
-              - visit: login
-              - expectText: Log in
-              - visit: blog
-              - expectText: Gumroad
-              - screenshot: public-navigation
-          - name: authenticated-products
-            description: >-
-              If an authenticated browser session is available, verify the products
-              dashboard renders and core navigation stays inside the preview host.
-            start: products
-            steps:
-              - visit: products
-              - expectUrl: /products
-              - screenshot: authenticated-products
       - name: public-preview
-        description: Public unauthenticated preview checks safe to run without a stored login.
         pages:
           - home
           - login
           - blog
-        flows:
-          - name: marketplace-search-feature-qa
-            description: >-
-              Example feature QA flow for a public Gumroad marketplace/search change.
-              It exercises the local preview, checks expected copy, fills the search box,
-              and captures evidence without adding any demo web UI.
-            start: home
-            steps:
-              - visit: home
-              - expectText: Gumroad
-              - expectText: Go from
-              - fill: '#marketplace-search'
-                value: writing
-              - screenshot: marketplace-search-feature-qa
         checks:
           - name: smoke-tests-pass
             category: runtime
@@ -315,11 +118,3 @@ agent:
             category: preview
             severity: high
             method: browser-dom-inspection
-            description: Rendered links, forms, fetch/XHR calls, and beacons should target the public preview host.
-  iteration:
-    restartCommand:
-      service: gumroad-web
-      command: touch tmp/restart.txt
-    dependencyChangedCommand:
-      service: gumroad-web
-      command: bundle install && npm install
