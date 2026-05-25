@@ -888,6 +888,164 @@ func TestPublicPreviewRouterProxiesActiveNamedTunnelHost(t *testing.T) {
 	}
 }
 
+func TestPublicPreviewRouterRewritesOriginRedirectsToHTTPSPublicURL(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/legacy" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		http.Redirect(w, r, "http://"+r.Host+"/products", http.StatusMovedPermanently)
+	}))
+	defer backend.Close()
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	_, err = a.saveProject(t.TempDir(), ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com"},
+		Services: map[string]ServiceConfig{
+			"web": {Source: "app", Image: "python:3.12-alpine", Public: true, OriginHost: "app.localhost"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := nowUTC()
+	if err := a.upsertPreview(PreviewRecord{ID: "demo-pr-17", Project: "demo", Status: "running", CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("demo-pr-17", PreviewService{Name: "web", Status: "healthy", URL: "https://pr-17.preview.example.com", OriginURL: backend.URL, StartedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		host          string
+		forwardedHost string
+	}{
+		{name: "public host over local router", host: "pr-17.preview.example.com"},
+		{name: "forwarded public host over loopback router", host: "127.0.0.1:7777", forwardedHost: "pr-17.preview.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "http://"+tc.host+"/legacy", nil)
+			req.Host = tc.host
+			if tc.forwardedHost != "" {
+				req.Header.Set("X-Forwarded-Host", tc.forwardedHost)
+			}
+			rec := httptest.NewRecorder()
+
+			a.controlPlaneHandler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMovedPermanently {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if got, want := rec.Header().Get("Location"), "https://pr-17.preview.example.com/products"; got != want {
+				t.Fatalf("Location = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestPublicPreviewRouterPreservesOriginSubdomainRedirects(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/legacy":
+			http.Redirect(w, r, "http://seller."+r.Host+"/products", http.StatusMovedPermanently)
+		case "/products":
+			if r.Host != "seller.app.localhost" {
+				http.Error(w, "wrong upstream host: "+r.Host, http.StatusMisdirectedRequest)
+				return
+			}
+			_, _ = w.Write([]byte("seller products"))
+		case "/base":
+			if r.Host != "seller.app.localhost" {
+				http.Error(w, "wrong upstream host: "+r.Host, http.StatusMisdirectedRequest)
+				return
+			}
+			http.Redirect(w, r, "http://app.localhost/home", http.StatusMovedPermanently)
+		case "/admin":
+			if r.Host != "seller.app.localhost" {
+				http.Error(w, "wrong upstream host: "+r.Host, http.StatusMisdirectedRequest)
+				return
+			}
+			http.Redirect(w, r, "http://admin.app.localhost/dashboard", http.StatusMovedPermanently)
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	defer backend.Close()
+	staleProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://pr-17.preview.example.com/products", http.StatusMovedPermanently)
+	}))
+	defer staleProxy.Close()
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	_, err = a.saveProject(t.TempDir(), ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com"},
+		Services: map[string]ServiceConfig{
+			"web": {Source: "app", Image: "python:3.12-alpine", Public: true, OriginHost: "app.localhost"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := nowUTC()
+	if err := a.upsertPreview(PreviewRecord{ID: "demo-pr-17", Project: "demo", Status: "running", CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("demo-pr-17", PreviewService{Name: "web", Status: "healthy", URL: "https://pr-17.preview.example.com", OriginURL: backend.URL, ProxyURL: staleProxy.URL, StartedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "http://pr-17.preview.example.com/legacy", nil)
+	req.Host = "pr-17.preview.example.com"
+	rec := httptest.NewRecorder()
+	a.controlPlaneHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "https://seller-pr-17.preview.example.com/products"; got != want {
+		t.Fatalf("Location = %q; want %q", got, want)
+	}
+
+	req = httptest.NewRequest("GET", "http://seller-pr-17.preview.example.com/products", nil)
+	req.Host = "seller-pr-17.preview.example.com"
+	rec = httptest.NewRecorder()
+	a.controlPlaneHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("prefixed host status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "seller products" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/base", want: "https://pr-17.preview.example.com/home"},
+		{path: "/admin", want: "https://admin-pr-17.preview.example.com/dashboard"},
+	} {
+		req = httptest.NewRequest("GET", "http://seller-pr-17.preview.example.com"+tc.path, nil)
+		req.Host = "seller-pr-17.preview.example.com"
+		rec = httptest.NewRecorder()
+		a.controlPlaneHandler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusMovedPermanently {
+			t.Fatalf("%s status = %d, body = %s", tc.path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Location"); got != tc.want {
+			t.Fatalf("%s Location = %q; want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 func TestDockerRunArgsPassEnvNamesWithoutValues(t *testing.T) {
 	args, err := dockerRunArgs(dockerServiceSpec{
 		PreviewID: "demo-pr-17",

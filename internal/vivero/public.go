@@ -219,9 +219,6 @@ func (a *App) servePublicPreview(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	targetRaw := serviceOriginURL(svc)
-	if svc.ProxyURL != "" {
-		targetRaw = svc.ProxyURL
-	}
 	if targetRaw == "" {
 		http.Error(w, "preview service has no upstream", http.StatusBadGateway)
 		return true
@@ -231,13 +228,46 @@ func (a *App) servePublicPreview(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, "preview service upstream is invalid", http.StatusBadGateway)
 		return true
 	}
-	hostHeader, err := publicProxyHostHeader(target, svcCfg)
+	baseHostHeader, err := publicProxyHostHeader(target, svcCfg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return true
 	}
-	newHeaderRewriteProxy(target, hostHeader, svcCfg.PublicRewrite).ServeHTTP(w, r)
+	basePublicURL := svc.URL
+	basePublicHost := previewServicePublicHost(svc)
+	hostHeader := publicRouteHostHeader(baseHostHeader, host, basePublicHost)
+	proxyReq := publicPreviewProxyRequest(r, svc.URL, host)
+	newPublicRouteHeaderRewriteProxy(target, hostHeader, baseHostHeader, basePublicURL, svcCfg.PublicRewrite).ServeHTTP(w, proxyReq)
 	return true
+}
+
+func publicPreviewProxyRequest(r *http.Request, publicURL, routeHost string) *http.Request {
+	if r == nil {
+		return r
+	}
+	publicHost := routeHost
+	if publicHost == "" {
+		publicHost = hostFromOrigin(publicURL)
+	}
+	publicScheme := schemeFromOrigin(publicURL)
+	if publicHost == "" && publicScheme == "" {
+		return r
+	}
+	clone := r.Clone(r.Context())
+	if publicHost != "" {
+		clone.Host = publicHost
+		clone.Header.Set("X-Forwarded-Host", publicHost)
+	}
+	if publicScheme != "" {
+		clone.Header.Set("X-Forwarded-Proto", publicScheme)
+		switch publicScheme {
+		case "https":
+			clone.Header.Set("X-Forwarded-Port", "443")
+		case "http":
+			clone.Header.Set("X-Forwarded-Port", "80")
+		}
+	}
+	return clone
 }
 
 func publicRouteHost(r *http.Request) string {
@@ -283,6 +313,46 @@ func publicProxyHostHeader(target *url.URL, svcCfg ServiceConfig) (string, error
 	return hostHeader, nil
 }
 
+func publicRouteHostHeader(hostHeader, routeHost, publicHost string) string {
+	label := derivedPublicSubdomainLabel(routeHost, publicHost)
+	if label == "" {
+		return hostHeader
+	}
+	hostname := hostnameOnly(hostHeader)
+	if hostname == "" || net.ParseIP(hostname) != nil {
+		return hostHeader
+	}
+	if strings.HasPrefix(strings.ToLower(hostname), label+".") {
+		return hostHeader
+	}
+	prefixed := label + "." + hostname
+	if h, port, err := net.SplitHostPort(hostHeader); err == nil {
+		h = strings.Trim(h, "[]")
+		if h == "" || net.ParseIP(h) != nil {
+			return hostHeader
+		}
+		return net.JoinHostPort(label+"."+h, port)
+	}
+	return prefixed
+}
+
+func derivedPublicSubdomainLabel(host, publicHost string) string {
+	host = strings.ToLower(hostnameOnly(host))
+	publicHost = strings.ToLower(hostnameOnly(publicHost))
+	if host == "" || publicHost == "" || host == publicHost {
+		return ""
+	}
+	suffix := "-" + publicHost
+	if !strings.HasSuffix(host, suffix) {
+		return ""
+	}
+	label := strings.TrimSuffix(host, suffix)
+	if label == "" || strings.Contains(label, ".") {
+		return ""
+	}
+	return publicDNSLabelSlug(label, "host")
+}
+
 func isLoopbackHost(host string) bool {
 	host = strings.ToLower(hostnameOnly(host))
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
@@ -293,6 +363,7 @@ func isLoopbackHost(host string) bool {
 }
 
 func (a *App) previewServiceForPublicHost(host string) (PreviewRecord, string, PreviewService, bool) {
+	host = strings.ToLower(hostnameOnly(host))
 	previews, err := a.listPreviews()
 	if err != nil {
 		return PreviewRecord{}, "", PreviewService{}, false
@@ -302,12 +373,35 @@ func (a *App) previewServiceForPublicHost(host string) (PreviewRecord, string, P
 			if !previewServiceHasPublicURL(svc) {
 				continue
 			}
-			if strings.ToLower(hostnameOnly(hostFromOrigin(svc.URL))) == host {
+			if previewServicePublicHost(svc) == host {
+				return p, name, svc, true
+			}
+		}
+	}
+	for _, p := range previews {
+		for name, svc := range p.Services {
+			if !previewServiceHasPublicURL(svc) {
+				continue
+			}
+			if isDerivedPublicSubdomainHost(host, previewServicePublicHost(svc)) {
 				return p, name, svc, true
 			}
 		}
 	}
 	return PreviewRecord{}, "", PreviewService{}, false
+}
+
+func previewServicePublicHost(svc PreviewService) string {
+	return strings.ToLower(hostnameOnly(hostFromOrigin(svc.URL)))
+}
+
+func isDerivedPublicSubdomainHost(host, publicHost string) bool {
+	host = strings.ToLower(hostnameOnly(host))
+	publicHost = strings.ToLower(hostnameOnly(publicHost))
+	if host == "" || publicHost == "" || host == publicHost {
+		return false
+	}
+	return strings.HasSuffix(host, "-"+publicHost)
 }
 
 func previewServiceHasPublicURL(svc PreviewService) bool {
