@@ -51,6 +51,9 @@ func (a *App) runEvidence(args []string, stdout, stderr io.Writer, jsonOut bool)
 		}
 		attachEvidenceShape(v, targetRef)
 		output(stdout, jsonOut, v, evidenceFlowHuman(v))
+		if !opts.DryRun && v["ok"] != true {
+			return 1
+		}
 		return 0
 	case "qa":
 		if len(args) < 2 {

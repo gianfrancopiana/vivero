@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -131,6 +132,38 @@ actions:
 		if !strings.Contains(string(report), want) {
 			t.Fatalf("report should include %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestEvidenceFlowCommandReturnsNonZeroWithFailurePayload(t *testing.T) {
+	t.Setenv("VIVERO_PLAYWRIGHT_PACKAGE", "")
+	a, _ := newQARecordTestApp(t)
+	defer a.Close()
+
+	stepsFile := filepath.Join(t.TempDir(), "flow.json")
+	if err := os.WriteFile(stepsFile, []byte(`{"name":"bad-flow","actions":[{"expectText":"Never shown"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(t.TempDir(), "flow-artifacts")
+	a.qaRecordRunner = &fakeQARecordRunner{runFunc: func(name string, args ...string) ([]byte, []byte, error) {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return []byte(`{"ok":false,"flow":{"name":"bad-flow"},"variants":[{"name":"default","ok":false,"errors":["expected text not found"],"artifacts":{"screenshots":[]}}],"artifacts":{"screenshots":[]}}`), nil, nil
+	}}
+
+	var stdout, stderr bytes.Buffer
+	code := a.runEvidence([]string{"flow", "preview:qa-pr", "--steps-file", stepsFile, "--target", "local", "--out", outputDir, "--json", "--no-input"}, &stdout, &stderr, true)
+	if code == 0 || stderr.Len() != 0 {
+		t.Fatalf("failed evidence flow should return non-zero with JSON on stdout, code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	payload := decodeJSONMap(t, stdout.String())
+	assertEvidenceShape(t, payload)
+	if payload["ok"] != false || payload["resultPath"] == "" {
+		t.Fatalf("failure payload should be preserved on stdout with artifact paths: %#v", payload)
+	}
+	if _, err := os.Stat(payload["resultPath"].(string)); err != nil {
+		t.Fatalf("failure result artifact should be written: %v", err)
 	}
 }
 
