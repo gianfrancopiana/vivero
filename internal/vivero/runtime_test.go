@@ -949,7 +949,7 @@ func TestPublicPreviewRewriterSupportsBasePublicTemplatePlaceholders(t *testing.
 			{From: `href=\"{routePublicOrigin}/discover\"`, To: `href=\"{basePublicOrigin}/discover\"`},
 		},
 	})
-	body := `data-page=\"{&quot;domain_settings&quot;:{&quot;root_domain&quot;:&quot;seller-main.preview.example.com&quot;}}\"<a href=\"https://seller-main.preview.example.com/discover\">Logo</a>`
+	body := `data-page=\"{&quot;domain_settings&quot;:{&quot;root_domain&quot;:&quot;seller-main.preview.example.com&quot;}}\"<a href=\"https://seller-main.preview.example.com/discover\">Logo</a><a href=\"http://main.preview.example.com/discover\">Base logo</a>`
 
 	got := rewriter.rewrite(body, "https://seller-main.preview.example.com")
 
@@ -958,8 +958,10 @@ func TestPublicPreviewRewriterSupportsBasePublicTemplatePlaceholders(t *testing.
 			t.Fatalf("body missing %q: %s", expected, got)
 		}
 	}
-	if strings.Contains(got, `seller-main.preview.example.com/discover`) {
-		t.Fatalf("discover URL still points at route public host: %s", got)
+	for _, disallowed := range []string{`seller-main.preview.example.com/discover`, `http://main.preview.example.com/discover`} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("body still contains %q: %s", disallowed, got)
+		}
 	}
 }
 

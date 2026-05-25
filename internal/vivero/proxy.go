@@ -199,6 +199,9 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 		out = strings.ReplaceAll(out, from, expandPublicRewriteTemplate(replacement.To, templateContext))
 	}
 	out = normalizePublicHostScheme(out, publicHost, publicScheme)
+	if templateContext.BasePublicHost != "" && templateContext.BasePublicHost != publicHost {
+		out = normalizePublicHostScheme(out, templateContext.BasePublicHost, templateContext.BasePublicScheme)
+	}
 	return out
 }
 
