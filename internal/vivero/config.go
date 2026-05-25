@@ -154,8 +154,33 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if _, exists := cfg.Services[name]; exists {
 			return fmt.Errorf("%s service name %s is declared in both services and backingServices", configPath, name)
 		}
-		if strings.TrimSpace(backing.Image) == "" {
-			return fmt.Errorf("%s backing service %s must declare image", configPath, name)
+		runtime := backingRuntime(backing)
+		switch runtime {
+		case "docker":
+			if strings.TrimSpace(backing.Image) == "" {
+				return fmt.Errorf("%s backing service %s must declare image", configPath, name)
+			}
+		case "compose":
+			if strings.TrimSpace(backing.Source) == "" {
+				return fmt.Errorf("%s backing service %s uses runtime compose and must declare source", configPath, name)
+			}
+			if len(composeFiles(backing.Compose)) == 0 {
+				return fmt.Errorf("%s backing service %s uses runtime compose and must declare compose.file or compose.files", configPath, name)
+			}
+			if strings.TrimSpace(backing.Image) != "" {
+				return fmt.Errorf("%s backing service %s uses runtime compose; keep image definitions in the app-owned Compose file", configPath, name)
+			}
+			if !backing.Command.IsZero() {
+				return fmt.Errorf("%s backing service %s uses runtime compose; keep the service command in the app-owned Compose file", configPath, name)
+			}
+			if len(backing.Env) > 0 {
+				return fmt.Errorf("%s backing service %s uses runtime compose; keep env contracts in the app-owned Compose file", configPath, name)
+			}
+			if len(backing.DependencyVolumes) > 0 {
+				return fmt.Errorf("%s backing service %s uses runtime compose; keep dependency volumes in the app-owned Compose file", configPath, name)
+			}
+		default:
+			return fmt.Errorf("%s backing service %s has unsupported runtime %q; use docker or compose", configPath, name, runtime)
 		}
 		if err := validateRuntimeEnv(configPath, "backing service", name, backing.Env); err != nil {
 			return err
@@ -308,6 +333,18 @@ func (a *App) refreshProjectConfig(project ProjectRecord) (ProjectRecord, error)
 
 func serviceRuntime(s ServiceConfig) string {
 	runtime := strings.ToLower(strings.TrimSpace(s.Runtime))
+	switch runtime {
+	case "", "container", "containers", "docker", "docker-cli", "orbstack":
+		return "docker"
+	case "compose", "docker-compose", "docker compose":
+		return "compose"
+	default:
+		return runtime
+	}
+}
+
+func backingRuntime(b BackingConfig) string {
+	runtime := strings.ToLower(strings.TrimSpace(b.Runtime))
 	switch runtime {
 	case "", "container", "containers", "docker", "docker-cli", "orbstack":
 		return "docker"

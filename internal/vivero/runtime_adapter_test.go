@@ -156,6 +156,34 @@ services:
 	}
 }
 
+func TestLoadProjectConfigAllowsComposeRuntimeBackingService(t *testing.T) {
+	root := t.TempDir()
+	cfg := []byte(`project:
+  name: compose-backing
+sources:
+  gumroad:
+    path: .
+backingServices:
+  db:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: db_test
+`)
+	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, loaded, err := loadProjectConfig(root)
+	if err != nil {
+		t.Fatalf("compose runtime backing should be accepted without duplicating image/command/volumes: %v", err)
+	}
+	backing := loaded.BackingServices["db"]
+	if backingRuntime(backing) != "compose" || backing.Compose.Service != "db_test" {
+		t.Fatalf("compose backing not loaded: %#v", backing)
+	}
+}
+
 func TestLoadProjectConfigRejectsComposeRuntimeDuplication(t *testing.T) {
 	tests := []struct {
 		name string
@@ -192,6 +220,47 @@ services:
 			_, _, err := loadProjectConfig(root)
 			if err == nil {
 				t.Fatal("expected compose runtime duplication to be rejected")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error should mention %q: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadProjectConfigRejectsComposeBackingDuplication(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "image", body: "    image: mysql:8\n", want: "image definitions"},
+		{name: "command", body: "    command: mysqld\n", want: "service command"},
+		{name: "env", body: "    env:\n      MYSQL_ROOT_PASSWORD: password\n", want: "env contracts"},
+		{name: "dependency volume", body: "    dependencyVolumes:\n      - name: data\n        target: /var/lib/mysql\n", want: "dependency volumes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfg := []byte(`project:
+  name: compose-backing-duplication
+sources:
+  gumroad:
+    path: .
+backingServices:
+  db:
+    source: gumroad
+    runtime: compose
+    compose:
+      file: docker/docker-compose-test-and-ci.yml
+      service: db_test
+` + tt.body)
+			if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := loadProjectConfig(root)
+			if err == nil {
+				t.Fatal("expected compose backing duplication to be rejected")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error should mention %q: %v", tt.want, err)
@@ -328,6 +397,7 @@ func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 		ComposeService: "web",
 		OverrideFile:   dockerComposeOverridePath(home, "preview-pr-9", "web-preview"),
 		Network:        dockerNetworkName("preview-pr-9"),
+		NetworkAliases: []string{"web-preview", "web"},
 		Ports:          []ServicePort{{Name: "http", Container: 3000, Protocol: "tcp"}},
 		Env:            map[string]string{"VIVERO_PUBLIC_URL": "https://preview.example"},
 	}
@@ -343,6 +413,9 @@ func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 		"vivero.preview: preview-pr-9",
 		"vivero.service: web-preview",
 		"127.0.0.1::3000",
+		"aliases:",
+		"- web-preview",
+		"- web",
 		"VIVERO_PUBLIC_URL: https://preview.example",
 		"external: true",
 		"name: " + dockerNetworkName("preview-pr-9"),
@@ -392,6 +465,39 @@ func TestStartDockerServiceSupportsComposeRuntime(t *testing.T) {
 	}
 	if !strings.Contains(string(overrideBody), "vivero.preview: preview-compose") || !strings.Contains(string(overrideBody), "VIVERO_PUBLIC_URL") {
 		t.Fatalf("compose override did not include Vivero metadata/env:\n%s", overrideBody)
+	}
+}
+
+func TestComposeRuntimeSupportsBackingServiceAlias(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_COMPOSE_SERVICES", "db_test redis")
+	home := t.TempDir()
+	source := t.TempDir()
+	composePath := filepath.Join(source, "docker-compose-test-and-ci.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  db_test:\n    image: mysql\n  redis:\n    image: redis\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backing := BackingConfig{
+		Source:  "gumroad",
+		Runtime: "compose",
+		Compose: ComposeConfig{File: "docker-compose-test-and-ci.yml", Service: "db_test"},
+	}
+	containerID, err := startDockerService(home, "gumroad-main", "preview-compose-db", "db", serviceConfigForBacking(backing), map[string]PreviewSource{"gumroad": {Path: source}}, nil)
+	if err != nil {
+		t.Fatalf("start compose backing: %v", err)
+	}
+	if !strings.Contains(containerID, "preview-compose-db") || !strings.Contains(containerID, "db_test") {
+		t.Fatalf("unexpected compose backing container id: %s", containerID)
+	}
+	overrideBody, err := os.ReadFile(dockerComposeOverridePath(home, "preview-compose-db", "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := string(overrideBody)
+	for _, want := range []string{"vivero.service: db", "aliases:", "- db", "- db_test"} {
+		if !strings.Contains(override, want) {
+			t.Fatalf("compose backing override missing %q:\n%s", want, override)
+		}
 	}
 }
 
