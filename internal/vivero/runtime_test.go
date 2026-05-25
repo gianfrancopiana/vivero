@@ -635,7 +635,7 @@ func TestPublicPreviewRewriterRewritesURLEncodedOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriter := newPublicPreviewRewriter(target, "localhost", PublicRewriteConfig{})
+	rewriter := newPublicPreviewRewriter(target, "localhost", "", PublicRewriteConfig{})
 	body := `<a href="/login?next=https%3A%2F%2Flocalhost%2F">Log in</a>`
 	got := rewriter.rewrite(body, "https://preview.trycloudflare.com")
 	if strings.Contains(got, "localhost") || strings.Contains(strings.ToLower(got), "localhost") {
@@ -651,7 +651,7 @@ func TestPublicPreviewRewriterRewritesProtocolRelativeDevHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriter := newPublicPreviewRewriter(target, "localhost", PublicRewriteConfig{Hosts: []string{"app.localhost:3000"}})
+	rewriter := newPublicPreviewRewriter(target, "localhost", "", PublicRewriteConfig{Hosts: []string{"app.localhost:3000"}})
 	body := `<link rel="dns-prefetch" href="//app.localhost"><link rel="dns-prefetch" href="//localhost">`
 	got := rewriter.rewrite(body, "https://preview.trycloudflare.com")
 	if strings.Contains(got, "localhost") {
@@ -935,6 +935,31 @@ func TestHeaderRewriteProxyAppliesConfiguredPublicRewrites(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("body missing %q: %s", expected, body)
 		}
+	}
+}
+
+func TestPublicPreviewRewriterSupportsBasePublicTemplatePlaceholders(t *testing.T) {
+	target, err := url.Parse("http://localhost:3310")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriter := newPublicPreviewRewriter(target, "localhost", "https://main.preview.example.com", PublicRewriteConfig{
+		Replacements: []PublicRewriteTemplate{
+			{From: `&quot;root_domain&quot;:&quot;{publicHost}&quot;`, To: `&quot;root_domain&quot;:&quot;{basePublicHost}&quot;`},
+			{From: `href=\"{routePublicOrigin}/discover\"`, To: `href=\"{basePublicOrigin}/discover\"`},
+		},
+	})
+	body := `data-page=\"{&quot;domain_settings&quot;:{&quot;root_domain&quot;:&quot;seller-main.preview.example.com&quot;}}\"<a href=\"https://seller-main.preview.example.com/discover\">Logo</a>`
+
+	got := rewriter.rewrite(body, "https://seller-main.preview.example.com")
+
+	for _, expected := range []string{`&quot;root_domain&quot;:&quot;main.preview.example.com&quot;`, `href=\"https://main.preview.example.com/discover\"`} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("body missing %q: %s", expected, got)
+		}
+	}
+	if strings.Contains(got, `seller-main.preview.example.com/discover`) {
+		t.Fatalf("discover URL still points at route public host: %s", got)
 	}
 }
 

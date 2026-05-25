@@ -48,9 +48,20 @@ func runHeaderRewriteProxy(listen, target, hostHeader string, publicRewrite Publ
 }
 
 func newHeaderRewriteProxy(target *url.URL, hostHeader string, publicRewrite PublicRewriteConfig) *httputil.ReverseProxy {
+	return newHeaderRewriteProxyWithRewriteHost(target, hostHeader, hostHeader, "", publicRewrite)
+}
+
+func newPublicRouteHeaderRewriteProxy(target *url.URL, hostHeader, rewriteHostHeader, basePublicOrigin string, publicRewrite PublicRewriteConfig) *httputil.ReverseProxy {
+	if rewriteHostHeader == "" {
+		rewriteHostHeader = hostHeader
+	}
+	return newHeaderRewriteProxyWithRewriteHost(target, hostHeader, rewriteHostHeader, basePublicOrigin, publicRewrite)
+}
+
+func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHostHeader, basePublicOrigin string, publicRewrite PublicRewriteConfig) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	baseDirector := proxy.Director
-	rewriter := newPublicPreviewRewriter(target, hostHeader, publicRewrite)
+	rewriter := newPublicPreviewRewriter(target, rewriteHostHeader, basePublicOrigin, publicRewrite)
 	proxy.Director = func(req *http.Request) {
 		publicOrigin := publicOriginForIncomingRequest(req)
 		publicScheme := schemeFromOrigin(publicOrigin)
@@ -104,6 +115,8 @@ type publicPreviewRewriter struct {
 	exactHosts            []string
 	protocolRelativeHosts []string
 	replacements          []PublicRewriteTemplate
+	originHost            string
+	basePublicOrigin      string
 	devOriginRE           *regexp.Regexp
 }
 
@@ -112,7 +125,7 @@ type encodedOriginRewrite struct {
 	To   string
 }
 
-func newPublicPreviewRewriter(target *url.URL, hostHeader string, cfg PublicRewriteConfig) publicPreviewRewriter {
+func newPublicPreviewRewriter(target *url.URL, hostHeader, basePublicOrigin string, cfg PublicRewriteConfig) publicPreviewRewriter {
 	exact := []string{}
 	if target != nil && target.Scheme != "" && target.Host != "" {
 		exact = append(exact, strings.TrimRight(target.String(), "/"))
@@ -139,7 +152,7 @@ func newPublicPreviewRewriter(target *url.URL, hostHeader string, cfg PublicRewr
 	if hostname != "" {
 		re = regexp.MustCompile(`https?://(?:[A-Za-z0-9-]+\.)?` + regexp.QuoteMeta(hostname) + `(?::\d+)?`)
 	}
-	return publicPreviewRewriter{exactOrigins: exact, encodedOrigins: encodedOrigins, exactHosts: exactHosts, protocolRelativeHosts: protocolRelativeHosts, replacements: cfg.Replacements, devOriginRE: re}
+	return publicPreviewRewriter{exactOrigins: exact, encodedOrigins: encodedOrigins, exactHosts: exactHosts, protocolRelativeHosts: protocolRelativeHosts, replacements: cfg.Replacements, originHost: hostname, basePublicOrigin: strings.TrimRight(basePublicOrigin, "/"), devOriginRE: re}
 }
 
 func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
@@ -148,6 +161,14 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 	}
 	publicHost := hostFromOrigin(publicOrigin)
 	publicScheme := schemeFromOrigin(publicOrigin)
+	templateContext := publicRewriteTemplateContext{
+		PublicOrigin:     publicOrigin,
+		PublicHost:       publicHost,
+		PublicScheme:     publicScheme,
+		BasePublicOrigin: r.rewriteBasePublicOrigin(publicOrigin),
+	}
+	templateContext.BasePublicHost = hostFromOrigin(templateContext.BasePublicOrigin)
+	templateContext.BasePublicScheme = schemeFromOrigin(templateContext.BasePublicOrigin)
 	out := input
 	for _, origin := range r.exactOrigins {
 		out = strings.ReplaceAll(out, origin, publicOrigin)
@@ -160,7 +181,7 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 		out = strings.ReplaceAll(out, replacement.From, to)
 	}
 	if r.devOriginRE != nil {
-		out = r.devOriginRE.ReplaceAllString(out, publicOrigin)
+		out = r.rewriteDevOrigins(out, publicOrigin)
 	}
 	if publicHost != "" {
 		for _, host := range r.exactHosts {
@@ -171,13 +192,94 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 		}
 	}
 	for _, replacement := range r.replacements {
-		if replacement.From == "" {
+		from := expandPublicRewriteTemplate(replacement.From, templateContext)
+		if from == "" {
 			continue
 		}
-		out = strings.ReplaceAll(out, replacement.From, expandPublicRewriteTemplate(replacement.To, publicOrigin, publicHost, publicScheme))
+		out = strings.ReplaceAll(out, from, expandPublicRewriteTemplate(replacement.To, templateContext))
 	}
 	out = normalizePublicHostScheme(out, publicHost, publicScheme)
 	return out
+}
+
+func (r publicPreviewRewriter) rewriteBasePublicOrigin(publicOrigin string) string {
+	if r.basePublicOrigin != "" {
+		return r.basePublicOrigin
+	}
+	return publicOrigin
+}
+
+func (r publicPreviewRewriter) rewriteDevOrigins(input, publicOrigin string) string {
+	if r.devOriginRE == nil {
+		return input
+	}
+	basePublicOrigin := r.basePublicOrigin
+	if basePublicOrigin == "" {
+		basePublicOrigin = publicOrigin
+	}
+	basePublicHost := hostFromOrigin(basePublicOrigin)
+	return r.devOriginRE.ReplaceAllStringFunc(input, func(match string) string {
+		subdomain, ok := r.devOriginSubdomain(match)
+		if !ok {
+			return match
+		}
+		if subdomain == "" {
+			return basePublicOrigin
+		}
+		return publicOriginForDevSubdomain(basePublicOrigin, basePublicHost, subdomain)
+	})
+}
+
+func (r publicPreviewRewriter) devOriginSubdomain(origin string) (string, bool) {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return "", false
+	}
+	host := strings.ToLower(hostnameOnly(parsed.Host))
+	originHost := strings.ToLower(hostnameOnly(r.originHost))
+	if host == "" || originHost == "" {
+		return "", false
+	}
+	if host == originHost {
+		return "", true
+	}
+	suffix := "." + originHost
+	if !strings.HasSuffix(host, suffix) {
+		return "", false
+	}
+	subdomain := strings.TrimSuffix(host, suffix)
+	if subdomain == "" || strings.Contains(subdomain, ".") {
+		return "", false
+	}
+	return subdomain, true
+}
+
+func publicOriginForDevSubdomain(publicOrigin, publicHost, subdomain string) string {
+	parsed, err := url.Parse(publicOrigin)
+	if err != nil {
+		return publicOrigin
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		host = hostnameOnly(publicHost)
+	}
+	if !isRoutablePublicHost(host) || strings.HasSuffix(strings.ToLower(host), ".trycloudflare.com") {
+		return publicOrigin
+	}
+	label := publicDNSLabelSlug(subdomain, "host")
+	if label == "" || strings.HasPrefix(strings.ToLower(host), label+"-") {
+		return publicOrigin
+	}
+	prefixedHost := label + "-" + host
+	if !isDNSHostname(prefixedHost) {
+		return publicOrigin
+	}
+	if port := parsed.Port(); port != "" {
+		parsed.Host = net.JoinHostPort(prefixedHost, port)
+	} else {
+		parsed.Host = prefixedHost
+	}
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func encodedOriginRewrites(origins, hosts []string, hostHeader string) []encodedOriginRewrite {
@@ -257,10 +359,25 @@ func escapedSchemeHost(scheme, host string, backslashes int) string {
 	return scheme + ":" + escapedSlashPrefix + escapedSlashPrefix + host
 }
 
-func expandPublicRewriteTemplate(template, publicOrigin, publicHost, publicScheme string) string {
-	out := strings.ReplaceAll(template, "{publicOrigin}", publicOrigin)
-	out = strings.ReplaceAll(out, "{publicHost}", publicHost)
-	out = strings.ReplaceAll(out, "{publicScheme}", publicScheme)
+type publicRewriteTemplateContext struct {
+	PublicOrigin     string
+	PublicHost       string
+	PublicScheme     string
+	BasePublicOrigin string
+	BasePublicHost   string
+	BasePublicScheme string
+}
+
+func expandPublicRewriteTemplate(template string, ctx publicRewriteTemplateContext) string {
+	out := strings.ReplaceAll(template, "{publicOrigin}", ctx.PublicOrigin)
+	out = strings.ReplaceAll(out, "{publicHost}", ctx.PublicHost)
+	out = strings.ReplaceAll(out, "{publicScheme}", ctx.PublicScheme)
+	out = strings.ReplaceAll(out, "{routePublicOrigin}", ctx.PublicOrigin)
+	out = strings.ReplaceAll(out, "{routePublicHost}", ctx.PublicHost)
+	out = strings.ReplaceAll(out, "{routePublicScheme}", ctx.PublicScheme)
+	out = strings.ReplaceAll(out, "{basePublicOrigin}", ctx.BasePublicOrigin)
+	out = strings.ReplaceAll(out, "{basePublicHost}", ctx.BasePublicHost)
+	out = strings.ReplaceAll(out, "{basePublicScheme}", ctx.BasePublicScheme)
 	return out
 }
 
