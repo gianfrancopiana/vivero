@@ -9,7 +9,7 @@ Vivero is local-first. The boundary is simple: **the app owns how it runs and de
 ## What Vivero gives agents
 
 - **Preview lane:** isolated, disposable previews for local repos, branches, worktrees, and public QA proof.
-- **Evidence/cache lane:** reusable logs, events, smoke checks, screenshots, QA reports, recordings, release artifacts, and cache controls.
+- **Evidence/cache lane:** reusable logs, events, smoke checks, screenshots, app-agnostic evidence flows, QA reports, recordings, release artifacts, and cache controls.
 - **Experimental deploy/release lane:** explicit, guarded `deploy` and `release` commands for app-owned production readiness, status, smoke evidence, and rollback records.
 - JSON output for every agent-facing workflow.
 - Unique ports, networks, and state per preview.
@@ -71,8 +71,12 @@ Evidence commands return one stable target-aware JSON shape. Use preview IDs, `p
 vivero evidence logs preview:webapp-local web --json --no-input
 vivero preview diagnose startup preview:webapp-local --json --no-input
 vivero evidence screenshot preview:webapp-local web / --target local --json --no-input
+vivero evidence flow preview:webapp-local --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input
+vivero evidence flow preview:webapp-local --steps-file qa/visual-flow.yaml --target local --video --json --no-input --quiet
 vivero evidence qa run preview:webapp-local --scope smoke --target local --json --no-input
 ```
+
+Use `vivero evidence flow` for app-agnostic browser walkthroughs that do not belong in Vivero core. The `--steps-file` declares the start page, actions, variants, screenshot points, and recording preferences. `--dry-run` validates target/URL resolution and planned artifacts without launching a browser; a real run can write screenshots, video, console, and optional network artifacts per variant.
 
 The same debugging loop applies after deploys:
 
@@ -124,7 +128,7 @@ The fixture set stays intentionally small. Each fixture exists because it proves
 
 - **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, and cleanup. Prove the boring path with `make example-e2e`; prove messy preview shapes with `make nasty-integration-fixtures`.
 - **Deploy/release invariants:** production doctor and read-only plan are reviewable before side effects; app-owned apply/smoke/status/rollback commands run with Vivero IDs, locks, idempotency, release history, and blue/green slot transitions; mutating apply/rollback commands require `--confirm-production`. Prove them with `make deploy-fixtures`.
-- **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
+- **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, app-agnostic evidence flows, QA reports, recordings, release command output, and handoff paths. Use `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input`, `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input`, and release-scoped evidence commands instead of ad hoc notes.
 
 Add a new fixture only when it proves a new invariant class. Do not grow a framework zoo of example apps that all prove the same thing.
 

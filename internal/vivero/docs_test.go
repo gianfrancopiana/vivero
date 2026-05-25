@@ -72,6 +72,29 @@ func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
 	}
 }
 
+func TestDocsExplainEvidenceFlowContract(t *testing.T) {
+	files := map[string]string{
+		"readme":            "../../README.md",
+		"skill":             "../../skills/vivero/SKILL.md",
+		"certifiedExamples": "../../docs/certified-examples.md",
+	}
+	bodies := map[string]string{}
+	for name, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		bodies[name] = string(body)
+	}
+	for _, doc := range []string{"readme", "skill", "certifiedExamples"} {
+		for _, want := range []string{"vivero evidence flow", "--steps-file", "variants", "screenshots", "video", "console", "dry-run"} {
+			if !strings.Contains(bodies[doc], want) {
+				t.Fatalf("%s should document evidence flow contract with %q", doc, want)
+			}
+		}
+	}
+}
+
 func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 	files := map[string]string{
 		"makefile":          "../../Makefile",

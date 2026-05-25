@@ -58,7 +58,7 @@ func evidenceOKValue(v any) (bool, bool) {
 
 func evidenceArtifacts(payload map[string]any) map[string]any {
 	artifacts := map[string]any{}
-	for _, key := range []string{"logPath", "path", "runPath", "recordPath", "finalPath", "outputDir"} {
+	for _, key := range []string{"logPath", "path", "runPath", "recordPath", "finalPath", "resultPath", "reportPath", "outputDir"} {
 		if value := stringValue(payload[key]); value != "" {
 			artifacts[key] = value
 		}
