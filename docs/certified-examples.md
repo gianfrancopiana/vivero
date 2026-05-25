@@ -43,7 +43,7 @@ Keep the matrix tiny and invariant-led. A fixture earns its place only when it p
 
 - **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, and teardown preserves or discards work intentionally. Covered by `make example-e2e`, `make integration-fixtures`, and `make nasty-integration-fixtures`.
 - **Deploy/release invariants:** production doctor runs before plan/apply, plans are reviewable before side effects, app-owned prepare/apply/smoke/status/rollback commands get the expected environment, command execution has timeouts and capped/redacted output, release state is locked and auditable, failed smoke does not promote, and rollback keeps history consistent. Covered by `make deploy-fixtures`.
-- **Evidence invariants:** every lane returns target-aware JSON with artifact paths for events, logs, screenshots, QA reports, recordings, and release command output. Preview evidence should work through `preview:<id>` targets, and release evidence should work through `release:<id>` targets.
+- **Evidence invariants:** every lane returns target-aware JSON with artifact paths for events, logs, screenshots, app-agnostic evidence flows, QA reports, recordings, and release command output. Preview evidence should work through `preview:<id>` targets, and release evidence should work through `release:<id>` targets. For browser walkthroughs, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input` validates variants, screenshots, video, console, and artifact planning before the real run.
 
 Do not add a parallel example just because a framework is popular. Extend the smallest existing fixture unless the new case creates a distinct invariant failure mode.
 
@@ -70,7 +70,7 @@ Certified examples prove cache and evidence contracts by asserting deterministic
 - `cache inspect` output showing configured build cache dirs, warm volumes, project volumes, and Vivero-tagged images;
 - warm baseline/derived events that show when a baseline volume was reused or copied for a branch/ref;
 - deploy phase durations for prepare, apply, smoke, status, promote, and rollback;
-- artifact paths for logs, screenshots, QA reports, recordings, release command output, and final handoff JSON.
+- artifact paths for logs, screenshots, evidence flow result/report files, QA reports, recordings, release command output, and final handoff JSON.
 
 Fixture gates should assert those fields and paths directly. They should not claim a precise speedup unless the test controls the environment tightly enough to make timing meaningful.
 

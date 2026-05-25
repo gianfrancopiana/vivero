@@ -4,10 +4,12 @@ import "testing"
 
 func TestAttachEvidenceShapeMergesDiscoveredArtifacts(t *testing.T) {
 	payload := map[string]any{
-		"ok":        true,
-		"runPath":   "/tmp/qa/run-2.json",
-		"finalPath": "/tmp/qa/final-2.json",
-		"artifacts": map[string]any{"dir": "/tmp/qa", "runPath": "/tmp/qa/run.json"},
+		"ok":         true,
+		"runPath":    "/tmp/qa/run-2.json",
+		"finalPath":  "/tmp/qa/final-2.json",
+		"resultPath": "/tmp/qa/result.json",
+		"reportPath": "/tmp/qa/report.md",
+		"artifacts":  map[string]any{"dir": "/tmp/qa", "runPath": "/tmp/qa/run.json"},
 	}
 
 	attachEvidenceShape(payload, map[string]any{"kind": "preview", "id": "pr-1", "ref": "preview:pr-1"})
@@ -15,7 +17,7 @@ func TestAttachEvidenceShapeMergesDiscoveredArtifacts(t *testing.T) {
 	if artifacts["dir"] != "/tmp/qa" {
 		t.Fatalf("existing artifact dir should be preserved: %#v", artifacts)
 	}
-	if artifacts["runPath"] != "/tmp/qa/run-2.json" || artifacts["finalPath"] != "/tmp/qa/final-2.json" {
+	if artifacts["runPath"] != "/tmp/qa/run-2.json" || artifacts["finalPath"] != "/tmp/qa/final-2.json" || artifacts["resultPath"] != "/tmp/qa/result.json" || artifacts["reportPath"] != "/tmp/qa/report.md" {
 		t.Fatalf("discovered artifact paths should override stale plan defaults: %#v", artifacts)
 	}
 }

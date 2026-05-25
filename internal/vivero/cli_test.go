@@ -80,6 +80,16 @@ func TestRunHelpAndSubcommandHelpAreExamplesFirst(t *testing.T) {
 			t.Fatalf("qa run help missing %q:\n%s", want, stdout)
 		}
 	}
+
+	code, stdout, stderr = runCLITestCommand(t, home, "help", "evidence", "flow")
+	if code != 0 || stderr != "" {
+		t.Fatalf("evidence flow help exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, want := range []string{"vivero evidence flow", "--steps-file", "--dry-run", "--print-script", "--video", "JSON stability: stable"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("evidence flow help missing %q:\n%s", want, stdout)
+		}
+	}
 }
 
 func TestRunInitWritesThinConfigAndDoctorPasses(t *testing.T) {
@@ -219,6 +229,70 @@ func TestEvidenceNamespaceRoutesPreviewEvidenceCommands(t *testing.T) {
 				t.Fatalf("evidence command should preserve preview targetRef: %s", evidenceStdout)
 			}
 		})
+	}
+}
+
+func TestEvidenceFlowDryRunResolvesVariantsAndArtifacts(t *testing.T) {
+	home := t.TempDir()
+	setupCLIQAPreview(t, home)
+	stepsFile := filepath.Join(t.TempDir(), "flow.json")
+	if err := os.WriteFile(stepsFile, []byte(`{
+  "name": "visual-review",
+  "start": { "page": "home" },
+  "variants": [
+    { "name": "desktop-light", "viewport": { "width": 1440, "height": 1000 }, "colorScheme": "light" },
+    { "name": "mobile-dark", "viewport": { "width": 390, "height": 844 }, "deviceScaleFactor": 3, "isMobile": true, "colorScheme": "dark" }
+  ],
+  "record": { "video": true, "screenshots": true, "console": true, "network": true },
+  "actions": [
+    { "screenshot": { "name": "home", "fullPage": true } },
+    { "expectText": "Demo" }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLITestCommand(t, home, "evidence", "flow", "preview:cli-pr", "--steps-file", stepsFile, "--target", "local", "--dry-run", "--print-script", "--wait-ms", "0", "--out", filepath.Join(home, "flow-artifacts"), "--json", "--no-input")
+	if code != 0 || stderr != "" {
+		t.Fatalf("evidence flow dry-run failed exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	payload := decodeJSONMap(t, stdout)
+	assertEvidenceShape(t, payload)
+	if payload["dryRun"] != true || payload["wouldLaunch"] != false || payload["script"] == "" {
+		t.Fatalf("dry-run should not launch and should expose script when requested: %#v", payload)
+	}
+	if payload["outputDir"] != filepath.Join(home, "flow-artifacts") {
+		t.Fatalf("dry-run should expose resolved output dir: %#v", payload)
+	}
+	flow := payload["flow"].(map[string]any)
+	start := flow["start"].(map[string]any)
+	if start["url"] != "http://127.0.0.1:7777/" || start["service"] != "web" {
+		t.Fatalf("flow start should resolve common page against local target: %#v", start)
+	}
+	variants := payload["variants"].([]any)
+	if len(variants) != 2 {
+		t.Fatalf("expected two variants, got %#v", variants)
+	}
+	mobile := variants[1].(map[string]any)
+	viewport := mobile["viewport"].(map[string]any)
+	if mobile["name"] != "mobile-dark" || mobile["isMobile"] != true || mobile["colorScheme"] != "dark" || viewport["width"] != float64(390) || viewport["height"] != float64(844) || mobile["deviceScaleFactor"] != float64(3) {
+		t.Fatalf("mobile variant should preserve viewport/mobile/color contract: %#v", mobile)
+	}
+	record := payload["record"].(map[string]any)
+	if record["video"] != true || record["screenshots"] != true || record["console"] != true || record["network"] != true || record["format"] != "mp4" {
+		t.Fatalf("record contract not preserved: %#v", record)
+	}
+	plan := payload["plan"].(map[string]any)
+	options := plan["options"].(map[string]any)
+	if options["waitMs"] != float64(0) {
+		t.Fatalf("explicit --wait-ms 0 should disable flow waits: %#v", options)
+	}
+}
+
+func TestEvidenceFlowRejectsReleaseTargets(t *testing.T) {
+	_, payload := runCLITestJSONError(t, "evidence", "flow", "release:rel-1", "--steps-file", "flow.json")
+	if payload.Error.Code != "unsupported_target" {
+		t.Fatalf("expected unsupported_target for release evidence flow, got %#v", payload)
 	}
 }
 

@@ -43,7 +43,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"init", "up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "evidence events", "evidence logs", "evidence screenshot", "evidence qa", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"init", "up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "evidence events", "evidence logs", "evidence screenshot", "evidence flow", "evidence qa", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing manifest for %s", name)
 		}
@@ -63,6 +63,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		{name: "evidence events", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "evidence logs", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "evidence screenshot", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
+		{name: "evidence flow", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "evidence qa", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "qa run", category: "qa", visibility: CommandVisibilityCommon, lane: CommandLaneEvidence},
 		{name: "cache inspect", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
@@ -112,7 +113,7 @@ func TestCommandManifestExposesAgentSafetyMetadataForEveryCommand(t *testing.T) 
 
 func TestCommandManifestPromotesTargetRefsAndApprovalToTopLevel(t *testing.T) {
 	commands := commandManifests()
-	for _, name := range []string{"inspect", "events", "logs", "smoke", "screenshot", "qa plan", "qa run", "qa final", "release events", "release logs", "release smoke", "evidence events", "evidence logs", "evidence smoke", "evidence screenshot", "evidence qa"} {
+	for _, name := range []string{"inspect", "events", "logs", "smoke", "screenshot", "qa plan", "qa run", "qa final", "release events", "release logs", "release smoke", "evidence events", "evidence logs", "evidence smoke", "evidence screenshot", "evidence flow", "evidence qa"} {
 		cmd := mustManifestForTest(t, commands, name)
 		raw := manifestJSONForTest(t, cmd)
 		if _, ok := raw["targetRefs"]; !ok {
@@ -230,7 +231,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 		t.Fatalf("capabilities should expose build provenance: %#v", caps["build"])
 	}
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "thin-config-init", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "thin-config-init", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "evidence-flow", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}
