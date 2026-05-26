@@ -135,32 +135,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
-		if len(rest) > 0 && rest[0] == "production" {
-			path := doctorProjectPath(rest[1:])
-			environment, _ := flagValue(rest[1:], "--environment")
-			report, err := a.ProductionDoctorForEnvironment(path, environment)
-			if err != nil {
-				return errOut(stderr, jsonOut, err)
-			}
-			output(stdout, jsonOut, map[string]any{"productionDoctor": report}, productionDoctorHuman(report))
-			if !report.OK {
-				return 1
-			}
-			return 0
-		}
-		if hasArg(rest, "--production") {
-			path := doctorProjectPath(rest)
-			environment, _ := flagValue(rest, "--environment")
-			report, err := a.ProductionDoctorForEnvironment(path, environment)
-			if err != nil {
-				return errOut(stderr, jsonOut, err)
-			}
-			output(stdout, jsonOut, map[string]any{"productionDoctor": report}, productionDoctorHuman(report))
-			if !report.OK {
-				return 1
-			}
-			return 0
-		}
 		if path, ok := flagValue(rest, "--project"); ok {
 			report, err := a.ConfigDoctor(path)
 			if err != nil {
@@ -181,10 +155,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
-	case "deploy":
-		return a.runDeploy(rest, stdout, stderr, jsonOut)
-	case "release":
-		return a.runRelease(rest, stdout, stderr, jsonOut)
 	case "evidence":
 		return a.runEvidence(rest, stdout, stderr, jsonOut)
 	case "cache":
@@ -537,7 +507,7 @@ func stateFreeUnknownSubcommand(args []string) (string, string, bool) {
 	}
 	group := args[0]
 	switch group {
-	case "cache", "deploy", "diagnose", "evidence", "preview", "project", "public", "qa", "release", "secrets", "skill":
+	case "cache", "diagnose", "evidence", "preview", "project", "public", "qa", "secrets", "skill":
 	default:
 		return "", "", false
 	}

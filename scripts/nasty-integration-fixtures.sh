@@ -114,8 +114,8 @@ services:
 PY
 
 for case in duplicate-public-hosts bad-public-domain; do
-  if bin/vivero doctor production --project "$workdir/cases/$case" --json --no-input > "$workdir/out/$case.json" 2>"$workdir/out/$case.err"; then
-    echo "expected production doctor to reject $case" >&2
+  if bin/vivero doctor config "$workdir/cases/$case" --json --no-input > "$workdir/out/$case.json" 2>"$workdir/out/$case.err"; then
+    echo "expected config doctor to reject $case" >&2
     cat "$workdir/out/$case.json" >&2
     exit 1
   fi
@@ -152,7 +152,7 @@ assert build_cache.get("from") and build_cache.get("to"), build_cache
 assert monorepo.get("dependencyVolumes"), monorepo
 for case in ["duplicate-public-hosts", "bad-public-domain", "bad-fingerprint-path"]:
     payload = json.loads((out / f"{case}.json").read_text())
-    doctor = payload.get("configDoctor") or payload.get("productionDoctor") or payload.get("doctor") or {}
+    doctor = payload.get("configDoctor") or payload.get("doctor") or {}
     assert doctor.get("ok") is False, (case, payload)
     errors = doctor.get("errors", 0)
     diagnostics = doctor.get("diagnostics") or doctor.get("findings") or []

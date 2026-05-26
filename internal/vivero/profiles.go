@@ -15,17 +15,6 @@ func projectConfigForRequestedProfile(cfg ProjectConfig, profile string) (Projec
 	return projectConfigForProfile(cfg, name)
 }
 
-func projectConfigForEnvironment(cfg ProjectConfig, environment string) (ProjectConfig, string, error) {
-	profile := strings.TrimSpace(environment)
-	if profile == "" {
-		return cfg, "", nil
-	}
-	if _, ok := cfg.Profiles[profile]; !ok {
-		return cfg, "", nil
-	}
-	return projectConfigForProfile(cfg, profile)
-}
-
 func projectConfigForPreview(project ProjectRecord, preview PreviewRecord) (ProjectConfig, error) {
 	cfg, _, err := projectConfigForProfile(project.Config, preview.Profile)
 	return cfg, err

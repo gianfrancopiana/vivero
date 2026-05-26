@@ -77,6 +77,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			return errOut(stderr, jsonOut, err)
 		} else if ok {
 			opts.WaitMS = ms
+			opts.WaitMSSet = true
 		}
 		v, err := a.QARecord(previewID, opts)
 		if err != nil {
@@ -123,6 +124,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			return errOut(stderr, jsonOut, err)
 		} else if ok {
 			opts.WaitMS = ms
+			opts.WaitMSSet = true
 		}
 		v, err := a.QAFinal(previewID, opts)
 		if err != nil {

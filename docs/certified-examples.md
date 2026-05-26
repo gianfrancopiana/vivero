@@ -42,24 +42,9 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 Keep the matrix tiny and invariant-led. A fixture earns its place only when it proves a behavior class that a frontier agent must be able to rely on in unfamiliar repos.
 
 - **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, and teardown preserves or discards work intentionally. Covered by `make example-e2e`, `make integration-fixtures`, and `make nasty-integration-fixtures`.
-- **Deploy/release invariants:** production doctor runs before plan/apply, plans are reviewable before side effects, app-owned prepare/apply/smoke/status/rollback commands get the expected environment, command execution has timeouts and capped/redacted output, release state is locked and auditable, failed smoke does not promote, and rollback keeps history consistent. Covered by `make deploy-fixtures`.
-- **Evidence invariants:** every lane returns target-aware JSON with artifact paths for events, logs, screenshots, app-agnostic evidence flows, QA reports, recordings, and release command output. Preview evidence should work through `preview:<id>` targets, and release evidence should work through `release:<id>` targets. For browser walkthroughs, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input` validates variants, screenshots, video, console, and artifact planning before the real run.
+- **Evidence invariants:** preview evidence returns target-aware JSON with artifact paths for events, logs, screenshots, app-agnostic evidence flows, QA reports, recordings, and timing/cache fields. Preview evidence should work through `preview:<id>` targets. For browser walkthroughs, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input` validates variants, screenshots, video, console, and artifact planning before the real run.
 
 Do not add a parallel example just because a framework is popular. Extend the smallest existing fixture unless the new case creates a distinct invariant failure mode.
-
-## Deploy/release fixtures
-
-- Path: `examples/deploy-command`
-- Shape: command deploy
-- Proves: `deploy plan`, `deploy apply`, `prepareCommand`, deploy cache hints, smoke gating, idempotent reapply, `release status`, `release events`, `release logs`, `release smoke`, and rollback
-- Gate: `make deploy-fixtures`
-
-- Path: `examples/deploy-blue-green`
-- Shape: blue/green deploy
-- Proves: active-slot discovery, target-slot planning, prepare/smoke/promote phases, status evidence, and rollback to previous slot
-- Gate: `make deploy-fixtures`
-
-Both deploy examples use fake registry images and app-owned shell scripts. They do not provision production infrastructure; they exercise Vivero's release state machine and command contract.
 
 ## Fast-path signals
 
@@ -69,8 +54,7 @@ Certified examples prove cache and evidence contracts by asserting deterministic
 - cache enabled/disabled fields for build cache, warm volumes, and app-owned setup/prebuild phases;
 - `cache inspect` output showing configured build cache dirs, warm volumes, project volumes, and Vivero-tagged images;
 - warm baseline/derived events that show when a baseline volume was reused or copied for a branch/ref;
-- deploy phase durations for prepare, apply, smoke, status, promote, and rollback;
-- artifact paths for logs, screenshots, evidence flow result/report files, QA reports, recordings, release command output, and final handoff JSON.
+- artifact paths for logs, screenshots, evidence flow result/report files, QA reports, recordings, and final handoff JSON.
 
 Fixture gates should assert those fields and paths directly. They should not claim a precise speedup unless the test controls the environment tightly enough to make timing meaningful.
 
@@ -92,7 +76,7 @@ These are config-quality fixtures. They should keep project-specific selectors, 
 make certify
 ```
 
-`make certify` runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, deploy fixtures, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
+`make certify` runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
 
 For external runtime confidence, run the live cloud/browser smoke manually or through the release/scheduled workflow:
 
@@ -105,5 +89,4 @@ make live-cloud-browser-smoke
 - README golden-path commands use certified examples.
 - Certified examples load through `loadProjectConfig` tests.
 - Preview examples are covered by fixture scripts.
-- Deploy examples are copied into temporary projects and exercised by `make deploy-fixtures`.
 - Any new documented example must name its gate here before it is treated as certified.

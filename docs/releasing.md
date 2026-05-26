@@ -19,7 +19,7 @@ make certify
 make live-cloud-browser-smoke
 ```
 
-`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, deploy fixtures, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
+`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
 
 `make live-cloud-browser-smoke` is intentionally not required on every PR. It is now a required tag gate in the Release workflow; run it locally before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
 
@@ -104,7 +104,7 @@ GH_CLI=gh VERSION=v0.1.1 RELEASE_POSTFLIGHT_FLAGS="--example-e2e" make release-p
 - Minor release: new CLI surface, config schema addition, or behavior that needs release notes.
 - Major release: breaking CLI/config/schema behavior.
 
-For minor releases that touch app-operations behavior, include release notes for the preview/deploy lane contract, build cache config, cache commands, deploy prepare/cache evidence, and compatibility aliases. Keep the notes clear that app repos still own Dockerfiles, deploy scripts, secrets, and provider-specific production infrastructure.
+For minor releases that touch app-operations behavior, include release notes for the preview/evidence lane contract, build cache config, cache commands, warm volume/cache evidence, and compatibility aliases. Keep the notes clear that app repos still own Dockerfiles, scripts, secrets, and provider-specific infrastructure.
 
 Every release should leave these true:
 

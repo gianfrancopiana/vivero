@@ -245,11 +245,11 @@ func explicitColorSchemesForPlan(colorSchemes []string) []string {
 func appendArtifactTargetArgs(argv []string, target string) []string {
 	switch normalizeArtifactTarget(target) {
 	case artifactTargetPublic:
-		return append(argv, "--public")
+		return append(argv, "--target", artifactTargetPublic)
 	case artifactTargetOrigin:
 		return append(argv, "--target", artifactTargetOrigin)
 	default:
-		return argv
+		return append(argv, "--target", defaultArtifactTarget)
 	}
 }
 
@@ -293,11 +293,11 @@ func qaServiceMapForTarget(p PreviewRecord, target string) map[string]any {
 func qaCommandWithTarget(command, target string) string {
 	switch normalizeArtifactTarget(target) {
 	case artifactTargetPublic:
-		return command + " --public"
+		return command + " --target public"
 	case artifactTargetOrigin:
 		return command + " --target origin"
 	default:
-		return command
+		return command + " --target local"
 	}
 }
 

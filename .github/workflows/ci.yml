@@ -75,17 +75,6 @@ jobs:
       - run: make nasty-integration-fixtures
       - run: make example-configs
 
-  deploy-fixtures:
-    name: Deploy/release fixtures
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - run: make deploy-fixtures
-
   release-snapshot:
     name: Release snapshot smoke
     runs-on: ubuntu-latest

@@ -81,6 +81,7 @@ func qaFinalRecordOptionsFromPlan(plan map[string]any, opts QAFinalOptions) QARe
 		Format:            opts.Format,
 		SlowMoMS:          opts.SlowMoMS,
 		WaitMS:            opts.WaitMS,
+		WaitMSSet:         opts.WaitMSSet,
 	}
 	if rec.Scope == "" {
 		rec.Scope = scopeNameFromPlan(plan)

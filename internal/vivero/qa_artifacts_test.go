@@ -158,7 +158,7 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 		t.Fatalf("screenshot commands = %d; want light and dark", len(screenshotCommands))
 	}
 	firstScreenshotCommand := screenshotCommands[0]["command"].(string)
-	if !strings.Contains(firstScreenshotCommand, "--breakpoints") || !strings.Contains(firstScreenshotCommand, "--color-scheme light") {
+	if !strings.Contains(firstScreenshotCommand, "--breakpoints") || !strings.Contains(firstScreenshotCommand, "--target local") || !strings.Contains(firstScreenshotCommand, "--color-scheme light") {
 		t.Fatalf("screenshot command should be concrete and YAML-backed: %s", firstScreenshotCommand)
 	}
 	recordings := evidence["recordings"].(map[string]any)
@@ -169,6 +169,26 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
+	}
+}
+
+func TestQARecordExplicitZeroWaitIsPreserved(t *testing.T) {
+	defaulted := normalizeQARecordOptions(QARecordOptions{})
+	if defaulted.WaitMS != 350 {
+		t.Fatalf("default record wait = %d; want 350", defaulted.WaitMS)
+	}
+
+	rec := normalizeQARecordOptions(QARecordOptions{WaitMS: 0, WaitMSSet: true})
+	if rec.WaitMS != 0 {
+		t.Fatalf("explicit zero record wait = %d; want 0", rec.WaitMS)
+	}
+
+	finalRec := qaFinalRecordOptionsFromPlan(map[string]any{}, QAFinalOptions{WaitMS: 0, WaitMSSet: true})
+	if !finalRec.WaitMSSet {
+		t.Fatalf("qa final should preserve explicit wait-ms intent: %#v", finalRec)
+	}
+	if got := normalizeQARecordOptions(finalRec).WaitMS; got != 0 {
+		t.Fatalf("qa final explicit zero record wait = %d; want 0", got)
 	}
 }
 

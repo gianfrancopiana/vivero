@@ -16,7 +16,7 @@ func resolvePreviewTargetRef(raw string) (string, map[string]any, error) {
 		case "preview":
 			previewID = strings.TrimSpace(id)
 		default:
-			return "", nil, fmt.Errorf("unsupported target ref %q; use preview:<id>", raw)
+			return "", nil, newCLIError("unsupported_target", fmt.Sprintf("unsupported target ref %q; use preview:<id>", raw), "Use preview:<id> or a bare preview id.", map[string]any{"target": raw})
 		}
 	}
 	if previewID == "" {
