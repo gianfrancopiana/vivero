@@ -98,7 +98,7 @@ func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHo
 		_ = resp.Body.Close()
 		rewrittenText := rewriter.rewrite(string(body), publicOrigin)
 		if isHTMLResponse(resp.Header) {
-			rewrittenText = injectPublicPreviewRuntime(rewrittenText, publicOrigin, rewriter.rewriteBasePublicOrigin(publicOrigin), contentSecurityPolicyNonce(resp.Header))
+			rewrittenText = injectPublicPreviewRuntime(rewrittenText, publicOrigin, rewriter.rewriteBasePublicOrigin(publicOrigin), rewriter.basePaths, contentSecurityPolicyNonce(resp.Header))
 		}
 		rewritten := []byte(rewrittenText)
 		resp.Body = io.NopCloser(bytes.NewReader(rewritten))
@@ -114,6 +114,7 @@ type publicPreviewRewriter struct {
 	encodedOrigins        []encodedOriginRewrite
 	exactHosts            []string
 	protocolRelativeHosts []string
+	basePaths             []string
 	replacements          []PublicRewriteTemplate
 	originHost            string
 	basePublicOrigin      string
@@ -148,11 +149,12 @@ func newPublicPreviewRewriter(target *url.URL, hostHeader, basePublicOrigin stri
 	hostname := hostnameOnly(hostHeader)
 	encodedOrigins := encodedOriginRewrites(exact, exactHosts, hostname)
 	protocolRelativeHosts := protocolRelativeHostRewrites(exactHosts, hostname)
+	basePaths := normalizePublicRewriteBasePaths(cfg.BasePaths)
 	var re *regexp.Regexp
 	if hostname != "" {
 		re = regexp.MustCompile(`https?://(?:[A-Za-z0-9-]+\.)?` + regexp.QuoteMeta(hostname) + `(?::\d+)?`)
 	}
-	return publicPreviewRewriter{exactOrigins: exact, encodedOrigins: encodedOrigins, exactHosts: exactHosts, protocolRelativeHosts: protocolRelativeHosts, replacements: cfg.Replacements, originHost: hostname, basePublicOrigin: strings.TrimRight(basePublicOrigin, "/"), devOriginRE: re}
+	return publicPreviewRewriter{exactOrigins: exact, encodedOrigins: encodedOrigins, exactHosts: exactHosts, protocolRelativeHosts: protocolRelativeHosts, basePaths: basePaths, replacements: cfg.Replacements, originHost: hostname, basePublicOrigin: strings.TrimRight(basePublicOrigin, "/"), devOriginRE: re}
 }
 
 func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
@@ -197,6 +199,9 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 			continue
 		}
 		out = strings.ReplaceAll(out, from, expandPublicRewriteTemplate(replacement.To, templateContext))
+	}
+	if len(r.basePaths) > 0 && templateContext.BasePublicOrigin != "" && templateContext.BasePublicOrigin != publicOrigin {
+		out = rewriteRouteBasePaths(out, publicOrigin, templateContext.BasePublicOrigin, r.basePaths)
 	}
 	out = normalizePublicHostScheme(out, publicHost, publicScheme)
 	if templateContext.BasePublicHost != "" && templateContext.BasePublicHost != publicHost {
@@ -343,6 +348,135 @@ func replaceProtocolRelativeHost(input, fromHost, toHost string) string {
 	return out
 }
 
+func normalizePublicRewriteBasePaths(paths []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, raw := range paths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if i := strings.IndexAny(path, "?#"); i >= 0 {
+			path = path[:i]
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		if path != "/" {
+			path = strings.TrimRight(path, "/")
+		}
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
+func rewriteRouteBasePaths(input, routePublicOrigin, basePublicOrigin string, basePaths []string) string {
+	if input == "" || routePublicOrigin == "" || basePublicOrigin == "" || routePublicOrigin == basePublicOrigin || len(basePaths) == 0 {
+		return input
+	}
+	route, err := url.Parse(strings.TrimRight(routePublicOrigin, "/"))
+	if err != nil || route.Scheme == "" || route.Host == "" {
+		return input
+	}
+	base, err := url.Parse(strings.TrimRight(basePublicOrigin, "/"))
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return input
+	}
+	routeOrigins := []string{route.Scheme + "://" + route.Host}
+	if route.Scheme == "https" {
+		routeOrigins = append(routeOrigins, "http://"+route.Host)
+	}
+	baseOrigins := map[string]string{}
+	for _, origin := range routeOrigins {
+		baseOrigins[origin] = base.Scheme + "://" + base.Host
+	}
+	out := input
+	for _, basePath := range normalizePublicRewriteBasePaths(basePaths) {
+		for _, routeOrigin := range routeOrigins {
+			baseOrigin := baseOrigins[routeOrigin]
+			for _, backslashes := range []int{0, 1, 2, 4} {
+				from := escapedOriginPath(routeOrigin, basePath, backslashes)
+				to := escapedOriginPath(baseOrigin, basePath, backslashes)
+				if from != "" && to != "" {
+					out = replaceRouteBasePathBoundary(out, from, to)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func replaceRouteBasePathBoundary(input, from, to string) string {
+	if input == "" || from == "" || from == to {
+		return input
+	}
+	var b strings.Builder
+	changed := false
+	last := 0
+	search := 0
+	for search < len(input) {
+		idx := strings.Index(input[search:], from)
+		if idx < 0 {
+			break
+		}
+		idx += search
+		end := idx + len(from)
+		if hasRouteBasePathBoundary(input, end) {
+			if !changed {
+				b.Grow(len(input))
+				changed = true
+			}
+			b.WriteString(input[last:idx])
+			b.WriteString(to)
+			last = end
+		}
+		search = end
+	}
+	if !changed {
+		return input
+	}
+	b.WriteString(input[last:])
+	return b.String()
+}
+
+func hasRouteBasePathBoundary(input string, pos int) bool {
+	if pos >= len(input) {
+		return true
+	}
+	switch input[pos] {
+	case '/', '?', '#':
+		return true
+	case '"', '\'', '`', '<', '>', ' ', '\t', '\n', '\r', ')', ']', '}', ',':
+		return true
+	case '\\':
+		for i := pos; i < len(input) && input[i] == '\\'; i++ {
+			if i+1 < len(input) && input[i+1] == '/' {
+				return true
+			}
+		}
+	case '%':
+		return pos+2 < len(input) && input[pos+1] == '2' && (input[pos+2] == 'f' || input[pos+2] == 'F')
+	}
+	return false
+}
+
+func escapedOriginPath(origin, path string, backslashes int) string {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	slash := strings.Repeat("\\", backslashes) + "/"
+	return escapedSchemeHost(parsed.Scheme, parsed.Host, backslashes) + strings.ReplaceAll(path, "/", slash)
+}
+
 func normalizePublicHostScheme(input, publicHost, publicScheme string) string {
 	if publicHost == "" || publicScheme == "" || publicScheme == "http" {
 		return input
@@ -401,7 +535,7 @@ func schemeFromOrigin(origin string) string {
 }
 
 func isZeroPublicRewriteConfig(cfg PublicRewriteConfig) bool {
-	return len(cfg.Hosts) == 0 && len(cfg.Origins) == 0 && len(cfg.Replacements) == 0
+	return len(cfg.Hosts) == 0 && len(cfg.Origins) == 0 && len(cfg.BasePaths) == 0 && len(cfg.Replacements) == 0
 }
 
 func rewriteResponseHeaders(headers http.Header, rewriter publicPreviewRewriter, publicOrigin string) {
@@ -434,7 +568,7 @@ func isHTMLResponse(headers http.Header) bool {
 	return strings.HasPrefix(strings.ToLower(headers.Get("Content-Type")), "text/html")
 }
 
-func injectPublicPreviewRuntime(input, publicOrigin, basePublicOrigin, nonce string) string {
+func injectPublicPreviewRuntime(input, publicOrigin, basePublicOrigin string, basePaths []string, nonce string) string {
 	publicHost := hostFromOrigin(publicOrigin)
 	publicScheme := schemeFromOrigin(publicOrigin)
 	if basePublicOrigin == "" {
@@ -447,7 +581,7 @@ func injectPublicPreviewRuntime(input, publicOrigin, basePublicOrigin, nonce str
 	if strings.Contains(input, "data-vivero-public-preview-runtime") {
 		return input
 	}
-	script := publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost, nonce)
+	script := publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost, normalizePublicRewriteBasePaths(basePaths), nonce)
 	lower := strings.ToLower(input)
 	for _, marker := range []string{"</head>", "</body>"} {
 		if idx := strings.Index(lower, marker); idx >= 0 {
@@ -457,24 +591,28 @@ func injectPublicPreviewRuntime(input, publicOrigin, basePublicOrigin, nonce str
 	return script + input
 }
 
-func publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost, nonce string) string {
+func publicPreviewRuntimeScript(publicOrigin, publicHost, basePublicOrigin, basePublicHost string, basePaths []string, nonce string) string {
 	originJSON, _ := json.Marshal(publicOrigin)
 	hostJSON, _ := json.Marshal(publicHost)
 	baseOriginJSON, _ := json.Marshal(basePublicOrigin)
 	baseHostJSON, _ := json.Marshal(basePublicHost)
+	basePathsJSON, _ := json.Marshal(normalizePublicRewriteBasePaths(basePaths))
 	nonceAttr := ""
 	if nonce != "" {
 		nonceAttr = ` nonce="` + html.EscapeString(nonce) + `"`
 	}
 	return "<script data-vivero-public-preview-runtime" + nonceAttr + ">(()=>{" +
-		"window.__viveroPublicPreviewRuntime={origin:" + string(originJSON) + ",host:" + string(hostJSON) + ",baseOrigin:" + string(baseOriginJSON) + ",baseHost:" + string(baseHostJSON) + "};" +
+		"const basePathPrefixes=" + string(basePathsJSON) + ";" +
+		"window.__viveroPublicPreviewRuntime={origin:" + string(originJSON) + ",host:" + string(hostJSON) + ",baseOrigin:" + string(baseOriginJSON) + ",baseHost:" + string(baseHostJSON) + ",basePaths:basePathPrefixes};" +
 		"const publicOrigin=" + string(originJSON) + ";" +
 		"const publicHost=" + string(hostJSON) + ";" +
 		"const basePublicOrigin=" + string(baseOriginJSON) + ";" +
 		"const basePublicHost=" + string(baseHostJSON) + ";" +
 		"const hostNameOnly=(host)=>(host||\"\").split(\":\")[0];" +
 		"const publicHosts=[{origin:publicOrigin,host:publicHost,subdomains:true},{origin:basePublicOrigin,host:basePublicHost,subdomains:false}].filter((item,index,all)=>item.origin&&item.host&&all.findIndex((other)=>other.host===item.host)===index);" +
-		"const toPublic=(value)=>{if(value==null)return value;const text=String(value);for(const item of publicHosts){const insecureOrigin=\"http://\"+item.host;if(text.startsWith(insecureOrigin))return item.origin+text.slice(insecureOrigin.length);}try{const url=new URL(text,document.baseURI);if(url.protocol===\"http:\"){for(const item of publicHosts){const hostName=hostNameOnly(item.host);if(url.host===item.host||url.hostname===hostName||(item.subdomains&&url.hostname.endsWith(\".\"+hostName)))return item.origin+url.pathname+url.search+url.hash;}}}catch{}return value;};" +
+		"const pathMatchesBase=(path)=>basePathPrefixes.some((prefix)=>path===prefix||path.startsWith(prefix+\"/\"));" +
+		"const toBaseIfNeeded=(url)=>{if(!basePublicOrigin||!basePathPrefixes.length||!url||!pathMatchesBase(url.pathname))return null;const hostName=hostNameOnly(publicHost);if(url.origin===publicOrigin||url.host===publicHost||url.hostname===hostName)return basePublicOrigin+url.pathname+url.search+url.hash;return null;};" +
+		"const toPublic=(value)=>{if(value==null)return value;const text=String(value);for(const item of publicHosts){const insecureOrigin=\"http://\"+item.host;if(text.startsWith(insecureOrigin))return item.origin+text.slice(insecureOrigin.length);}try{const url=new URL(text,document.baseURI);const baseFixed=toBaseIfNeeded(url);if(baseFixed)return baseFixed;if(url.protocol===\"http:\"){for(const item of publicHosts){const hostName=hostNameOnly(item.host);if(url.host===item.host||url.hostname===hostName||(item.subdomains&&url.hostname.endsWith(\".\"+hostName)))return item.origin+url.pathname+url.search+url.hash;}}}catch{}return value;};" +
 		"const attrs=[\"href\",\"src\",\"action\"];" +
 		"const valueSelector=\"input,textarea\";" +
 		"const selector=attrs.map((attr)=>\"[\"+attr+\"]\").concat(valueSelector).join(\",\");" +

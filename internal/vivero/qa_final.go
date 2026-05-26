@@ -73,6 +73,7 @@ func (a *App) QAFinal(previewID string, opts QAFinalOptions) (map[string]any, er
 func qaFinalRecordOptionsFromPlan(plan map[string]any, opts QAFinalOptions) QARecordOptions {
 	rec := QARecordOptions{
 		Scope:             opts.Scope,
+		Target:            opts.Target,
 		ColorScheme:       opts.ColorScheme,
 		StorageState:      opts.StorageState,
 		Width:             opts.Width,

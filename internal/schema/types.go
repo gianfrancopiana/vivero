@@ -79,6 +79,7 @@ type ImageBuildCacheConfig struct {
 type PublicRewriteConfig struct {
 	Hosts        []string                `yaml:"hosts" json:"hosts,omitempty"`
 	Origins      []string                `yaml:"origins" json:"origins,omitempty"`
+	BasePaths    []string                `yaml:"basePaths" json:"basePaths,omitempty"`
 	Replacements []PublicRewriteTemplate `yaml:"replacements" json:"replacements,omitempty"`
 }
 
@@ -191,6 +192,7 @@ type ScreenshotOptions struct {
 
 type QARecordOptions struct {
 	Scope             string  `json:"scope,omitempty"`
+	Target            string  `json:"target,omitempty"`
 	ColorScheme       string  `json:"colorScheme,omitempty"`
 	StorageState      string  `json:"storageState,omitempty"`
 	Width             int     `json:"width,omitempty"`

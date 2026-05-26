@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -145,6 +146,72 @@ func TestScreenshotBreakpointsPreferExplicitThenProjectThenViewport(t *testing.T
 	got = screenshotBreakpoints(ScreenshotOptions{Width: 800, Height: 600}, project)
 	if len(got) != 1 || got[0].Width != 800 || got[0].Height != 600 {
 		t.Fatalf("viewport fallback = %#v", got)
+	}
+}
+
+func TestScreenshotWithOptionsCapturesBreakpointsInSinglePlaywrightRun(t *testing.T) {
+	t.Setenv("VIVERO_PLAYWRIGHT_PACKAGE", "")
+	a, _ := newQARecordTestApp(t)
+	defer a.Close()
+	outputDir := t.TempDir()
+
+	runner := &fakeQARecordRunner{runFunc: func(name string, args ...string) ([]byte, []byte, error) {
+		if name != "npm" {
+			t.Fatalf("screenshot runner command = %s; want npm", name)
+		}
+		inputPath := args[len(args)-1]
+		payload := readJSONFile[map[string]any](t, inputPath)
+		if payload["url"] != "http://127.0.0.1:4444/products" {
+			t.Fatalf("screenshot url = %#v", payload["url"])
+		}
+		options := payload["options"].(map[string]any)
+		if options["colorScheme"] != "dark" {
+			t.Fatalf("screenshot options = %#v", options)
+		}
+		shots := payload["screenshots"].([]any)
+		if len(shots) != 2 {
+			t.Fatalf("screenshots payload count = %d", len(shots))
+		}
+		for _, raw := range shots {
+			shot := raw.(map[string]any)
+			path := shot["path"].(string)
+			width := int(shot["viewportWidth"].(float64))
+			height := int(shot["viewportHeight"].(float64))
+			img := image.NewRGBA(image.Rect(0, 0, width, height))
+			draw.Draw(img, img.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+			writePNG(t, path, img)
+		}
+		return []byte(`{"ok":true}`), nil, nil
+	}}
+	a.qaRecordRunner = runner
+
+	result, err := a.ScreenshotWithOptions("qa-pr", "web", ScreenshotOptions{
+		Path:        "/products",
+		Target:      "local",
+		ColorScheme: "dark",
+		OutputDir:   outputDir,
+		Breakpoints: []ScreenshotBreakpoint{{Name: "desktop", Width: 1200, Height: 700}, {Name: "mobile", Width: 390, Height: 844}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(runner.lookups, []string{"npm"}) {
+		t.Fatalf("lookups = %#v; want npm", runner.lookups)
+	}
+	if len(runner.runs) != 1 {
+		t.Fatalf("screenshots should be captured in one Playwright run, got %#v", runner.runs)
+	}
+	screenshots := result["screenshots"].([]map[string]any)
+	if len(screenshots) != 2 {
+		t.Fatalf("result screenshot count = %d", len(screenshots))
+	}
+	for _, shot := range screenshots {
+		if shot["target"] != "local" || shot["colorScheme"] != "dark" {
+			t.Fatalf("screenshot metadata = %#v", shot)
+		}
+		if _, err := os.Stat(shot["path"].(string)); err != nil {
+			t.Fatalf("screenshot artifact missing: %v", err)
+		}
 	}
 }
 

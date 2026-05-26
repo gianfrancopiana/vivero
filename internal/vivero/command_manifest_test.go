@@ -132,6 +132,22 @@ func TestCommandManifestPromotesTargetRefsAndApprovalToTopLevel(t *testing.T) {
 	}
 }
 
+func TestQAContextManifestIncludesPlanSelectionFlags(t *testing.T) {
+	commands := commandManifests()
+	for _, name := range []string{"qa plan", "qa context"} {
+		cmd := mustManifestForTest(t, commands, name)
+		flags := map[string]bool{}
+		for _, flag := range cmd.Flags {
+			flags[flag.Name] = true
+		}
+		for _, want := range []string{"--scope", "--target"} {
+			if !flags[want] {
+				t.Fatalf("%s manifest should expose %s for agents: %#v", name, want, cmd.Flags)
+			}
+		}
+	}
+}
+
 func TestCommandManifestExamplesResolveToManifestCommands(t *testing.T) {
 	commands := commandManifests()
 	for _, cmd := range commands {

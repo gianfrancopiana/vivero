@@ -199,6 +199,7 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 	}
 	for _, colorScheme := range recordingColorSchemes {
 		argv := []string{"vivero", "preview", "qa", "record", "preview:" + previewID, "--scope", scopeName, "--json", "--no-input", "--quiet"}
+		argv = appendArtifactTargetArgs(argv, target)
 		if hasRecordingAuth && recordingSession.StorageState != "" {
 			argv = append(argv, "--storage-state", recordingSession.StorageState)
 		}

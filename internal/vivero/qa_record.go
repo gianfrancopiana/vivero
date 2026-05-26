@@ -50,7 +50,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	if opts.Format != "mp4" && opts.Format != "webm" {
 		return nil, fmt.Errorf("qa record format must be mp4 or webm")
 	}
-	plan, err := a.QAPlan(previewID, opts.Scope)
+	plan, err := a.QAPlanWithTarget(previewID, opts.Scope, opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +101,7 @@ func (a *App) QARecord(previewID string, opts QARecordOptions) (map[string]any, 
 	}
 	result["preview"] = previewID
 	result["scope"] = scopeNameFromPlan(plan)
+	result["target"] = opts.Target
 	result["colorScheme"] = opts.ColorScheme
 	result["storageState"] = opts.StorageState
 	result["format"] = opts.Format

@@ -40,7 +40,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		}
 		return 0
 	case "record":
-		opts := QARecordOptions{Scope: scope}
+		opts := QARecordOptions{Scope: scope, Target: artifactTargetFromArgs(actionArgs)}
 		if width, ok, err := positiveIntFlag(actionArgs, "--width"); err != nil {
 			return errOut(stderr, jsonOut, err)
 		} else if ok {
