@@ -168,11 +168,7 @@ func qaFinalProof(result map[string]any) map[string]any {
 	artifacts, _ := result["artifacts"].(map[string]any)
 	run, _ := result["run"].(map[string]any)
 	record, _ := result["record"].(map[string]any)
-	screenshots := qaFinalScreenshotPaths(run["screenshots"])
-	videos := qaFinalVideoPaths(record["videos"])
-	includedScreenshots, includedVideos := artifactMediaPaths(result["includedEvidence"])
-	screenshots = appendUniqueStrings(screenshots, includedScreenshots...)
-	videos = appendUniqueStrings(videos, includedVideos...)
+	screenshots, videos := artifactMediaPaths(run["screenshots"], record["videos"], result["includedEvidence"])
 	media := qaFinalMediaEntries(screenshots, videos)
 	proof := map[string]any{
 		"preview":       stringValue(result["preview"]),
@@ -240,61 +236,6 @@ func qaFinalRecordPath(record, artifacts map[string]any) string {
 	return stringValue(artifacts["recordPath"])
 }
 
-func qaFinalScreenshotPaths(raw any) []string {
-	paths := []string{}
-	seen := map[string]bool{}
-	var collect func(any)
-	collect = func(value any) {
-		switch screenshots := value.(type) {
-		case []map[string]any:
-			for _, screenshot := range screenshots {
-				collect(screenshot)
-			}
-		case []any:
-			for _, item := range screenshots {
-				collect(item)
-			}
-		case map[string]any:
-			if path := stringValue(screenshots["path"]); path != "" && !seen[path] {
-				seen[path] = true
-				paths = append(paths, path)
-			}
-			if nested := screenshots["screenshots"]; nested != nil {
-				collect(nested)
-			}
-		}
-	}
-	collect(raw)
-	return paths
-}
-
-func qaFinalVideoPaths(raw any) []string {
-	_, videos := artifactMediaPaths(raw)
-	return videos
-}
-
-func appendUniqueStrings(base []string, values ...string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(base)+len(values))
-	for _, value := range base {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
 func qaFinalMediaEntries(screenshots, videos []string) []map[string]any {
 	entries := []map[string]any{}
 	appendEntry := func(kind, path string) {
@@ -334,21 +275,7 @@ func qaFinalMediaOK(media []map[string]any) bool {
 }
 
 func writeQAFinalResult(artifacts map[string]any) (string, error) {
-	finalPath := stringValue(artifacts["finalPath"])
-	if finalPath == "" {
-		return "", nil
-	}
-	finalPath = expandPath(finalPath)
-	if !filepath.IsAbs(finalPath) {
-		if dir := stringValue(artifacts["dir"]); dir != "" {
-			finalPath = filepath.Join(dir, finalPath)
-		}
-	}
-	finalPath = nextAvailableArtifactPath(finalPath)
-	if err := ensureDir(filepath.Dir(finalPath)); err != nil {
-		return "", err
-	}
-	return finalPath, nil
+	return qaArtifactResultPath(artifacts, "finalPath")
 }
 
 func qaFinalHuman(v map[string]any) string {
@@ -367,33 +294,20 @@ func qaFinalHuman(v map[string]any) string {
 	if finalPath := stringValue(v["finalPath"]); finalPath != "" {
 		parts = append(parts, "final: "+finalPath)
 	}
-	for _, path := range stringListValue(proof["screenshots"]) {
-		parts = append(parts, "screenshot: "+path)
+	if screenshots, _ := proof["screenshots"].([]string); len(screenshots) > 0 {
+		for _, path := range screenshots {
+			parts = append(parts, "screenshot: "+path)
+		}
 	}
-	for _, path := range stringListValue(proof["videos"]) {
-		parts = append(parts, "video: "+path)
+	if videos, _ := proof["videos"].([]string); len(videos) > 0 {
+		for _, path := range videos {
+			parts = append(parts, "video: "+path)
+		}
 	}
 	if proof["mediaOk"] == false {
 		parts = append(parts, "media: missing or empty artifact")
 	}
 	return strings.Join(parts, "\n")
-}
-
-func stringListValue(value any) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []any:
-		out := []string{}
-		for _, item := range v {
-			if s := stringValue(item); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
 }
 
 func (a *App) captureQAPageScreenshots(previewID string, plan map[string]any) ([]map[string]any, error) {
@@ -457,22 +371,26 @@ func qaScreenshotColorSchemesFromPlan(plan map[string]any) []string {
 }
 
 func writeQARunResult(artifacts map[string]any, result map[string]any) (string, error) {
-	runPath := stringValue(artifacts["runPath"])
-	if runPath == "" {
-		return "", nil
-	}
-	runPath = expandPath(runPath)
-	if !filepath.IsAbs(runPath) {
-		if dir := stringValue(artifacts["dir"]); dir != "" {
-			runPath = filepath.Join(dir, runPath)
-		}
-	}
-	runPath = nextAvailableArtifactPath(runPath)
-	if err := ensureDir(filepath.Dir(runPath)); err != nil {
-		return "", err
+	runPath, err := qaArtifactResultPath(artifacts, "runPath")
+	if err != nil || runPath == "" {
+		return runPath, err
 	}
 	if err := writeIndentedJSONFile(runPath, result, 0o644); err != nil {
 		return "", err
 	}
 	return runPath, nil
+}
+
+func qaArtifactResultPath(artifacts map[string]any, key string) (string, error) {
+	path := expandPath(stringValue(artifacts[key]))
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		if dir := stringValue(artifacts["dir"]); dir != "" {
+			path = filepath.Join(dir, path)
+		}
+	}
+	path = nextAvailableArtifactPath(path)
+	return path, ensureDir(filepath.Dir(path))
 }
