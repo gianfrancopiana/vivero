@@ -18,6 +18,7 @@ const (
 	defaultScreenshotWidth            = 1280
 	defaultScreenshotHeight           = 800
 	defaultDeviceScaleFactor          = 1
+	defaultQARecordWaitMS             = 1500
 	defaultArtifactTarget             = "local"
 	artifactTargetPublic              = "public"
 	artifactTargetOrigin              = "origin"
@@ -84,7 +85,7 @@ func normalizeQARecordOptions(opts QARecordOptions) QARecordOptions {
 		opts.Format = strings.ToLower(strings.TrimSpace(opts.Format))
 	}
 	if !opts.WaitMSSet && opts.WaitMS == 0 {
-		opts.WaitMS = 350
+		opts.WaitMS = defaultQARecordWaitMS
 	}
 	return opts
 }

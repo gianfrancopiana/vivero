@@ -1,6 +1,10 @@
 package vivero
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 func attachEvidenceShape(payload map[string]any, targetRef map[string]any) map[string]any {
 	if payload == nil {
@@ -55,7 +59,19 @@ func evidenceArtifacts(payload map[string]any) map[string]any {
 			artifacts[key] = value
 		}
 	}
-	if paths := screenshotArtifactPaths(payload["screenshots"]); len(paths) > 0 {
+	screenshots, videos := artifactMediaPaths(payload)
+	if len(screenshots) > 0 {
+		artifacts["screenshots"] = screenshots
+	}
+	if len(videos) > 0 {
+		artifacts["videos"] = videos
+	}
+	if len(screenshots)+len(videos) > 0 {
+		media := append([]string{}, screenshots...)
+		media = append(media, videos...)
+		artifacts["media"] = media
+	}
+	if paths := screenshotArtifactPaths(payload["screenshots"]); len(paths) > 0 && len(screenshots) == 0 {
 		artifacts["screenshots"] = paths
 	}
 	if smokeArtifact, ok := smokeArtifactValue(payload["smoke"]); ok {
@@ -112,22 +128,85 @@ func smokeArtifactValue(v any) (any, bool) {
 }
 
 func screenshotArtifactPaths(v any) []string {
-	paths := []string{}
-	switch screenshots := v.(type) {
-	case []map[string]any:
-		for _, screenshot := range screenshots {
-			if path := stringValue(screenshot["path"]); path != "" {
-				paths = append(paths, path)
-			}
+	screenshots, _ := artifactMediaPaths(v)
+	return screenshots
+}
+
+func artifactMediaPaths(values ...any) ([]string, []string) {
+	screenshots := []string{}
+	videos := []string{}
+	seenScreenshots := map[string]bool{}
+	seenVideos := map[string]bool{}
+	add := func(kind, path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
 		}
-	case []any:
-		for _, raw := range screenshots {
-			if screenshot, ok := raw.(map[string]any); ok {
-				if path := stringValue(screenshot["path"]); path != "" {
-					paths = append(paths, path)
-				}
+		switch kind {
+		case "screenshot":
+			if !seenScreenshots[path] {
+				seenScreenshots[path] = true
+				screenshots = append(screenshots, path)
+			}
+		case "video":
+			if !seenVideos[path] {
+				seenVideos[path] = true
+				videos = append(videos, path)
 			}
 		}
 	}
-	return paths
+	var collect func(any)
+	collect = func(value any) {
+		switch v := value.(type) {
+		case nil:
+			return
+		case string:
+			add(mediaKindForPath(v, ""), v)
+		case []string:
+			for _, item := range v {
+				collect(item)
+			}
+		case []map[string]any:
+			for _, item := range v {
+				collect(item)
+			}
+		case []any:
+			for _, item := range v {
+				collect(item)
+			}
+		case map[string]any:
+			if path := stringValue(v["screenshotPath"]); path != "" {
+				add("screenshot", path)
+			}
+			if path := stringValue(v["videoPath"]); path != "" {
+				add("video", path)
+			}
+			if path := stringValue(v["path"]); path != "" {
+				add(mediaKindForPath(path, stringValue(v["format"])), path)
+			}
+			for _, key := range []string{"screenshots", "videos", "media", "proof", "run", "record", "artifacts", "steps", "flows", "results"} {
+				collect(v[key])
+			}
+		}
+	}
+	for _, value := range values {
+		collect(value)
+	}
+	return screenshots, videos
+}
+
+func mediaKindForPath(path, format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "png", "jpg", "jpeg", "webp", "screenshot", "image":
+		return "screenshot"
+	case "mp4", "webm", "mov", "video":
+		return "video"
+	}
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return "screenshot"
+	case ".mp4", ".webm", ".mov":
+		return "video"
+	}
+	return ""
 }

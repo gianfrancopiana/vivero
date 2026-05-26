@@ -148,6 +148,25 @@ func TestQAContextManifestIncludesPlanSelectionFlags(t *testing.T) {
 	}
 }
 
+func TestQAMediaProofManifestFlags(t *testing.T) {
+	commands := commandManifests()
+	for name, wants := range map[string][]string{
+		"qa record": {"--output-dir", "--wait-ms", "--slow-mo-ms", "--format"},
+		"qa final":  {"--include-evidence", "--wait-ms", "--slow-mo-ms", "--format"},
+	} {
+		cmd := mustManifestForTest(t, commands, name)
+		flags := map[string]bool{}
+		for _, flag := range cmd.Flags {
+			flags[flag.Name] = flag.ValueName != ""
+		}
+		for _, want := range wants {
+			if !flags[want] {
+				t.Fatalf("%s manifest should expose value flag %s for evidence artifacts: %#v", name, want, cmd.Flags)
+			}
+		}
+	}
+}
+
 func TestCommandManifestExamplesResolveToManifestCommands(t *testing.T) {
 	commands := commandManifests()
 	for _, cmd := range commands {

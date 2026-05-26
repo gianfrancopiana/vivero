@@ -158,15 +158,15 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 		t.Fatalf("screenshot commands = %d; want light and dark", len(screenshotCommands))
 	}
 	firstScreenshotCommand := screenshotCommands[0]["command"].(string)
-	if !strings.Contains(firstScreenshotCommand, "--breakpoints") || !strings.Contains(firstScreenshotCommand, "--target local") || !strings.Contains(firstScreenshotCommand, "--color-scheme light") {
-		t.Fatalf("screenshot command should be concrete and YAML-backed: %s", firstScreenshotCommand)
+	if !strings.Contains(firstScreenshotCommand, "--breakpoints") || !strings.Contains(firstScreenshotCommand, "--output-dir /tmp/qa/screenshots") || !strings.Contains(firstScreenshotCommand, "--target local") || !strings.Contains(firstScreenshotCommand, "--color-scheme light") {
+		t.Fatalf("screenshot command should be concrete, deliverable, and YAML-backed: %s", firstScreenshotCommand)
 	}
 	recordings := evidence["recordings"].(map[string]any)
 	recordingCommands := recordings["commands"].([]map[string]any)
 	if len(recordingCommands) != 1 {
 		t.Fatalf("recording commands = %d; want configured light recording", len(recordingCommands))
 	}
-	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--json", "--no-input", "--quiet", "--target", "local", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--output-dir", "/tmp/qa/videos", "--json", "--no-input", "--quiet", "--target", "local", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -174,8 +174,8 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 
 func TestQARecordExplicitZeroWaitIsPreserved(t *testing.T) {
 	defaulted := normalizeQARecordOptions(QARecordOptions{})
-	if defaulted.WaitMS != 350 {
-		t.Fatalf("default record wait = %d; want 350", defaulted.WaitMS)
+	if defaulted.WaitMS != defaultQARecordWaitMS {
+		t.Fatalf("default record wait = %d; want %d", defaulted.WaitMS, defaultQARecordWaitMS)
 	}
 
 	rec := normalizeQARecordOptions(QARecordOptions{WaitMS: 0, WaitMSSet: true})
@@ -219,7 +219,7 @@ func TestQAEvidencePlanRecordCommandsHonorPublicPlanTarget(t *testing.T) {
 	}
 	recordings := evidence["recordings"].(map[string]any)
 	recordingCommands := recordings["commands"].([]map[string]any)
-	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "public", "--json", "--no-input", "--quiet", "--target", "public", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "public", "--output-dir", "/tmp/qa/videos", "--json", "--no-input", "--quiet", "--target", "public", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -351,6 +351,66 @@ func TestQAFinalUsesRecordingPlanForDefaultProof(t *testing.T) {
 	}
 }
 
+func TestQAFinalIncludesAdHocEvidenceMediaAndVerifiesFiles(t *testing.T) {
+	dir := t.TempDir()
+	shotPath := filepath.Join(dir, "adhoc.png")
+	videoPath := filepath.Join(dir, "walkthrough.mp4")
+	if err := os.WriteFile(shotPath, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(videoPath, []byte("mp4"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evidencePath := filepath.Join(dir, "evidence-result.json")
+	evidenceJSON := fmt.Sprintf(`{"screenshots":[{"path":%q}],"record":{"videos":[{"path":%q,"format":"mp4"}]}}`, shotPath, videoPath)
+	if err := os.WriteFile(evidencePath, []byte(evidenceJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	included, includeErrors := loadQAFinalIncludedEvidence([]string{evidencePath})
+	if len(includeErrors) != 0 || len(included) != 1 {
+		t.Fatalf("included evidence = %#v errors=%#v", included, includeErrors)
+	}
+
+	result := map[string]any{"ok": true, "preview": "preview", "includedEvidence": included}
+	setQAFinalProof(result)
+	proof := result["proof"].(map[string]any)
+	if result["ok"] != true || proof["mediaOk"] != true {
+		t.Fatalf("deliverable included media should keep proof ok: result=%#v proof=%#v", result, proof)
+	}
+	if !reflect.DeepEqual(proof["screenshots"], []string{shotPath}) || !reflect.DeepEqual(proof["videos"], []string{videoPath}) {
+		t.Fatalf("proof should include ad hoc screenshots/videos: %#v", proof)
+	}
+	media := proof["media"].([]map[string]any)
+	if len(media) != 2 || media[0]["deliverable"] != true || media[1]["deliverable"] != true {
+		t.Fatalf("proof media should verify files: %#v", media)
+	}
+
+	missing := map[string]any{"ok": true, "preview": "preview", "includedEvidence": []map[string]any{{"videos": []any{map[string]any{"path": filepath.Join(dir, "missing.mp4")}}}}}
+	setQAFinalProof(missing)
+	missingProof := missing["proof"].(map[string]any)
+	if missing["ok"] != false || missingProof["mediaOk"] != false || missing["mediaError"] == nil {
+		t.Fatalf("missing media should fail final proof: result=%#v proof=%#v", missing, missingProof)
+	}
+}
+
+func TestEvidenceArtifactsCollectNestedMedia(t *testing.T) {
+	payload := map[string]any{
+		"run":    map[string]any{"screenshots": []any{map[string]any{"path": "/tmp/run.png"}}},
+		"record": map[string]any{"videos": []any{map[string]any{"path": "/tmp/record.mp4", "format": "mp4"}}},
+		"proof":  map[string]any{"screenshots": []any{"/tmp/proof.png"}, "videos": []any{"/tmp/proof.webm"}},
+	}
+	artifacts := evidenceArtifacts(payload)
+	if !reflect.DeepEqual(artifacts["screenshots"], []string{"/tmp/proof.png", "/tmp/run.png"}) {
+		t.Fatalf("nested screenshot artifacts = %#v", artifacts["screenshots"])
+	}
+	if !reflect.DeepEqual(artifacts["videos"], []string{"/tmp/proof.webm", "/tmp/record.mp4"}) {
+		t.Fatalf("nested video artifacts = %#v", artifacts["videos"])
+	}
+	if !reflect.DeepEqual(artifacts["media"], []string{"/tmp/proof.png", "/tmp/run.png", "/tmp/proof.webm", "/tmp/record.mp4"}) {
+		t.Fatalf("nested media artifacts = %#v", artifacts["media"])
+	}
+}
+
 func TestQAPureHelperFallbacks(t *testing.T) {
 	p := PreviewRecord{Services: map[string]PreviewService{
 		"api": {Name: "api", OriginURL: "http://127.0.0.1:3001"},
@@ -459,6 +519,13 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	}
 	if !strings.Contains(recordOptions["storageState"].(string), "agent.qa.auth.sessions") {
 		t.Fatalf("qa schema should document storage-state auth primitive: %v", recordOptions)
+	}
+	if !strings.Contains(recordOptions["outputDir"].(string), "video artifact directory") || !strings.Contains(recordOptions["waitMs"].(string), "1500") {
+		t.Fatalf("qa schema should document durable video output and readable waits: %v", recordOptions)
+	}
+	finalOptions := qa["finalOptions"].(map[string]any)
+	if !strings.Contains(finalOptions["includeEvidence"].(string), "ad-hoc evidence flow JSON result") {
+		t.Fatalf("qa schema should document ad-hoc evidence includes: %v", finalOptions)
 	}
 
 	shot := schemaFor("screenshot")["schema"].(map[string]any)
