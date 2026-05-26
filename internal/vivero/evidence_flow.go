@@ -125,6 +125,10 @@ func (a *App) EvidenceFlow(previewID string, opts EvidenceFlowOptions) (map[stri
 	if err := ensureDir(outputDir); err != nil {
 		return nil, err
 	}
+	inputArtifacts, err := writeEvidenceFlowInputArtifacts(outputDir, spec, plan)
+	if err != nil {
+		return nil, err
+	}
 
 	runner := a.recordRunner()
 	if _, err := runner.LookPath("npm"); err != nil {
@@ -160,6 +164,8 @@ func (a *App) EvidenceFlow(previewID string, opts EvidenceFlowOptions) (map[stri
 	result["outputDir"] = outputDir
 	result["plan"] = plan
 	result["format"] = opts.Format
+	result["inputArtifacts"] = inputArtifacts
+	attachEvidenceFlowInputArtifacts(result, inputArtifacts)
 	if opts.PrintScript {
 		result["script"] = evidenceFlowPlaywrightScript
 	}
@@ -484,10 +490,12 @@ func evidenceFlowVariants(spec map[string]any, opts EvidenceFlowOptions) ([]map[
 func evidenceFlowRecord(spec map[string]any, opts EvidenceFlowOptions) map[string]any {
 	raw, _ := evidenceFlowMap(spec["record"])
 	record := evidenceFlowCopyMap(raw)
+	_, pointerSet := record["pointer"]
 	video := evidenceFlowBool(record["video"], false)
 	screenshots := evidenceFlowBool(record["screenshots"], true)
 	console := evidenceFlowBool(record["console"], true)
 	network := evidenceFlowBool(record["network"], false)
+	pointer := evidenceFlowBool(record["pointer"], false)
 	if opts.VideoSet {
 		video = opts.Video
 	}
@@ -500,12 +508,46 @@ func evidenceFlowRecord(spec map[string]any, opts EvidenceFlowOptions) map[strin
 	if opts.NetworkSet {
 		network = opts.Network
 	}
+	if !pointerSet {
+		pointer = video
+	}
 	record["video"] = video
 	record["screenshots"] = screenshots
 	record["console"] = console
 	record["network"] = network
+	record["pointer"] = pointer
 	record["format"] = opts.Format
 	return record
+}
+
+func writeEvidenceFlowInputArtifacts(outputDir string, spec, plan map[string]any) (map[string]any, error) {
+	artifacts := map[string]any{
+		"plan":   filepath.Join(outputDir, "plan.json"),
+		"steps":  filepath.Join(outputDir, "steps.json"),
+		"script": filepath.Join(outputDir, "playwright.js"),
+	}
+	if err := writeIndentedJSONFile(artifacts["plan"].(string), plan, 0o644); err != nil {
+		return artifacts, fmt.Errorf("write evidence flow plan artifact: %w", err)
+	}
+	if err := writeIndentedJSONFile(artifacts["steps"].(string), spec, 0o644); err != nil {
+		return artifacts, fmt.Errorf("write evidence flow steps artifact: %w", err)
+	}
+	if err := os.WriteFile(artifacts["script"].(string), []byte(evidenceFlowPlaywrightScript), 0o644); err != nil {
+		return artifacts, fmt.Errorf("write evidence flow script artifact: %w", err)
+	}
+	return artifacts, nil
+}
+
+func attachEvidenceFlowInputArtifacts(result map[string]any, inputArtifacts map[string]any) {
+	if len(inputArtifacts) == 0 {
+		return
+	}
+	artifacts, ok := evidenceFlowMap(result["artifacts"])
+	if !ok || artifacts == nil {
+		artifacts = map[string]any{}
+		result["artifacts"] = artifacts
+	}
+	artifacts["inputs"] = inputArtifacts
 }
 
 func convertEvidenceFlowVideosToMP4(runner qaRecordRunner, result map[string]any) error {
@@ -586,6 +628,15 @@ func writeEvidenceFlowReport(outputDir string, result map[string]any) (string, e
 	b.WriteString(fmt.Sprintf("- Target: %s\n", stringValue(result["target"])))
 	b.WriteString(fmt.Sprintf("- Flow: %s\n", stringValue(flow["name"])))
 	b.WriteString(fmt.Sprintf("- Output: %s\n\n", outputDir))
+	if inputs, ok := evidenceFlowMap(result["inputArtifacts"]); ok {
+		b.WriteString("## Input artifacts\n\n")
+		for _, key := range []string{"steps", "plan", "script"} {
+			if path := stringValue(inputs[key]); path != "" {
+				b.WriteString(fmt.Sprintf("- %s: `%s`\n", key, path))
+			}
+		}
+		b.WriteString("\n")
+	}
 	if variants, ok := evidenceFlowSlice(result["variants"]); ok {
 		b.WriteString("## Variants\n\n")
 		for _, raw := range variants {
@@ -801,29 +852,175 @@ function endpointURL(value) {
   return value.url || '';
 }
 
+function pointerEnabled() {
+  return record.video === true && record.pointer !== false;
+}
+
+const pointerCSS = '#vivero-pointer{position:fixed;left:0;top:0;width:24px;height:24px;transform:translate(72px,72px);z-index:2147483647;pointer-events:none;transition:transform 180ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease;opacity:.95}#vivero-pointer::before{content:"";position:absolute;left:0;top:0;width:0;height:0;border-left:14px solid #111827;border-top:0 solid transparent;border-bottom:20px solid transparent;filter:drop-shadow(0 0 1px white) drop-shadow(0 1px 2px rgba(0,0,0,.6))}#vivero-pointer::after{content:"";position:absolute;left:4px;top:3px;width:0;height:0;border-left:8px solid white;border-top:0 solid transparent;border-bottom:12px solid transparent}#vivero-pointer.vivero-click::before{border-left-color:#2563eb;filter:drop-shadow(0 0 1px white) drop-shadow(0 0 5px rgba(37,99,235,.7))}#vivero-pointer.vivero-click::after{border-left-color:white}';
+
+async function ensurePointerOverlay(page) {
+  if (!pointerEnabled()) return;
+  await page.evaluate((css) => {
+    if (!document.getElementById('vivero-pointer-style')) {
+      const style = document.createElement('style');
+      style.id = 'vivero-pointer-style';
+      style.textContent = css;
+      document.documentElement.appendChild(style);
+    }
+    if (!document.getElementById('vivero-pointer')) {
+      const pointer = document.createElement('div');
+      pointer.id = 'vivero-pointer';
+      pointer.setAttribute('aria-hidden', 'true');
+      document.documentElement.appendChild(pointer);
+    }
+  }, pointerCSS);
+}
+
+async function showPointerAt(page, x, y, pulse) {
+  if (!pointerEnabled()) return;
+  await ensurePointerOverlay(page);
+  await page.evaluate(({ x, y, pulse }) => {
+    const pointer = document.getElementById('vivero-pointer');
+    if (!pointer) return;
+    pointer.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+    pointer.classList.remove('vivero-click');
+    if (pulse) {
+      void pointer.offsetWidth;
+      pointer.classList.add('vivero-click');
+    }
+  }, { x, y, pulse });
+}
+
+async function showPointerIdle(page) {
+  if (!pointerEnabled()) return;
+  const viewport = page.viewportSize() || { width: 1280, height: 800 };
+  await showPointerAt(page, Math.min(96, viewport.width - 24), Math.min(96, viewport.height - 24), false);
+}
+
+async function captureScreenshot(page, options) {
+  let previousVisibility = null;
+  if (pointerEnabled()) {
+    previousVisibility = await page.evaluate(() => {
+      const pointer = document.getElementById('vivero-pointer');
+      if (!pointer) return null;
+      const visibility = pointer.style.visibility || '';
+      pointer.style.visibility = 'hidden';
+      return visibility;
+    });
+  }
+  try {
+    await page.screenshot(options);
+  } finally {
+    if (previousVisibility !== null) {
+      await page.evaluate((previousVisibility) => {
+        const pointer = document.getElementById('vivero-pointer');
+        if (pointer) pointer.style.visibility = previousVisibility;
+      }, previousVisibility);
+    }
+  }
+}
+
+async function locatorPoint(locator) {
+  await locator.scrollIntoViewIfNeeded({ timeout: 10000 });
+  const box = await locator.boundingBox();
+  if (!box) return null;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+function scrollDelta(value, viewport) {
+  const base = viewport && viewport.height ? Math.max(200, Math.round(viewport.height * 0.8)) : 700;
+  let dx = 0;
+  let dy = base;
+  const applyDirection = (direction, amount) => {
+    const dir = String(direction || 'down').toLowerCase();
+    const pixels = Number(amount || base);
+    if (dir === 'up') { dx = 0; dy = -pixels; return; }
+    if (dir === 'left') { dx = -pixels; dy = 0; return; }
+    if (dir === 'right') { dx = pixels; dy = 0; return; }
+    dx = 0; dy = pixels;
+  };
+  if (typeof value === 'number') {
+    dy = value;
+  } else if (typeof value === 'string') {
+    applyDirection(value, base);
+  } else if (value && typeof value === 'object') {
+    if (value.x !== undefined || value.y !== undefined || value.dx !== undefined || value.dy !== undefined) {
+      dx = Number(value.x !== undefined ? value.x : (value.dx || 0));
+      dy = Number(value.y !== undefined ? value.y : (value.dy || 0));
+    } else {
+      applyDirection(value.direction || value.dir || 'down', value.pixels || value.amount || base);
+    }
+  }
+  if (!Number.isFinite(dx)) dx = 0;
+  if (!Number.isFinite(dy)) dy = base;
+  return { dx, dy };
+}
+
+async function assertTextAbsent(page, text, timeoutMs) {
+  const absentText = String(text);
+  let timeout = Number(timeoutMs !== undefined ? timeoutMs : 10000);
+  if (!Number.isFinite(timeout) || timeout < 0) timeout = 10000;
+  const interval = 150;
+  const deadline = Date.now() + timeout;
+  while (true) {
+    const count = await page.getByText(absentText).count();
+    if (count > 0) throw new Error('expected text to stay absent: ' + absentText);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    await page.waitForTimeout(Math.min(interval, remaining));
+  }
+}
+
 async function runAction(page, action, flowDir, steps, errors) {
   const stepOut = JSON.parse(JSON.stringify(action || {}));
   try {
     const visitURL = endpointURL(action.visit) || endpointURL(action.goto) || action.url || '';
     if (visitURL) {
       await page.goto(visitURL, { waitUntil: 'domcontentloaded' });
+      await showPointerIdle(page);
       stepOut.action = action.goto ? 'goto' : 'visit';
       stepOut.currentUrl = page.url();
     }
     if (action.click) {
-      await locatorFor(page, action.click).click({ timeout: action.timeoutMs || 10000 });
+      const targetLocator = locatorFor(page, action.click);
+      const point = await locatorPoint(targetLocator);
+      if (point) {
+        await showPointerAt(page, point.x, point.y, false);
+        await page.waitForTimeout(Math.max(120, Math.min(320, options.slowMoMs || 160)));
+      }
+      await targetLocator.click({ timeout: action.timeoutMs || 10000 });
+      if (point) {
+        await showPointerAt(page, point.x, point.y, true);
+        await page.waitForTimeout(420);
+      }
       stepOut.action = 'click';
       stepOut.currentUrl = page.url();
     }
     if (action.fill) {
       const value = action.value !== undefined ? String(action.value) : String(action.fill.value || '');
       const target = typeof action.fill === 'object' ? action.fill : action.fill;
-      await locatorFor(page, target).fill(value, { timeout: action.timeoutMs || 10000 });
+      const targetLocator = locatorFor(page, target);
+      const point = await locatorPoint(targetLocator);
+      if (point) await showPointerAt(page, point.x, point.y, false);
+      await targetLocator.fill(value, { timeout: action.timeoutMs || 10000 });
       stepOut.action = 'fill';
     }
     if (action.press) {
       await page.keyboard.press(String(action.press));
       stepOut.action = 'press';
+    }
+    if (action.scroll !== undefined) {
+      const delta = scrollDelta(action.scroll, page.viewportSize());
+      const viewport = page.viewportSize() || { width: 1280, height: 800 };
+      const pointerX = Math.max(32, viewport.width - 72);
+      const pointerY = Math.max(32, Math.round(viewport.height * 0.62));
+      await showPointerAt(page, pointerX, pointerY, false);
+      await page.mouse.move(pointerX, pointerY);
+      await page.waitForTimeout(Math.max(120, Math.min(320, options.slowMoMs || 160)));
+      await page.mouse.wheel(delta.dx, delta.dy);
+      stepOut.action = 'scroll';
+      stepOut.scroll = { x: delta.dx, y: delta.dy };
+      stepOut.scrollPosition = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
     }
     if (action.waitForSelector) {
       await page.locator(action.waitForSelector).first().waitFor({ timeout: action.timeoutMs || 10000 });
@@ -837,11 +1034,30 @@ async function runAction(page, action, flowDir, steps, errors) {
       await page.getByText(String(action.expectText)).first().waitFor({ timeout: action.timeoutMs || 10000 });
       stepOut.expectTextFound = true;
     }
+    if (action.expectNoText) {
+      const denied = String(action.expectNoText);
+      await assertTextAbsent(page, denied, action.timeoutMs);
+      stepOut.expectNoTextMatched = true;
+    }
+    if (action.expectSelector) {
+      await page.locator(String(action.expectSelector)).first().waitFor({ timeout: action.timeoutMs || 10000 });
+      stepOut.expectSelectorFound = true;
+    }
+    if (action.expectNoSelector) {
+      await page.locator(String(action.expectNoSelector)).first().waitFor({ state: 'hidden', timeout: action.timeoutMs || 10000 });
+      stepOut.expectNoSelectorMatched = true;
+    }
     if (action.expectUrl) {
       const current = page.url();
       const expected = String(action.expectUrl);
       if (!current.includes(expected)) throw new Error('expected URL to contain ' + expected + ', got ' + current);
       stepOut.expectUrlMatched = true;
+    }
+    if (action.expectUrlNot) {
+      const current = page.url();
+      const denied = String(action.expectUrlNot);
+      if (current.includes(denied)) throw new Error('expected URL not to contain ' + denied + ', got ' + current);
+      stepOut.expectUrlNotMatched = true;
     }
     if (action.screenshot && record.screenshots !== false) {
       let shotName = action.screenshot;
@@ -851,7 +1067,7 @@ async function runAction(page, action, flowDir, steps, errors) {
         fullPage = action.screenshot.fullPage === true;
       }
       const screenshotPath = path.join(flowDir, safeName(shotName) + '.png');
-      await page.screenshot({ path: screenshotPath, fullPage });
+      await captureScreenshot(page, { path: screenshotPath, fullPage });
       stepOut.screenshotName = String(shotName || 'screenshot');
       stepOut.screenshotPath = screenshotPath;
     }
@@ -859,6 +1075,18 @@ async function runAction(page, action, flowDir, steps, errors) {
     steps.push(stepOut);
   } catch (error) {
     stepOut.error = error && error.message ? error.message : String(error);
+    stepOut.currentUrl = page.url();
+    if (record.screenshots !== false) {
+      const failureScreenshotPath = path.join(flowDir, safeName('failure-' + (steps.length + 1)) + '.png');
+      try {
+        await captureScreenshot(page, { path: failureScreenshotPath, fullPage: true });
+        stepOut.failureScreenshotPath = failureScreenshotPath;
+        stepOut.screenshotName = 'failure-' + (steps.length + 1);
+        stepOut.screenshotPath = failureScreenshotPath;
+      } catch (screenshotError) {
+        stepOut.failureScreenshotError = screenshotError && screenshotError.message ? screenshotError.message : String(screenshotError);
+      }
+    }
     steps.push(stepOut);
     errors.push(stepOut.error);
   }
@@ -894,9 +1122,14 @@ async function run() {
       const page = await context.newPage();
       const consoleMessages = [];
       const networkFailures = [];
+      const pageErrors = [];
+      page.on('pageerror', (error) => {
+        const text = error && error.message ? error.message : String(error);
+        pageErrors.push(text);
+        if (record.console !== false) consoleMessages.push({ type: 'pageerror', text });
+      });
       if (record.console !== false) {
         page.on('console', (msg) => consoleMessages.push({ type: msg.type(), text: msg.text(), location: msg.location() }));
-        page.on('pageerror', (error) => consoleMessages.push({ type: 'pageerror', text: error.message || String(error) }));
       }
       if (record.network === true) {
         page.on('requestfailed', (request) => networkFailures.push({ url: request.url(), method: request.method(), failure: request.failure() }));
@@ -907,6 +1140,7 @@ async function run() {
       try {
         if (startURL) {
           await page.goto(startURL, { waitUntil: 'domcontentloaded' });
+          await showPointerIdle(page);
           steps.push({ action: 'start', url: page.url() });
           if (options.waitMs) await page.waitForTimeout(options.waitMs);
         }
@@ -915,6 +1149,9 @@ async function run() {
         }
       } catch (error) {
         errors.push(error && error.message ? error.message : String(error));
+      }
+      for (const pageError of pageErrors) {
+        errors.push('uncaught page error: ' + pageError);
       }
       const video = page.video();
       await context.close();

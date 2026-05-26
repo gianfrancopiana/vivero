@@ -965,6 +965,48 @@ func TestPublicPreviewRewriterSupportsBasePublicTemplatePlaceholders(t *testing.
 	}
 }
 
+func TestPublicPreviewRewriterCanPinRoutePathsToBasePublicOrigin(t *testing.T) {
+	target, err := url.Parse("http://localhost:3310")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriter := newPublicPreviewRewriter(target, "localhost", "https://main.preview.example.com", PublicRewriteConfig{
+		BasePaths: []string{"/checkout"},
+	})
+	body := strings.Join([]string{
+		`<a href="https://seller-main.preview.example.com/checkout?product=e&quantity=1">Add to cart</a>`,
+		`<a href="https://seller-main.preview.example.com/checkout/success">Checkout success child</a>`,
+		`<a href="https://seller-main.preview.example.com/checkout-success">Independent success page</a>`,
+		`{"checkout":"https:\/\/seller-main.preview.example.com\/checkout?product=e"}`,
+		`{"checkoutSuccess":"https:\/\/seller-main.preview.example.com\/checkout-success"}`,
+		`<a href="https://seller-main.preview.example.com/l/e">Product</a>`,
+	}, "\n")
+
+	got := rewriter.rewrite(body, "https://seller-main.preview.example.com")
+
+	for _, expected := range []string{
+		`href="https://main.preview.example.com/checkout?product=e&quantity=1"`,
+		`href="https://main.preview.example.com/checkout/success"`,
+		`"checkout":"https:\/\/main.preview.example.com\/checkout?product=e"`,
+		`href="https://seller-main.preview.example.com/checkout-success"`,
+		`"checkoutSuccess":"https:\/\/seller-main.preview.example.com\/checkout-success"`,
+		`href="https://seller-main.preview.example.com/l/e"`,
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("body missing %q: %s", expected, got)
+		}
+	}
+	for _, disallowed := range []string{
+		`href="https://seller-main.preview.example.com/checkout?`,
+		`href="https://seller-main.preview.example.com/checkout/success`,
+		`"checkout":"https:\/\/seller-main.preview.example.com\/checkout?`,
+	} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("checkout route should move to base public origin but found %q in %s", disallowed, got)
+		}
+	}
+}
+
 func TestHeaderRewriteProxyRewritesDevSubdomainOriginsBeforeBareHostnames(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

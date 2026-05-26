@@ -55,6 +55,11 @@ actions:
 		if plan["outputDir"] != outputDir || plan["target"] != "local" || plan["format"] != "mp4" {
 			t.Fatalf("unexpected flow plan: %#v", plan)
 		}
+		for _, artifact := range []string{"plan.json", "steps.json", "playwright.js"} {
+			if _, err := os.Stat(filepath.Join(outputDir, artifact)); err != nil {
+				t.Fatalf("evidence flow should persist %s before running: %v", artifact, err)
+			}
+		}
 		flow := plan["flow"].(map[string]any)
 		start := flow["start"].(map[string]any)
 		if start["url"] != "http://127.0.0.1:4444/" || start["service"] != "web" {
@@ -128,10 +133,32 @@ actions:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"checkout-review", mp4Path, screenshotPath, consolePath} {
+	for _, want := range []string{"checkout-review", mp4Path, screenshotPath, consolePath, "plan.json", "steps.json", "playwright.js"} {
 		if !strings.Contains(string(report), want) {
 			t.Fatalf("report should include %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestEvidenceFlowScriptSupportsPostconditionsAndFailureEvidence(t *testing.T) {
+	for _, want := range []string{"expectNoText", "assertTextAbsent", "expected text to stay absent", "expectUrlNot", "expectSelector", "expectNoSelector", "failureScreenshotPath", "pageErrors", "uncaught page error"} {
+		if !strings.Contains(evidenceFlowPlaywrightScript, want) {
+			t.Fatalf("generated Playwright script should support %q postconditions/failure evidence", want)
+		}
+	}
+}
+
+func TestEvidenceFlowScriptKeepsScreenshotsCursorFreeWithArrowVideoPointer(t *testing.T) {
+	for _, want := range []string{"async function captureScreenshot", "pointer.style.visibility = 'hidden'", "pointer.style.visibility = previousVisibility", "border-left:14px solid #111827"} {
+		if !strings.Contains(evidenceFlowPlaywrightScript, want) {
+			t.Fatalf("generated Playwright script should support cursor-free screenshots and arrow video pointer; missing %q", want)
+		}
+	}
+	if strings.Contains(evidenceFlowPlaywrightScript, "background:#fef08a") || strings.Contains(evidenceFlowPlaywrightScript, "border-radius:999px") {
+		t.Fatalf("generated Playwright script should not use the old concentric-circle video pointer")
+	}
+	if strings.Count(evidenceFlowPlaywrightScript, "page.screenshot") != 1 {
+		t.Fatalf("generated Playwright script should route all screenshots through cursor-hiding helper")
 	}
 }
 
@@ -187,6 +214,7 @@ func TestEvidenceFlowPlanCoversEndpointActionsDefaultsAndTypedValues(t *testing.
 			map[string]any{"visit": "blog"},
 			map[string]any{"goto": map[string]any{"service": "api", "path": "health"}},
 			map[string]any{"visit": "https://external.example.com/path"},
+			map[string]any{"scroll": map[string]any{"direction": "down", "pixels": json.Number("640")}},
 		},
 		"variants": []map[string]any{{
 			"width":             "390",
@@ -213,8 +241,8 @@ func TestEvidenceFlowPlanCoversEndpointActionsDefaultsAndTypedValues(t *testing.
 		t.Fatalf("start did not resolve common page: %#v", start)
 	}
 	actions := flow["actions"].([]any)
-	if len(actions) != 3 {
-		t.Fatalf("expected 3 actions, got %#v", actions)
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %#v", actions)
 	}
 	visitBlog := actions[0].(map[string]any)["visit"].(map[string]any)
 	if visitBlog["url"] != "http://127.0.0.1:9000/blog" || visitBlog["path"] != "/blog" {
@@ -228,6 +256,10 @@ func TestEvidenceFlowPlanCoversEndpointActionsDefaultsAndTypedValues(t *testing.
 	if visitExternal["url"] != "https://external.example.com/path" {
 		t.Fatalf("absolute visit not preserved: %#v", visitExternal)
 	}
+	scroll := actions[3].(map[string]any)["scroll"].(map[string]any)
+	if scroll["direction"] != "down" || scroll["pixels"] != json.Number("640") {
+		t.Fatalf("scroll action should be preserved for the Playwright runner: %#v", scroll)
+	}
 	variants := plan["variants"].([]map[string]any)
 	variant := variants[0]
 	viewport := variant["viewport"].(map[string]any)
@@ -238,7 +270,7 @@ func TestEvidenceFlowPlanCoversEndpointActionsDefaultsAndTypedValues(t *testing.
 		t.Fatalf("storage state should be expanded, got %q", got)
 	}
 	record := plan["record"].(map[string]any)
-	if record["video"] != true || record["screenshots"] != false || record["console"] != false || record["network"] != true {
+	if record["video"] != true || record["screenshots"] != false || record["console"] != false || record["network"] != true || record["pointer"] != true {
 		t.Fatalf("record booleans not normalized: %#v", record)
 	}
 }

@@ -185,25 +185,48 @@ vivero preview exec preview:webapp-local web --json --no-input -- npm test
 
 ## Evidence/QA flow
 
-Preview target refs identify a running preview, for example `preview:<id>` or the bare preview ID where the command expects a preview. QA/screenshot `--target local` uses the local/proxy preview URL and is fastest. Use `--target public` only when the project explicitly configures a public preview route.
+Preview target refs identify a running preview, for example `preview:<id>` or the bare preview ID where the command expects a preview. QA screenshot and recording evidence defaults to `--target local`, which uses the local/proxy preview URL and is fastest. Use `--target public` only when explicitly validating the public tunnel.
+
+Prefer generated Vivero/Playwright evidence commands for reproducible screenshots, recordings, traces, and CI-safe artifacts. Use Chrome MCP or other browser-driving tools only for exploratory debugging/manual inspection, then convert the finding into a Vivero evidence command when it needs to be shared.
 
 ```sh
+vivero preview qa plan preview:webapp-local --scope smoke --target local --json --no-input
 vivero evidence events preview:webapp-local --tail --json --no-input
 vivero evidence logs preview:webapp-local web --json --no-input
 vivero evidence smoke preview:webapp-local --json --no-input
 vivero evidence screenshot preview:webapp-local web / --target local --json --no-input --quiet
+vivero preview screenshot preview:webapp-local web / --breakpoints --target local --json --no-input --quiet
+vivero preview qa record preview:webapp-local --scope smoke --target local --json --no-input --quiet
 vivero evidence qa run preview:webapp-local --scope smoke --target local --json --no-input --quiet
 vivero preview qa final preview:webapp-local --scope smoke --target local --json --no-input --quiet
 ```
 
-Use `vivero evidence flow` for app-agnostic browser walkthroughs that belong in a project-owned steps file, not Vivero core:
+Use `vivero evidence flow` for ad-hoc, app-agnostic browser walkthroughs. When a user asks for feature QA beyond the declared `vivero.yml` QA scopes, create a temporary or repo-owned JSON/YAML steps file, dry-run it, then call the CLI with video, screenshots, waits, and slow motion so the artifact is reviewable:
 
 ```sh
-vivero evidence flow preview:webapp-local --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input
-vivero evidence flow preview:webapp-local --steps-file qa/visual-flow.yaml --target local --video --console --json --no-input --quiet
+vivero evidence flow preview:webapp-local --steps-file /tmp/feature-flow.yaml --target local --dry-run --json --no-input
+vivero evidence flow preview:webapp-local --steps-file /tmp/feature-flow.yaml --target local --video --screenshots --console --slow-mo-ms 250 --wait-ms 750 --json --no-input --quiet
 ```
 
-Flow files declare start page, actions, variants, screenshot capture points, video preferences, and console/network capture. Always keep the flow file in the app repo when it encodes app-specific selectors or routes.
+Flow files declare start page, actions, variants, screenshot capture points, video preferences, and console/network capture. They support `visit`/`goto`, `click`, `fill`, `press`, `scroll`, `wait`/`waitMs`, `waitForSelector`, `expectText`, `expectNoText`, `expectSelector`, `expectNoSelector`, `expectUrl`, `expectUrlNot`, and named screenshots. Video evidence defaults to a visible in-page arrow pointer/click highlight (`record.pointer: true`) so review recordings show where clicks happened; screenshots hide that pointer overlay automatically so PNG artifacts stay cursor-free. Set `record.pointer: false` when even the video should be pixel-clean. Each run preserves input artifacts (`steps.json`, `plan.json`, generated `playwright.js`) and failure screenshots when an assertion fails. Use explicit waits, scroll actions, negative postconditions, and multiple screenshot checkpoints; a short smoke video that only lands on the homepage is not useful QA evidence. Always keep the flow file in the app repo when it encodes app-specific selectors or routes.
+
+Minimal ad-hoc scroll flow:
+
+```yaml
+name: feature-scroll-review
+start: { service: web, path: /feature }
+variants:
+  - name: desktop-light
+    viewport: { width: 1440, height: 1000 }
+    colorScheme: light
+record: { video: true, screenshots: true, console: true, pointer: true }
+actions:
+  - waitForSelector: body
+  - screenshot: { name: top, fullPage: false }
+  - scroll: { direction: down, pixels: 800 }
+  - wait: 750
+  - screenshot: { name: after-scroll, fullPage: false }
+```
 
 ## Cache/speed flow
 
@@ -238,7 +261,7 @@ vivero evidence qa run preview:webapp-local --scope smoke --target local --json 
 vivero evidence screenshot preview:webapp-local web / --target local --json --no-input --quiet
 ```
 
-Check the resolved URL, target, storage state, selectors, screenshot breakpoints, and artifact paths. Prefer updating project-owned QA steps over adding app-specific behavior to Vivero core.
+Check the resolved URL, target, storage state, selectors, screenshot breakpoints, postconditions, console/pageerror output, and artifact paths. Prefer updating project-owned QA steps or declarative preview rewrite config over adding app-specific behavior to Vivero core. For public-preview host routing where some paths are app-global and others are subdomain-specific, use project config such as `publicRewrite.basePaths` (for example `/checkout`) to pin those paths to the base public origin without changing the app. If screenshots/video are blank, verify whether Playwright captured a real blank app state by inspecting `console.json`, `pageerror`, HTML props, and `network.json` before blaming media delivery.
 
 ### Local state looks stale
 
@@ -248,7 +271,7 @@ vivero list --json --no-input
 vivero preview down webapp-local --archive-patch --json --no-input --quiet
 ```
 
-Archive patches before deleting preview worktrees unless the operator explicitly wants a discard.
+Archive patches before deleting preview worktrees unless the operator explicitly wants a discard. After changing a mounted preview `.env`, prefer `vivero preview up <project> --id <id> --reuse --wait --timeout 5m --public --json --no-input` over `docker restart <container>` so Vivero refreshes dynamic host ports, proxy process, and public-router state together.
 
 ## Teardown and safety
 

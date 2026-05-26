@@ -166,7 +166,7 @@ func TestQAEvidencePlanExposesYAMLBackedConcreteCommands(t *testing.T) {
 	if len(recordingCommands) != 1 {
 		t.Fatalf("recording commands = %d; want configured light recording", len(recordingCommands))
 	}
-	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "core", "--json", "--no-input", "--quiet", "--target", "local", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -192,7 +192,7 @@ func TestQARecordExplicitZeroWaitIsPreserved(t *testing.T) {
 	}
 }
 
-func TestQAEvidencePlanRecordCommandsIgnorePublicPlanTarget(t *testing.T) {
+func TestQAEvidencePlanRecordCommandsHonorPublicPlanTarget(t *testing.T) {
 	p := PreviewRecord{Services: map[string]PreviewService{
 		"web": {
 			URL:       "https://public.example.trycloudflare.com",
@@ -219,7 +219,7 @@ func TestQAEvidencePlanRecordCommandsIgnorePublicPlanTarget(t *testing.T) {
 	}
 	recordings := evidence["recordings"].(map[string]any)
 	recordingCommands := recordings["commands"].([]map[string]any)
-	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "public", "--json", "--no-input", "--quiet", "--color-scheme", "light"}
+	wantRecordArgs := []string{"vivero", "preview", "qa", "record", "preview:preview", "--scope", "public", "--json", "--no-input", "--quiet", "--target", "public", "--color-scheme", "light"}
 	if got := recordingCommands[0]["argv"].([]string); !reflect.DeepEqual(got, wantRecordArgs) {
 		t.Fatalf("recording argv = %#v; want %#v", got, wantRecordArgs)
 	}
@@ -441,8 +441,8 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 	if !strings.Contains(usage, "--public") {
 		t.Fatalf("qa schema usage should advertise explicit public target for non-record actions: %s", usage)
 	}
-	if strings.Contains(recordUsage, "--public") || strings.Contains(recordUsage, "--origin") || strings.Contains(recordUsage, "--target") {
-		t.Fatalf("qa record usage should not include target flags: %s", recordUsage)
+	if strings.Contains(recordUsage, "--public") || strings.Contains(recordUsage, "--origin") || !strings.Contains(recordUsage, "--target local|public|origin") {
+		t.Fatalf("qa record usage should advertise normalized target flag only: %s", recordUsage)
 	}
 	if strings.Contains(usage, "--color-scheme") {
 		t.Fatalf("qa schema should keep color schemes in agent.qa.evidence, not as a broad qa flag: %s", usage)
@@ -451,8 +451,8 @@ func TestDiscoverabilityDocumentsQARecordOptions(t *testing.T) {
 		t.Fatalf("qa schema config = %v", qa["config"])
 	}
 	recordOptions := qa["recordOptions"].(map[string]any)
-	if _, ok := recordOptions["target"]; ok {
-		t.Fatalf("qa schema should not expose record target options: %v", recordOptions)
+	if !strings.Contains(recordOptions["target"].(string), "default local") {
+		t.Fatalf("qa schema should document record target option: %v", recordOptions)
 	}
 	if !strings.Contains(recordOptions["colorScheme"].(string), "generated evidence.recordings.commands") {
 		t.Fatalf("qa schema should document record color scheme as generated evidence primitive: %v", recordOptions)

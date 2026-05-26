@@ -102,6 +102,42 @@ func TestQARecordWebMUsesInjectableRunnerAndWritesArtifact(t *testing.T) {
 	}
 }
 
+func TestQARecordTargetPublicUsesPublicPlanURLs(t *testing.T) {
+	a, _ := newQARecordTestApp(t)
+	defer a.Close()
+	if err := a.saveService("qa-pr", PreviewService{Name: "web", Status: "healthy", URL: "https://qa.example.test", OriginURL: "http://127.0.0.1:3000", ProxyURL: "http://127.0.0.1:4444"}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &fakeQARecordRunner{runFunc: func(name string, args ...string) ([]byte, []byte, error) {
+		inputPath := args[len(args)-1]
+		payload := readJSONFile[map[string]any](t, inputPath)
+		plan := payload["plan"].(map[string]any)
+		if plan["target"] != "public" {
+			t.Fatalf("plan target = %#v; want public", plan["target"])
+		}
+		scopes := plan["scopes"].([]any)
+		pages := scopes[0].(map[string]any)["pages"].([]any)
+		if got := pages[0].(map[string]any)["url"]; got != "https://qa.example.test/" {
+			t.Fatalf("record page url = %#v", got)
+		}
+		options := payload["options"].(map[string]any)
+		if options["target"] != "public" {
+			t.Fatalf("record options = %#v", options)
+		}
+		return []byte(`{"ok":true,"videos":[]}`), nil, nil
+	}}
+	a.qaRecordRunner = runner
+
+	result, err := a.QARecord("qa-pr", QARecordOptions{Scope: "smoke", Format: "webm", Target: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["target"] != "public" {
+		t.Fatalf("result target = %#v", result["target"])
+	}
+}
+
 func TestQARecordMP4ConversionUsesInjectableRunner(t *testing.T) {
 	a, _ := newQARecordTestApp(t)
 	defer a.Close()

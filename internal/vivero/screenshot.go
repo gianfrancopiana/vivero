@@ -1,13 +1,14 @@
 package vivero
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ func normalizeScreenshotOptions(opts ScreenshotOptions) ScreenshotOptions {
 }
 
 func normalizeQARecordOptions(opts QARecordOptions) QARecordOptions {
+	opts.Target = normalizeArtifactTarget(opts.Target)
 	opts.ColorScheme = normalizeColorScheme(opts.ColorScheme)
 	if opts.StorageState != "" {
 		opts.StorageState = expandPath(opts.StorageState)
@@ -455,8 +457,9 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 	if len(breakpoints) == 0 {
 		breakpoints = []ScreenshotBreakpoint{{Width: opts.Width, Height: opts.Height}}
 	}
-	if _, err := exec.LookPath("npx"); err != nil {
-		return nil, fmt.Errorf("npx/playwright not available for screenshots: %w", err)
+	runner := a.recordRunner()
+	if _, err := runner.LookPath("npm"); err != nil {
+		return nil, fmt.Errorf("npm/playwright not available for screenshots: %w", err)
 	}
 	baseURL := serviceBaseURLForTarget(svc, opts.Target)
 	if baseURL == "" {
@@ -472,29 +475,27 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 		if err := ensureDir(filepath.Dir(out)); err != nil {
 			return nil, err
 		}
-		args := []string{"--yes", playwrightPackage(), "screenshot", "--viewport-size", fmt.Sprintf("%d,%d", bp.Width, bp.Height)}
-		args = append(args, "--channel", "chrome")
-		if opts.FullPage {
-			args = append(args, "--full-page")
-		}
-		if opts.WaitForSelector != "" {
-			args = append(args, "--wait-for-selector", opts.WaitForSelector)
-		}
-		if opts.WaitForTimeout != "" {
-			args = append(args, "--wait-for-timeout", opts.WaitForTimeout)
-		}
-		if opts.ColorScheme != "" {
-			args = append(args, "--color-scheme", opts.ColorScheme)
+		screenshot := map[string]any{
+			"preview":        previewID,
+			"service":        service,
+			"target":         opts.Target,
+			"colorScheme":    opts.ColorScheme,
+			"url":            url,
+			"path":           out,
+			"breakpoint":     bp.Name,
+			"viewportWidth":  bp.Width,
+			"viewportHeight": bp.Height,
 		}
 		if opts.StorageState != "" {
-			args = append(args, "--load-storage", opts.StorageState)
+			screenshot["storageState"] = opts.StorageState
 		}
-		args = append(args, url, out)
-		cmd := exec.Command("npx", args...)
-		b, err := cmd.CombinedOutput()
-		if err != nil {
-			return nil, fmt.Errorf("playwright screenshot failed: %w: %s", err, string(b))
-		}
+		screenshots = append(screenshots, screenshot)
+	}
+	if err := captureScreenshotsWithPlaywright(runner, url, opts, screenshots); err != nil {
+		return nil, err
+	}
+	for _, screenshot := range screenshots {
+		out := stringValue(screenshot["path"])
 		width, height, err := screenshotDimensions(out)
 		if err != nil {
 			return nil, fmt.Errorf("read screenshot dimensions: %w", err)
@@ -512,26 +513,11 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 			originalWidth = crop.OriginalWidth
 			originalHeight = crop.OriginalHeight
 		}
-		screenshot := map[string]any{
-			"preview":        previewID,
-			"service":        service,
-			"target":         opts.Target,
-			"colorScheme":    opts.ColorScheme,
-			"url":            url,
-			"path":           out,
-			"breakpoint":     bp.Name,
-			"viewportWidth":  bp.Width,
-			"viewportHeight": bp.Height,
-			"cropped":        cropped,
-			"width":          width,
-			"height":         height,
-			"originalWidth":  originalWidth,
-			"originalHeight": originalHeight,
-		}
-		if opts.StorageState != "" {
-			screenshot["storageState"] = opts.StorageState
-		}
-		screenshots = append(screenshots, screenshot)
+		screenshot["cropped"] = cropped
+		screenshot["width"] = width
+		screenshot["height"] = height
+		screenshot["originalWidth"] = originalWidth
+		screenshot["originalHeight"] = originalHeight
 	}
 	result := map[string]any{"preview": previewID, "service": service, "target": opts.Target, "url": url, "screenshots": screenshots}
 	if len(screenshots) == 1 {
@@ -541,3 +527,96 @@ func (a *App) ScreenshotWithOptions(previewID, service string, opts ScreenshotOp
 	}
 	return result, nil
 }
+
+func captureScreenshotsWithPlaywright(runner qaRecordRunner, url string, opts ScreenshotOptions, screenshots []map[string]any) error {
+	tmpDir, err := os.MkdirTemp("", "vivero-screenshot-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	inputPath := filepath.Join(tmpDir, "input.json")
+	scriptPath := filepath.Join(tmpDir, "screenshot.js")
+	payload := map[string]any{"url": url, "options": opts, "screenshots": screenshots}
+	if err := writeIndentedJSONFile(inputPath, payload, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(scriptPath, []byte(screenshotPlaywrightScript), 0o644); err != nil {
+		return err
+	}
+	stdout, stderr, err := runner.Run("npm", "exec", "--yes", "--package", playwrightPackage(), "--", "sh", "-lc", `NODE_PATH="$(dirname "$(dirname "$(command -v playwright)")")" exec node "$1" "$2"`, "vivero-playwright", scriptPath, inputPath)
+	if err != nil {
+		return fmt.Errorf("playwright screenshot failed: %w: %s", err, strings.TrimSpace(string(stderr)+"\n"+string(stdout)))
+	}
+	trimmed := bytes.TrimSpace(stdout)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(trimmed, &result); err != nil {
+		return fmt.Errorf("parse screenshot output: %w: %s", err, strings.TrimSpace(string(stdout)))
+	}
+	if result["ok"] == false {
+		return fmt.Errorf("playwright screenshot failed: %s", strings.TrimSpace(string(stdout)))
+	}
+	return nil
+}
+
+const screenshotPlaywrightScript = `
+const fs = require('fs');
+const { chromium } = require('playwright');
+
+const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const url = input.url;
+const opts = input.options || {};
+const screenshots = input.screenshots || [];
+
+function waitTimeoutMillis(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  if (typeof value === 'number') return Math.max(0, value);
+  const text = String(value).trim().toLowerCase();
+  const match = text.match(/^(\d+(?:\.\d+)?)(ms|s)?$/);
+  if (!match) throw new Error('invalid wait timeout: ' + value);
+  const number = Number(match[1]);
+  return match[2] === 's' ? Math.round(number * 1000) : Math.round(number);
+}
+
+async function run() {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const captured = [];
+  try {
+    for (const shot of screenshots) {
+      const width = Number(shot.viewportWidth || opts.width || 1280);
+      const height = Number(shot.viewportHeight || opts.height || 800);
+      const contextOptions = {
+        viewport: { width, height },
+        deviceScaleFactor: opts.deviceScaleFactor || 1,
+        colorScheme: opts.colorScheme || undefined,
+        ignoreHTTPSErrors: true,
+      };
+      if (opts.storageState) contextOptions.storageState = opts.storageState;
+      const context = await browser.newContext(contextOptions);
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        if (opts.waitForSelector) {
+          await page.locator(opts.waitForSelector).first().waitFor({ timeout: 30000 });
+        }
+        const waitMs = waitTimeoutMillis(opts.waitForTimeout);
+        if (waitMs) await page.waitForTimeout(waitMs);
+        await page.screenshot({ path: shot.path, fullPage: !!opts.fullPage });
+        captured.push({ path: shot.path, width, height });
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+  process.stdout.write(JSON.stringify({ ok: true, screenshots: captured }, null, 2));
+}
+
+run().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+`
