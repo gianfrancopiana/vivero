@@ -90,7 +90,7 @@ func (a *App) runQA(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		}
 		return 0
 	case "final":
-		opts := QAFinalOptions{Scope: scope, Target: artifactTargetFromArgs(actionArgs), SkipScreenshots: hasArg(actionArgs, "--no-screenshots"), SkipRecord: hasArg(actionArgs, "--no-record")}
+		opts := QAFinalOptions{Scope: scope, Target: artifactTargetFromArgs(actionArgs), SkipScreenshots: hasArg(actionArgs, "--no-screenshots"), SkipRecord: hasArg(actionArgs, "--no-record"), IncludeEvidence: flagValues(actionArgs, "--include-evidence")}
 		if width, ok, err := positiveIntFlag(actionArgs, "--width"); err != nil {
 			return errOut(stderr, jsonOut, err)
 		} else if ok {

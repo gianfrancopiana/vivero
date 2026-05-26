@@ -157,12 +157,14 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		}
 	}
 
+	screenshotDir := filepath.Join(artifactDir, "screenshots")
+	videoDir := filepath.Join(artifactDir, "videos")
 	screenshotCommands := []map[string]any{}
 	for _, page := range pages {
 		service := stringValue(page["service"])
 		path := stringValue(page["path"])
 		for _, colorScheme := range screenshotColorSchemes {
-			argv := []string{"vivero", "preview", "screenshot", "preview:" + previewID, service, path, "--breakpoints", "--json", "--no-input", "--quiet"}
+			argv := []string{"vivero", "preview", "screenshot", "preview:" + previewID, service, path, "--breakpoints", "--output-dir", screenshotDir, "--json", "--no-input", "--quiet"}
 			argv = appendArtifactTargetArgs(argv, target)
 			storageState := stringValue(page["storageState"])
 			if storageState != "" {
@@ -198,7 +200,7 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		recordingSession, hasRecordingAuth = qaAuthSessionForScope(scopes[0], authSessions)
 	}
 	for _, colorScheme := range recordingColorSchemes {
-		argv := []string{"vivero", "preview", "qa", "record", "preview:" + previewID, "--scope", scopeName, "--json", "--no-input", "--quiet"}
+		argv := []string{"vivero", "preview", "qa", "record", "preview:" + previewID, "--scope", scopeName, "--output-dir", videoDir, "--json", "--no-input", "--quiet"}
 		argv = appendArtifactTargetArgs(argv, target)
 		if hasRecordingAuth && recordingSession.StorageState != "" {
 			argv = append(argv, "--storage-state", recordingSession.StorageState)
@@ -222,12 +224,12 @@ func qaEvidencePlan(previewID, scopeName string, p PreviewRecord, agent AgentCon
 		"screenshots": map[string]any{
 			"colorSchemes": explicitColorSchemesForPlan(screenshotColorSchemes),
 			"breakpoints":  agent.ScreenshotBreakpoints,
-			"outputDir":    filepath.Join(artifactDir, "screenshots"),
+			"outputDir":    screenshotDir,
 			"commands":     screenshotCommands,
 		},
 		"recordings": map[string]any{
 			"colorSchemes": explicitColorSchemesForPlan(recordingColorSchemes),
-			"outputDir":    filepath.Join(artifactDir, "videos"),
+			"outputDir":    videoDir,
 			"commands":     recordingCommands,
 		},
 	}, nil

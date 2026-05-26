@@ -1,6 +1,8 @@
 package vivero
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,26 +50,75 @@ func (a *App) QAFinal(previewID string, opts QAFinalOptions) (map[string]any, er
 		}
 	}
 
+	if included, includeErrors := loadQAFinalIncludedEvidence(opts.IncludeEvidence); len(included) > 0 || len(includeErrors) > 0 {
+		if len(included) > 0 {
+			result["includedEvidence"] = included
+		}
+		if len(includeErrors) > 0 {
+			result["ok"] = false
+			result["includedEvidenceErrors"] = includeErrors
+		}
+	}
+
 	if diag, err := a.DiagnoseStartup(previewID); err != nil {
 		result["diagnosisError"] = err.Error()
 	} else {
 		result["diagnosis"] = diag
 	}
 
-	if finalPath, err := writeQAFinalResult(artifacts); err != nil {
+	finalPath := ""
+	if path, err := writeQAFinalResult(artifacts); err != nil {
 		result["ok"] = false
 		result["finalArtifactError"] = err.Error()
-	} else if finalPath != "" {
+	} else if path != "" {
+		finalPath = path
 		result["finalPath"] = finalPath
-		result["proof"] = qaFinalProof(result)
+	}
+	setQAFinalProof(result)
+	if finalPath != "" {
 		if err := writeIndentedJSONFile(finalPath, result, 0o644); err != nil {
 			result["ok"] = false
 			result["finalArtifactError"] = err.Error()
 			delete(result, "finalPath")
+			setQAFinalProof(result)
 		}
 	}
-	result["proof"] = qaFinalProof(result)
 	return result, nil
+}
+
+func loadQAFinalIncludedEvidence(paths []string) ([]map[string]any, []string) {
+	included := []map[string]any{}
+	errors := []string{}
+	for _, rawPath := range paths {
+		path := strings.TrimSpace(rawPath)
+		if path == "" {
+			continue
+		}
+		path = expandPath(path)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			errors = append(errors, path+": "+err.Error())
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(b, &payload); err != nil {
+			errors = append(errors, path+": "+err.Error())
+			continue
+		}
+		payload["sourcePath"] = path
+		included = append(included, payload)
+	}
+	return included, errors
+}
+
+func setQAFinalProof(result map[string]any) {
+	proof := qaFinalProof(result)
+	if proof["mediaOk"] == false {
+		result["ok"] = false
+		proof["ok"] = false
+		result["mediaError"] = "one or more media artifacts are missing or empty"
+	}
+	result["proof"] = proof
 }
 
 func qaFinalRecordOptionsFromPlan(plan map[string]any, opts QAFinalOptions) QARecordOptions {
@@ -117,6 +168,12 @@ func qaFinalProof(result map[string]any) map[string]any {
 	artifacts, _ := result["artifacts"].(map[string]any)
 	run, _ := result["run"].(map[string]any)
 	record, _ := result["record"].(map[string]any)
+	screenshots := qaFinalScreenshotPaths(run["screenshots"])
+	videos := qaFinalVideoPaths(record["videos"])
+	includedScreenshots, includedVideos := artifactMediaPaths(result["includedEvidence"])
+	screenshots = appendUniqueStrings(screenshots, includedScreenshots...)
+	videos = appendUniqueStrings(videos, includedVideos...)
+	media := qaFinalMediaEntries(screenshots, videos)
 	proof := map[string]any{
 		"preview":       stringValue(result["preview"]),
 		"scope":         stringValue(result["scope"]),
@@ -127,8 +184,10 @@ func qaFinalProof(result map[string]any) map[string]any {
 		"recordPath":    qaFinalRecordPath(record, artifacts),
 		"finalPath":     stringValue(result["finalPath"]),
 		"videoDir":      stringValue(artifacts["videoDir"]),
-		"screenshots":   qaFinalScreenshotPaths(run["screenshots"]),
-		"videos":        qaFinalVideoPaths(record["videos"]),
+		"screenshots":   screenshots,
+		"videos":        videos,
+		"media":         media,
+		"mediaOk":       qaFinalMediaOK(media),
 		"recordSkipped": result["recordSkipped"] == true,
 		"ok":            result["ok"] == true,
 	}
@@ -210,17 +269,68 @@ func qaFinalScreenshotPaths(raw any) []string {
 }
 
 func qaFinalVideoPaths(raw any) []string {
-	paths := []string{}
-	if videos, ok := raw.([]any); ok {
-		for _, item := range videos {
-			if video, ok := item.(map[string]any); ok {
-				if path := stringValue(video["path"]); path != "" {
-					paths = append(paths, path)
-				}
-			}
+	_, videos := artifactMediaPaths(raw)
+	return videos
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(base)+len(values))
+	for _, value := range base {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func qaFinalMediaEntries(screenshots, videos []string) []map[string]any {
+	entries := []map[string]any{}
+	appendEntry := func(kind, path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		entry := map[string]any{"kind": kind, "path": path, "exists": false, "bytes": int64(0), "deliverable": false}
+		info, err := os.Stat(expandPath(path))
+		if err != nil {
+			entry["error"] = err.Error()
+		} else if info.IsDir() {
+			entry["error"] = "path is a directory"
+		} else {
+			entry["exists"] = true
+			entry["bytes"] = info.Size()
+			entry["deliverable"] = info.Size() > 0
+		}
+		entries = append(entries, entry)
+	}
+	for _, path := range screenshots {
+		appendEntry("screenshot", path)
+	}
+	for _, path := range videos {
+		appendEntry("video", path)
+	}
+	return entries
+}
+
+func qaFinalMediaOK(media []map[string]any) bool {
+	for _, entry := range media {
+		if entry["deliverable"] != true {
+			return false
 		}
 	}
-	return paths
+	return true
 }
 
 func writeQAFinalResult(artifacts map[string]any) (string, error) {
@@ -257,7 +367,33 @@ func qaFinalHuman(v map[string]any) string {
 	if finalPath := stringValue(v["finalPath"]); finalPath != "" {
 		parts = append(parts, "final: "+finalPath)
 	}
+	for _, path := range stringListValue(proof["screenshots"]) {
+		parts = append(parts, "screenshot: "+path)
+	}
+	for _, path := range stringListValue(proof["videos"]) {
+		parts = append(parts, "video: "+path)
+	}
+	if proof["mediaOk"] == false {
+		parts = append(parts, "media: missing or empty artifact")
+	}
 	return strings.Join(parts, "\n")
+}
+
+func stringListValue(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []any:
+		out := []string{}
+		for _, item := range v {
+			if s := stringValue(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (a *App) captureQAPageScreenshots(previewID string, plan map[string]any) ([]map[string]any, error) {
