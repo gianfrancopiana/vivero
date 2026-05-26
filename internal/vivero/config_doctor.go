@@ -62,6 +62,7 @@ func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 	configDoctorCheckBuildCache(&report, cfg)
 	configDoctorCheckSetup(&report, root, cfg)
 	configDoctorCheckAgent(&report, root, cfg)
+	configDoctorCheckPublicRoutes(&report, cfg)
 	report.finish()
 	return report, nil
 }
@@ -237,6 +238,18 @@ func configDoctorCheckAgent(report *ConfigDoctorReport, root string, cfg Project
 	}
 	configDoctorCheckQAAuth(report, root, cfg)
 	configDoctorCheckQAScopes(report, cfg)
+}
+
+func configDoctorCheckPublicRoutes(report *ConfigDoctorReport, cfg ProjectConfig) {
+	project := strings.TrimSpace(cfg.Project.Name)
+	previewID := project
+	if previewID == "" {
+		previewID = "preview"
+	}
+	_, err := plannedNamedPublicHosts(UpRequest{Project: project, ID: previewID, Public: true}, cfg)
+	if err != nil {
+		report.addFinding("error", "public-route", "public", err.Error())
+	}
 }
 
 func configDoctorCheckQAAuth(report *ConfigDoctorReport, root string, cfg ProjectConfig) {

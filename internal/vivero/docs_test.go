@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
+func TestReadmeFramesPreviewEvidenceContract(t *testing.T) {
 	readme, err := os.ReadFile("../../README.md")
 	if err != nil {
 		t.Fatal(err)
@@ -15,26 +15,22 @@ func TestReadmeFramesPreviewDeployEvidenceContract(t *testing.T) {
 	for _, want := range []string{
 		"preview-first app-ops runtime",
 		"Preview lane",
-		"Experimental deploy/release lane",
 		"Evidence/cache lane",
-		"the app owns how it runs and deploys; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
-		"Golden path: preview, prove, then guarded deploy-readiness",
+		"the app owns how it runs; Vivero owns orchestration, safety gates, local state, command contracts, and evidence",
+		"Golden path: preview, prove, iterate, and tear down",
 		"vivero preview up",
-		"vivero deploy plan",
-		"vivero release events",
 		"## Fast paths",
 		"Docker build cache",
-		"deploy prepare/cache hints",
 		"docs/certified-examples.md",
 		"## Limits",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("README should frame preview/deploy/evidence contract with %q", want)
+			t.Fatalf("README should frame preview/evidence contract with %q", want)
 		}
 	}
 }
 
-func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
+func TestDocsExplainPreviewCacheFastPaths(t *testing.T) {
 	files := map[string]string{
 		"readme":            "../../README.md",
 		"skill":             "../../skills/vivero/SKILL.md",
@@ -50,22 +46,22 @@ func TestDocsExplainPreviewDeployCacheFastPaths(t *testing.T) {
 		bodies[name] = string(body)
 	}
 
-	for _, want := range []string{"Preview lane", "Experimental deploy/release lane", "Evidence/cache lane"} {
+	for _, want := range []string{"Preview lane", "Evidence/cache lane"} {
 		if !strings.Contains(bodies["readme"], want) {
 			t.Fatalf("README should teach lane %q", want)
 		}
 	}
-	for _, want := range []string{"## Speed model", "stable preview IDs", "--metadata branch=", "build cache config", "cache inspect", "deploy prepare/cache evidence"} {
+	for _, want := range []string{"## Speed model", "stable preview IDs", "--metadata branch=", "build cache config", "cache inspect", "warm volume/cache evidence"} {
 		if !strings.Contains(bodies["skill"], want) {
 			t.Fatalf("bundled skill should document speed model with %q", want)
 		}
 	}
-	for _, want := range []string{"Fast-path signals", "image build duration", "cache enabled/disabled", "warm baseline/derived events", "deploy phase durations", "artifact paths"} {
+	for _, want := range []string{"Fast-path signals", "image build duration", "cache enabled/disabled", "warm baseline/derived events", "artifact paths"} {
 		if !strings.Contains(bodies["certifiedExamples"], want) {
 			t.Fatalf("certified examples docs should document fast-path signal %q", want)
 		}
 	}
-	for _, want := range []string{"preview/deploy lane contract", "build cache config", "cache commands", "deploy prepare/cache evidence", "--example-e2e"} {
+	for _, want := range []string{"build cache config", "cache commands", "warm volume/cache evidence", "--example-e2e"} {
 		if !strings.Contains(bodies["releasing"], want) {
 			t.Fatalf("releasing docs should mention release-note surface %q", want)
 		}
@@ -119,7 +115,6 @@ func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 		"\t$(MAKE) integration-fixtures",
 		"\t$(MAKE) nasty-integration-fixtures",
 		"\t$(MAKE) example-configs",
-		"\t$(MAKE) deploy-fixtures",
 		"\t$(MAKE) release-smoke",
 	} {
 		if !strings.Contains(bodies["makefile"], want) {
@@ -162,8 +157,6 @@ func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
 		"../../examples/agent-demo":        "agent-demo",
 		"../../examples/integration-stack": "integration-stack",
 		"../../examples/nasty-integration": "nasty-integration",
-		"../../examples/deploy-command":    "deploy-ready",
-		"../../examples/deploy-blue-green": "deploy-blue-green",
 	}
 	for path, wantName := range examples {
 		t.Run(wantName, func(t *testing.T) {
@@ -179,44 +172,10 @@ func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
 			}
 		})
 	}
-	for _, want := range []string{"static-only", "web app", "app + database", "monorepo app-owned Dockerfile", "command deploy", "blue/green deploy", "make example-e2e", "make integration-fixtures", "make nasty-integration-fixtures", "make deploy-fixtures"} {
+	for _, want := range []string{"static-only", "web app", "app + database", "monorepo app-owned Dockerfile", "make example-e2e", "make integration-fixtures", "make nasty-integration-fixtures"} {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("certified examples doc should include %q", want)
 		}
-	}
-}
-
-func TestCertifiedDeployExamplesUseAppOwnedScripts(t *testing.T) {
-	cases := []struct {
-		path     string
-		strategy string
-		command  string
-	}{
-		{path: "../../examples/deploy-command", strategy: "command", command: "scripts/deploy-command.sh"},
-		{path: "../../examples/deploy-blue-green", strategy: "blue-green", command: "scripts/blue-green.sh"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.path, func(t *testing.T) {
-			bodyBytes, err := os.ReadFile(tc.path + "/vivero.yml")
-			if err != nil {
-				t.Fatal(err)
-			}
-			body := string(bodyBytes)
-			if !strings.Contains(body, tc.command) {
-				t.Fatalf("deploy example should delegate to app-owned script %q", tc.command)
-			}
-			_, cfg, err := loadProjectConfig(tc.path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			env, ok := cfg.Deploy.Environments["production"]
-			if !ok {
-				t.Fatal("deploy example should configure production environment")
-			}
-			if normalizeDeployStrategy(env.Strategy) != tc.strategy {
-				t.Fatalf("strategy = %q, want %q", normalizeDeployStrategy(env.Strategy), tc.strategy)
-			}
-		})
 	}
 }
 
@@ -284,21 +243,8 @@ func TestCertifiedFastPathExamplesExposeCacheContracts(t *testing.T) {
 		t.Fatalf("nasty integration monorepo preview should keep runtime dependency volumes alongside build cache: %#v", monorepo.DependencyVolumes)
 	}
 
-	_, deployCfg, err := loadProjectConfig("../../examples/deploy-command")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := deployCfg.Deploy.Environments["production"]
-	if env.PrepareCommand == "" {
-		t.Fatal("deploy-command example should include a prepareCommand fast path")
-	}
-	if env.Cache.Dir == "" || len(env.Cache.Build.From) == 0 || len(env.Cache.Build.To) == 0 {
-		t.Fatalf("deploy-command example should expose cache dir and build cache hints: %#v", env.Cache)
-	}
-
 	for path, wants := range map[string][]string{
-		"../../docs/certified-examples.md":        {"prepareCommand", "build cache specs", "cache inspect"},
-		"../../examples/deploy-command/README.md": {"prepareCommand", "VIVERO_BUILD_CACHE_FROM", "VIVERO_CACHE_DIR"},
+		"../../docs/certified-examples.md": {"build cache specs", "cache inspect", "warm baseline"},
 	} {
 		bodyBytes, err := os.ReadFile(path)
 		if err != nil {
@@ -329,18 +275,18 @@ func TestDocsFrameTinyInvariantMatrixAndFrontierAgentRecipes(t *testing.T) {
 	}
 
 	for _, doc := range []string{"readme", "certifiedExamples", "skill"} {
-		for _, want := range []string{"Tiny invariant fixture matrix", "Preview invariants", "Deploy/release invariants", "Evidence invariants"} {
+		for _, want := range []string{"Tiny invariant fixture matrix", "Preview invariants", "Evidence invariants"} {
 			if !strings.Contains(bodies[doc], want) {
 				t.Fatalf("%s should frame the tiny invariant matrix with %q", doc, want)
 			}
 		}
 	}
-	for _, want := range []string{"Frontier-agent recipes", "Discover the live contract", "Start from a thin config", "Collect target-aware evidence", "Plan before applying deploys", "Leave a handoff"} {
+	for _, want := range []string{"Frontier-agent recipes", "Discover the live contract", "Start from a thin config", "Collect target-aware evidence", "Leave a handoff"} {
 		if !strings.Contains(bodies["skill"], want) {
 			t.Fatalf("bundled skill should include frontier-agent recipe %q", want)
 		}
 	}
-	for _, want := range []string{"make example-e2e", "make nasty-integration-fixtures", "make deploy-fixtures", "vivero evidence logs", "vivero evidence qa"} {
+	for _, want := range []string{"make example-e2e", "make nasty-integration-fixtures", "vivero evidence logs", "vivero evidence qa"} {
 		if !strings.Contains(bodies["readme"], want) || !strings.Contains(bodies["skill"], want) {
 			t.Fatalf("README and skill should ground matrix/recipes in %q", want)
 		}

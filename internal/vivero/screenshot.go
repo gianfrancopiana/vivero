@@ -81,7 +81,7 @@ func normalizeQARecordOptions(opts QARecordOptions) QARecordOptions {
 	} else {
 		opts.Format = strings.ToLower(strings.TrimSpace(opts.Format))
 	}
-	if opts.WaitMS == 0 {
+	if !opts.WaitMSSet && opts.WaitMS == 0 {
 		opts.WaitMS = 350
 	}
 	return opts

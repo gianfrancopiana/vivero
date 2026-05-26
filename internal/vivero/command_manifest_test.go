@@ -43,7 +43,7 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		seen[name] = cmd
 	}
-	for _, name := range []string{"init", "up", "down", "commands", "schema", "doctor", "doctor config", "doctor production", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "deploy plan", "deploy apply", "release status", "release rollback", "evidence events", "evidence logs", "evidence screenshot", "evidence flow", "evidence qa", "qa run", "qa record", "skill doctor"} {
+	for _, name := range []string{"init", "up", "down", "commands", "schema", "doctor", "doctor config", "cache inspect", "cache warm", "cache prune", "preview up", "preview inspect", "preview down", "preview events", "preview logs", "preview smoke", "preview screenshot", "preview qa run", "preview qa final", "preview diagnose startup", "evidence events", "evidence logs", "evidence screenshot", "evidence flow", "evidence qa", "qa run", "qa record", "skill doctor"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing manifest for %s", name)
 		}
@@ -69,8 +69,6 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		{name: "cache inspect", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
 		{name: "cache warm", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
 		{name: "cache prune", category: "cache", visibility: CommandVisibilityCommon, lane: CommandLaneSupport},
-		{name: "deploy apply", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
-		{name: "release rollback", category: "release", visibility: CommandVisibilityAdvanced, lane: CommandLaneDeploy},
 		{name: "serve", category: "control-plane", visibility: CommandVisibilityInternal, lane: CommandLaneSupport},
 	} {
 		cmd, ok := seen[tc.name]
@@ -79,6 +77,18 @@ func TestCommandManifestCoversPublicCommands(t *testing.T) {
 		}
 		if cmd.Category != tc.category || cmd.Visibility != tc.visibility || cmd.Lane != tc.lane {
 			t.Fatalf("%s category/visibility/lane = %s/%s/%s, want %s/%s/%s", cmd.Name(), cmd.Category, cmd.Visibility, cmd.Lane, tc.category, tc.visibility, tc.lane)
+		}
+	}
+}
+
+func TestCommandManifestOmitsDeployReleaseProductionCommands(t *testing.T) {
+	for _, cmd := range commandManifests() {
+		name := cmd.Name()
+		if strings.HasPrefix(name, "deploy") || strings.HasPrefix(name, "release") || name == "doctor production" {
+			t.Fatalf("preview-only core should not expose %s", name)
+		}
+		if cmd.Lane == "deploy" || cmd.Category == "release" {
+			t.Fatalf("preview-only core should not expose deploy/release metadata: %#v", cmd)
 		}
 	}
 }
@@ -113,57 +123,11 @@ func TestCommandManifestExposesAgentSafetyMetadataForEveryCommand(t *testing.T) 
 
 func TestCommandManifestPromotesTargetRefsAndApprovalToTopLevel(t *testing.T) {
 	commands := commandManifests()
-	for _, name := range []string{"inspect", "events", "logs", "smoke", "screenshot", "qa plan", "qa run", "qa final", "release events", "release logs", "release smoke", "evidence events", "evidence logs", "evidence smoke", "evidence screenshot", "evidence flow", "evidence qa"} {
+	for _, name := range []string{"inspect", "events", "logs", "smoke", "screenshot", "qa plan", "qa run", "qa final", "evidence events", "evidence logs", "evidence smoke", "evidence screenshot", "evidence flow", "evidence qa"} {
 		cmd := mustManifestForTest(t, commands, name)
 		raw := manifestJSONForTest(t, cmd)
 		if _, ok := raw["targetRefs"]; !ok {
 			t.Fatalf("%s should expose targetRefs as first-class manifest metadata: %#v", name, raw)
-		}
-	}
-
-	for _, name := range []string{"deploy apply", "release smoke", "release rollback"} {
-		cmd := mustManifestForTest(t, commands, name)
-		raw := manifestJSONForTest(t, cmd)
-		if raw["approvalRequired"] != "human" {
-			t.Fatalf("%s should require human approval in the manifest, got %#v", name, raw["approvalRequired"])
-		}
-		if raw["agentSafe"] != false || raw["dangerous"] != true {
-			t.Fatalf("%s approval metadata should align with agentSafe=false and dangerous=true: %#v", name, raw)
-		}
-	}
-}
-
-func TestCommandManifestProductionCommandsDiscloseRemoteEffects(t *testing.T) {
-	commands := commandManifests()
-	for _, name := range []string{"deploy apply", "release rollback"} {
-		cmd := mustManifestForTest(t, commands, name)
-		if !cmd.RequiresNet || !cmd.ReadsRemote || !cmd.WritesRemote {
-			t.Fatalf("%s should disclose production remote read/write effects: %#v", name, cmd)
-		}
-	}
-	for _, name := range []string{"release status", "release smoke"} {
-		cmd := mustManifestForTest(t, commands, name)
-		if !cmd.RequiresNet || !cmd.ReadsRemote || cmd.WritesRemote {
-			t.Fatalf("%s should disclose production remote read-only effects: %#v", name, cmd)
-		}
-	}
-}
-
-func TestCommandManifestFramesProductionLaneAsExperimentalAndGuarded(t *testing.T) {
-	commands := commandManifests()
-	for _, name := range []string{"doctor production", "deploy plan", "deploy apply", "release status", "release smoke", "release rollback"} {
-		cmd := mustManifestForTest(t, commands, name)
-		if got := cmd.Schema["featureStatus"]; got != "experimental" {
-			t.Fatalf("%s should mark production lane featureStatus=experimental, got %#v", name, got)
-		}
-	}
-	for _, name := range []string{"deploy apply", "release rollback"} {
-		cmd := mustManifestForTest(t, commands, name)
-		if got := cmd.Schema["requiresConfirmProduction"]; got != true {
-			t.Fatalf("%s should require --confirm-production in schema, got %#v", name, got)
-		}
-		if !manifestHasFlag(cmd, "--confirm-production") || !strings.Contains(cmd.Usage, "--confirm-production") {
-			t.Fatalf("%s should publish --confirm-production in flags and usage: %#v", name, cmd)
 		}
 	}
 }
@@ -199,11 +163,6 @@ func TestCommandCatalogUsesManifestMetadata(t *testing.T) {
 				t.Fatalf("up metadata should describe side effects and agent safety: %#v", cmd)
 			}
 		}
-		if cmd.Name() == "release status" {
-			if cmd.AgentSafe || !cmd.WritesLocal || !cmd.RequiresNet || cmd.Schema["runsAppOwnedCommand"] != true || cmd.Schema["mayUpdateLocalReleaseState"] != true {
-				t.Fatalf("release status metadata should disclose app-owned status command side effects: %#v", cmd)
-			}
-		}
 	}
 }
 
@@ -231,7 +190,7 @@ func TestCapabilitiesAdvertiseCLIContract(t *testing.T) {
 		t.Fatalf("capabilities should expose build provenance: %#v", caps["build"])
 	}
 	features := stringSet(caps["features"].([]string))
-	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "thin-config-init", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "evidence-flow", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
+	for _, want := range []string{"cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance", "thin-config-init", "local-state-doctor", "config-doctor", "evidence-namespace", "evidence-flow", "bounded-parallel-startup", "authenticated-qa", "preview-runtime"} {
 		if !features[want] {
 			t.Fatalf("capabilities missing %s: %#v", want, caps["features"])
 		}
@@ -292,13 +251,4 @@ func stringSet(values []string) map[string]bool {
 		out[value] = true
 	}
 	return out
-}
-
-func manifestHasFlag(cmd CommandManifest, name string) bool {
-	for _, flag := range cmd.Flags {
-		if flag.Name == name {
-			return true
-		}
-	}
-	return false
 }

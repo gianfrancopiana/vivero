@@ -26,7 +26,7 @@ func NewApp() (*App, error) {
 	if err := ensureDir(home); err != nil {
 		return nil, err
 	}
-	for _, d := range []string{"projects", "repos", "worktrees", "logs", "secrets", "patches", "run", "deploy", filepath.Join("deploy", "plans"), filepath.Join("deploy", "releases")} {
+	for _, d := range []string{"projects", "repos", "worktrees", "logs", "secrets", "patches", "run"} {
 		if err := ensureDir(filepath.Join(home, d)); err != nil {
 			return nil, err
 		}

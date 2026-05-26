@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -74,6 +75,17 @@ func TestCacheWarmCreatesBaselineVolumesAndBuildsCacheEnabledImages(t *testing.T
 	if got := cacheActionStatuses(result.Actions); !reflect.DeepEqual(got, []string{"volume:db:warmed", "build:web:warmed"}) {
 		t.Fatalf("unexpected cache warm actions: %#v", result.Actions)
 	}
+	if result.Duration == "" {
+		t.Fatalf("cache warm result should report total duration: %#v", result)
+	}
+	for _, action := range result.Actions {
+		if action.Duration == "" {
+			t.Fatalf("cache warm action should report duration for speed evidence: %#v", result.Actions)
+		}
+	}
+	if human := cacheActionsHuman(result.Actions); !strings.Contains(human, "duration=") {
+		t.Fatalf("cache warm human output should include durations, got %q", human)
+	}
 }
 
 func TestCachePruneRequiresExplicitScopeAndRemovesSelectedResources(t *testing.T) {
@@ -132,6 +144,107 @@ func TestCachePruneRejectsAmbiguousOrUnconfirmedDeletes(t *testing.T) {
 				t.Fatalf("CachePrune(%#v) err=%v, want %q", tc.opts, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunCacheCommandsRenderHumanOutput(t *testing.T) {
+	a, fake, _ := newCacheTestApp(t)
+	baselineVolume := dockerSmartBaselineVolumeName("demo", "db", "pgdata")
+	projectVolume := dockerProjectVolumeName("demo", "web", "uploads")
+	fake.volumes = map[string]bool{baselineVolume: true, projectVolume: true}
+	fake.images = map[string]bool{"registry.example/demo-web:cache": true}
+
+	var stdout, stderr bytes.Buffer
+	if code := a.runCache([]string{"inspect", "demo"}, &stdout, &stderr, false); code != 0 {
+		t.Fatalf("cache inspect code=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "demo\tbuild=1") || !strings.Contains(got, "image\tweb\tregistry.example/demo-web:cache") {
+		t.Fatalf("unexpected cache inspect output: %q", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := a.runCache([]string{"warm", "demo"}, &stdout, &stderr, false); code != 0 {
+		t.Fatalf("cache warm code=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "volume\tdb") || !strings.Contains(got, "build\tweb") || !strings.Contains(got, "duration=") {
+		t.Fatalf("unexpected cache warm output: %q", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := a.runCache([]string{"prune", "demo", "--kind", "image", "--yes"}, &stdout, &stderr, false); code != 0 {
+		t.Fatalf("cache prune code=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "image\tweb\tregistry.example/demo-web:cache\tremoved") {
+		t.Fatalf("unexpected cache prune output: %q", got)
+	}
+}
+
+func TestRunCacheRejectsMissingAndUnknownSubcommands(t *testing.T) {
+	a, _, _ := newCacheTestApp(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing subcommand", args: nil, want: "cache requires subcommand"},
+		{name: "missing inspect project", args: []string{"inspect"}, want: "cache inspect requires project"},
+		{name: "missing warm project", args: []string{"warm"}, want: "cache warm requires project"},
+		{name: "missing prune project", args: []string{"prune"}, want: "cache prune requires project"},
+		{name: "unknown subcommand", args: []string{"frobnicate"}, want: "unknown command: cache frobnicate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := a.runCache(tc.args, &stdout, &stderr, false); code == 0 {
+				t.Fatalf("runCache(%#v) code=0 stdout=%q stderr=%q", tc.args, stdout.String(), stderr.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, tc.want) {
+				t.Fatalf("runCache(%#v) stderr=%q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrebuildRunsConfiguredStepsAndReportsFailures(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := cacheTestProjectConfig()
+	cfg.Sources["app"] = SourceConfig{Path: "app"}
+	cfg.Prebuild = map[string]PrebuildConfig{"app": {Steps: []string{"printf ok > prebuild.txt"}}}
+	if _, err := a.saveProject(projectDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Prebuild("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["ok"] != true {
+		t.Fatalf("prebuild should succeed: %#v", result)
+	}
+	if got, err := os.ReadFile(filepath.Join(projectDir, "app", "prebuild.txt")); err != nil || string(got) != "ok" {
+		t.Fatalf("prebuild did not run in source dir: got=%q err=%v", got, err)
+	}
+
+	cfg.Prebuild = map[string]PrebuildConfig{
+		"app":     {Steps: []string{"false"}},
+		"missing": {Steps: []string{"exit 99"}},
+	}
+	if _, err := a.saveProject(projectDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	result, err = a.Prebuild("demo")
+	if err == nil || result["ok"] != false {
+		t.Fatalf("prebuild should report failing step: result=%#v err=%v", result, err)
 	}
 }
 

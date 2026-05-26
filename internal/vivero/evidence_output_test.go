@@ -22,7 +22,7 @@ func TestAttachEvidenceShapeMergesDiscoveredArtifacts(t *testing.T) {
 	}
 }
 
-func TestAttachEvidenceShapeSuggestsPreviewAndReleaseDebugCommandsOnFailure(t *testing.T) {
+func TestAttachEvidenceShapeSuggestsPreviewDebugCommandsOnFailure(t *testing.T) {
 	previewPayload := map[string]any{"smoke": map[string]any{"ok": false}}
 	attachEvidenceShape(previewPayload, map[string]any{"kind": "preview", "id": "pr-1", "ref": "preview:pr-1"})
 	previewSuggestions := stringSliceFromAny(t, previewPayload["nextSuggestedCommands"])
@@ -36,17 +36,6 @@ func TestAttachEvidenceShapeSuggestsPreviewAndReleaseDebugCommandsOnFailure(t *t
 		}
 	}
 
-	releasePayload := map[string]any{"smoke": ReleaseSmokeResult{OK: false, Error: "smoke failed"}}
-	attachEvidenceShape(releasePayload, map[string]any{"kind": "release", "id": "rel-1", "ref": "release:rel-1", "project": "demo", "environment": "production"})
-	releaseSuggestions := stringSliceFromAny(t, releasePayload["nextSuggestedCommands"])
-	for _, want := range []string{
-		"vivero release events release:rel-1 --json --no-input",
-		"vivero release logs release:rel-1 --json --no-input",
-	} {
-		if !containsString(releaseSuggestions, want) {
-			t.Fatalf("release failure suggestions missing %q: %#v", want, releaseSuggestions)
-		}
-	}
 }
 
 func stringSliceFromAny(t *testing.T, value any) []string {

@@ -10,7 +10,6 @@ type ProjectConfig struct {
 	Seeds           map[string]SeedConfig     `yaml:"seeds" json:"seeds,omitempty"`
 	Prebuild        map[string]PrebuildConfig `yaml:"prebuild" json:"prebuild,omitempty"`
 	Public          PublicConfig              `yaml:"public" json:"public,omitempty"`
-	Deploy          DeployConfig              `yaml:"deploy" json:"deploy,omitempty"`
 	Warm            WarmConfig                `yaml:"warm" json:"warm,omitempty"`
 	Setup           SetupConfig               `yaml:"setup" json:"setup,omitempty"`
 	Routes          map[string]string         `yaml:"routes" json:"routes,omitempty"`
@@ -99,38 +98,6 @@ type PublicConfig struct {
 	HostnameTemplate string `yaml:"hostnameTemplate" json:"hostnameTemplate,omitempty"`
 	RouterAddr       string `yaml:"routerAddr" json:"routerAddr,omitempty"`
 	InactiveBehavior string `yaml:"inactiveBehavior" json:"inactiveBehavior,omitempty"`
-}
-
-type DeployConfig struct {
-	Environments map[string]DeployEnvironmentConfig `yaml:"environments" json:"environments,omitempty"`
-}
-
-type DeployEnvironmentConfig struct {
-	Strategy        string                `yaml:"strategy" json:"strategy,omitempty"`
-	CommandTimeout  string                `yaml:"commandTimeout" json:"commandTimeout,omitempty"`
-	StatusTimeout   string                `yaml:"statusTimeout" json:"statusTimeout,omitempty"`
-	PrepareCommand  string                `yaml:"prepareCommand" json:"prepareCommand,omitempty"`
-	ApplyCommand    string                `yaml:"applyCommand" json:"applyCommand,omitempty"`
-	StatusCommand   string                `yaml:"statusCommand" json:"statusCommand,omitempty"`
-	SmokeCommand    string                `yaml:"smokeCommand" json:"smokeCommand,omitempty"`
-	RollbackCommand string                `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
-	Cache           DeployCacheConfig     `yaml:"cache" json:"cache,omitempty"`
-	BlueGreen       BlueGreenDeployConfig `yaml:"blueGreen" json:"blueGreen,omitempty"`
-}
-
-type DeployCacheConfig struct {
-	Dir   string                `yaml:"dir" json:"dir,omitempty"`
-	Build ImageBuildCacheConfig `yaml:"build" json:"build,omitempty"`
-}
-
-type BlueGreenDeployConfig struct {
-	Slots             []string `yaml:"slots" json:"slots,omitempty"`
-	ActiveSlotCommand string   `yaml:"activeSlotCommand" json:"activeSlotCommand,omitempty"`
-	PrepareCommand    string   `yaml:"prepareCommand" json:"prepareCommand,omitempty"`
-	SmokeCommand      string   `yaml:"smokeCommand" json:"smokeCommand,omitempty"`
-	PromoteCommand    string   `yaml:"promoteCommand" json:"promoteCommand,omitempty"`
-	StatusCommand     string   `yaml:"statusCommand" json:"statusCommand,omitempty"`
-	RollbackCommand   string   `yaml:"rollbackCommand" json:"rollbackCommand,omitempty"`
 }
 
 type BackingConfig struct {
@@ -233,6 +200,7 @@ type QARecordOptions struct {
 	OutputDir         string  `json:"outputDir,omitempty"`
 	SlowMoMS          int     `json:"slowMoMs,omitempty"`
 	WaitMS            int     `json:"waitMs,omitempty"`
+	WaitMSSet         bool    `json:"-"`
 }
 
 type QAFinalOptions struct {
@@ -248,6 +216,7 @@ type QAFinalOptions struct {
 	Format            string  `json:"format,omitempty"`
 	SlowMoMS          int     `json:"slowMoMs,omitempty"`
 	WaitMS            int     `json:"waitMs,omitempty"`
+	WaitMSSet         bool    `json:"-"`
 }
 
 type AgentPage struct {

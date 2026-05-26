@@ -21,7 +21,7 @@ var requiredSkillSections = []string{
 	"Choose the lane",
 	"Preview flow",
 	"Evidence/QA flow",
-	"Deploy/release flow",
+	"Cache/speed flow",
 	"Failure playbooks",
 	"Teardown and safety",
 	"Secrets rules",

@@ -56,7 +56,7 @@ func TestBundledSkillHasRequiredOperatingSections(t *testing.T) {
 		"Choose the lane",
 		"Preview flow",
 		"Evidence/QA flow",
-		"Deploy/release flow",
+		"Cache/speed flow",
 		"Failure playbooks",
 		"Teardown and safety",
 		"Secrets rules",
@@ -100,13 +100,12 @@ func TestBundledSkillDescribesAgentLaneDecisionFlow(t *testing.T) {
 	for _, required := range []string{
 		"Preview lane",
 		"Evidence/QA lane",
-		"Deploy/release lane",
 		"Support lane",
 		"preview:<id>",
-		"release:<id>",
-		"explicit operator approval",
 		"exact artifact paths",
-		"Plan is the safe entry point",
+		"cache inspect",
+		"Trust the installed CLI contract",
+		"URL means healthy",
 	} {
 		if !strings.Contains(skill, required) {
 			t.Fatalf("bundled skill should include %q in the agent operating flow", required)
@@ -142,10 +141,10 @@ func TestSkillCommandSnippetValidationRejectsStaleSubcommands(t *testing.T) {
 	}
 
 	for _, command := range []string{
-		"vivero doctor production --project . --json --no-input",
-		"vivero release status my-app --environment production --json --no-input",
-		"vivero schema deploy apply --json --no-input",
-		"vivero help deploy apply",
+		"vivero doctor config . --json --no-input",
+		"vivero schema evidence flow --json --no-input",
+		"vivero help preview qa final",
+		"vivero cache inspect my-app --json --no-input",
 	} {
 		snippet := validateSkillCommandSnippet(skillCommandSnippet{Line: 1, Command: command})
 		if !snippet.OK {
@@ -177,7 +176,7 @@ func TestSkillCommandSnippetValidationRejectsUnknownFlagsAndTypos(t *testing.T) 
 }
 
 func TestSkillSectionsIgnoreFencedHeadings(t *testing.T) {
-	skill := []byte("---\nname: vivero\nversion: 0.1.0\nvivero_cli: 0.1.0\nschema: 1\nlicense: MIT\ndescription: valid\n---\n\n```md\n## Mental model\n## First checks\n## Choose the lane\n## Preview flow\n## Evidence/QA flow\n## Deploy/release flow\n## Failure playbooks\n## Teardown and safety\n## Secrets rules\n## Verification gates\n```\n")
+	skill := []byte("---\nname: vivero\nversion: 0.1.0\nvivero_cli: 0.1.0\nschema: 1\nlicense: MIT\ndescription: valid\n---\n\n```md\n## Mental model\n## First checks\n## Choose the lane\n## Preview flow\n## Evidence/QA flow\n## Cache/speed flow\n## Failure playbooks\n## Teardown and safety\n## Secrets rules\n## Verification gates\n```\n")
 	report, err := validateEmbeddedSkill(skill)
 	if err != nil {
 		t.Fatalf("validate embedded skill: %v", err)

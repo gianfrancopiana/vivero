@@ -78,9 +78,6 @@ func decodeProjectConfigNode(configPath string, node *yaml.Node) (ProjectConfig,
 	if cfg.Routes == nil {
 		cfg.Routes = map[string]string{}
 	}
-	if cfg.Deploy.Environments == nil {
-		cfg.Deploy.Environments = map[string]DeployEnvironmentConfig{}
-	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]ProfileConfig{}
 	}
@@ -217,9 +214,6 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 	if err := validateWarmConfig(configPath, cfg.Warm); err != nil {
 		return err
 	}
-	if err := validateDeployConfig(configPath, cfg.Deploy); err != nil {
-		return err
-	}
 	if err := validateProfilesConfig(configPath, cfg); err != nil {
 		return err
 	}
@@ -275,35 +269,6 @@ func validateWarmConfig(configPath string, warm WarmConfig) error {
 		}
 	}
 	return validateFingerprintPaths(configPath, "warm.fingerprint.paths", warm.Fingerprint.Paths)
-}
-
-func validateDeployConfig(configPath string, deploy DeployConfig) error {
-	for _, name := range sortedMapKeys(deploy.Environments) {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("%s deploy.environments has an empty environment name", configPath)
-		}
-		env := deploy.Environments[name]
-		for field, value := range map[string]string{"strategy": env.Strategy, "prepareCommand": env.PrepareCommand, "applyCommand": env.ApplyCommand, "statusCommand": env.StatusCommand, "smokeCommand": env.SmokeCommand, "rollbackCommand": env.RollbackCommand} {
-			if strings.ContainsAny(value, "\x00") {
-				return fmt.Errorf("%s deploy.environments.%s.%s contains unsupported NUL", configPath, name, field)
-			}
-		}
-		if strings.ContainsAny(env.Cache.Dir, "\x00\n\r") {
-			return fmt.Errorf("%s deploy.environments.%s.cache.dir contains unsupported newline or NUL", configPath, name)
-		}
-		if err := validateImageBuildCacheSpecs(configPath, fmt.Sprintf("deploy.environments.%s.cache.build.from", name), env.Cache.Build.From); err != nil {
-			return err
-		}
-		if err := validateImageBuildCacheSpecs(configPath, fmt.Sprintf("deploy.environments.%s.cache.build.to", name), env.Cache.Build.To); err != nil {
-			return err
-		}
-		for field, value := range map[string]string{"activeSlotCommand": env.BlueGreen.ActiveSlotCommand, "prepareCommand": env.BlueGreen.PrepareCommand, "smokeCommand": env.BlueGreen.SmokeCommand, "promoteCommand": env.BlueGreen.PromoteCommand, "statusCommand": env.BlueGreen.StatusCommand, "rollbackCommand": env.BlueGreen.RollbackCommand} {
-			if strings.ContainsAny(value, "\x00") {
-				return fmt.Errorf("%s deploy.environments.%s.blueGreen.%s contains unsupported NUL", configPath, name, field)
-			}
-		}
-	}
-	return nil
 }
 
 func imageBuildConfigured(build ImageBuildConfig) bool {
@@ -364,7 +329,7 @@ func (a *App) capabilities() map[string]any {
 		"localOnlyControlPlane": true,
 		"sourceModes":           []string{"managed", "external"},
 		"runtimes":              []string{"docker", "compose"},
-		"features":              []string{"preview-runtime", "projects", "thin-config-init", "worktrees", "health-gated-up", "events", "startup-diagnostics", "local-state-doctor", "config-doctor", "production-readiness-doctor", "app-owned-deploy-surface", "app-owned-compose-runtime", "blue-green-deploy", "release-status", "release-events", "release-logs", "release-smoke", "release-rollback", "evidence-namespace", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "evidence-flow", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance"},
+		"features":              []string{"preview-runtime", "projects", "thin-config-init", "worktrees", "health-gated-up", "events", "startup-diagnostics", "local-state-doctor", "config-doctor", "app-owned-compose-runtime", "evidence-namespace", "secrets", "sync", "diff", "exec", "logs", "smoke", "screenshots", "screenshot-breakpoints", "color-scheme-evidence", "evidence-flow", "qa-plan", "qa-run", "qa-record", "qa-report", "authenticated-qa", "local-default-evidence", "cloudflared-quick-tunnel", "cloudflare-named-tunnel", "fixed-public-hostnames", "profiles", "profile-service-env", "project-lifetime-volumes", "smart-warm-volumes", "setup-once-per-project", "setup-once-per-fingerprint", "bounded-parallel-startup", "bundled-skill", "cli-manifest", "manifest-visibility", "clig-compatible-help", "cli-coverage-ratchet", "release-checksums", "build-provenance"},
 		"invariants":            []string{"json-first", "stable-json-errors", "no-required-prompts", "no-github-auth-in-core", "control-plane-local-only", "url-after-health", "containerized-apps-only"},
 	}
 }

@@ -17,18 +17,11 @@ func rootHelp() string {
 		"  vivero preview qa run my-app-local --scope all --target local --json --no-input",
 		"  vivero preview down my-app-local --discard --json --no-input",
 		"",
-		"  # Experimental deploy/release: plan, inspect, and guard app-owned production logic",
-		"  vivero deploy plan . --environment production --json --no-input",
-		"  vivero deploy apply <plan-id> --confirm-production --json --no-input",
-		"  vivero release status my-app --environment production --json --no-input",
-		"  vivero release events release:<release-id> --json --no-input",
-		"  vivero release logs release:<release-id> --json --no-input",
-		"",
-		"  # Evidence/debug: one target-aware namespace for preview and release proof",
+		"  # Evidence/debug: preview-targeted proof and artifacts",
 		"  vivero evidence events preview:my-app-local --tail --json --no-input",
 		"  vivero evidence logs preview:my-app-local web --json --no-input",
 		"  vivero evidence screenshot preview:my-app-local web / --json --no-input",
-		"  vivero evidence logs release:<release-id> --json --no-input",
+		"  vivero evidence flow preview:my-app-local --steps-file flow.json --json --no-input",
 	} {
 		b.WriteString(line + "\n")
 	}

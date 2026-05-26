@@ -35,6 +35,8 @@ type warmVolumeBinding struct {
 	Name         string `json:"name"`
 	BaselineName string `json:"baselineName"`
 	ActiveName   string `json:"activeName"`
+	Duration     string `json:"duration,omitempty"`
+	DurationMs   int64  `json:"durationMs,omitempty"`
 }
 
 type warmVolumeState struct {
@@ -132,12 +134,15 @@ func (a *App) prepareSmartWarmVolumes(project ProjectRecord, req UpRequest, cfg 
 		}
 	}
 
-	for _, binding := range state.Volumes {
+	for i := range state.Volumes {
+		binding := &state.Volumes[i]
+		timer := startOperationTimer()
 		if mode == warmModeBaseline {
 			if err := a.containerRuntime().EnsureVolume(binding.BaselineName); err != nil {
 				return cfg, state, err
 			}
-			a.recordEvent(req.ID, "info", "warm.baseline", "using canonical smart warm volume", binding.Service, map[string]string{"volume": binding.BaselineName, "fingerprint": fingerprint, "ref": ref})
+			binding.DurationMs, binding.Duration = cacheDurationFromTimer(timer)
+			a.recordEvent(req.ID, "info", "warm.baseline", "using canonical smart warm volume", binding.Service, timer.metadata(map[string]string{"volume": binding.BaselineName, "fingerprint": fingerprint, "ref": ref}))
 			continue
 		}
 		if err := a.containerRuntime().RemoveVolume(binding.ActiveName); err != nil {
@@ -147,12 +152,14 @@ func (a *App) prepareSmartWarmVolumes(project ProjectRecord, req UpRequest, cfg 
 			if err := a.containerRuntime().CopyVolume(binding.BaselineName, binding.ActiveName); err != nil {
 				return cfg, state, err
 			}
-			a.recordEvent(req.ID, "info", "warm.derived", "created preview-local smart warm volume from baseline", binding.Service, map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "baselineReady": fmt.Sprint(state.BaselineReady), "ref": ref})
+			binding.DurationMs, binding.Duration = cacheDurationFromTimer(timer)
+			a.recordEvent(req.ID, "info", "warm.derived", "created preview-local smart warm volume from baseline", binding.Service, timer.metadata(map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "baselineReady": fmt.Sprint(state.BaselineReady), "ref": ref}))
 		} else {
 			if err := a.containerRuntime().EnsureVolume(binding.ActiveName); err != nil {
 				return cfg, state, err
 			}
-			a.recordEvent(req.ID, "info", "warm.derived", "created empty preview-local smart warm volume; baseline is missing", binding.Service, map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "ref": ref})
+			binding.DurationMs, binding.Duration = cacheDurationFromTimer(timer)
+			a.recordEvent(req.ID, "info", "warm.derived", "created empty preview-local smart warm volume; baseline is missing", binding.Service, timer.metadata(map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "ref": ref}))
 		}
 	}
 	return cfg, state, nil

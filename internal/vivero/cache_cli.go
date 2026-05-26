@@ -91,10 +91,14 @@ func cacheActionsHuman(actions []CacheAction) string {
 		if resource == "" {
 			resource = action.Path
 		}
+		duration := ""
+		if action.Duration != "" {
+			duration = "\tduration=" + action.Duration
+		}
 		if action.Service != "" {
-			b.WriteString(fmt.Sprintf("%s\t%s\t%s\t%s\n", action.Kind, action.Service, resource, action.Status))
+			b.WriteString(fmt.Sprintf("%s\t%s\t%s\t%s%s\n", action.Kind, action.Service, resource, action.Status, duration))
 		} else {
-			b.WriteString(fmt.Sprintf("%s\t%s\t%s\n", action.Kind, resource, action.Status))
+			b.WriteString(fmt.Sprintf("%s\t%s\t%s%s\n", action.Kind, resource, action.Status, duration))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -59,13 +59,15 @@ type ImageCacheEntry struct {
 }
 
 type CacheAction struct {
-	Kind     string `json:"kind"`
-	Service  string `json:"service,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Resource string `json:"resource,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Status   string `json:"status"`
-	Error    string `json:"error,omitempty"`
+	Kind       string `json:"kind"`
+	Service    string `json:"service,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Resource   string `json:"resource,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Status     string `json:"status"`
+	Duration   string `json:"duration,omitempty"`
+	DurationMs int64  `json:"durationMs,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type CacheWarmOptions struct {
@@ -73,9 +75,26 @@ type CacheWarmOptions struct {
 }
 
 type CacheWarmResult struct {
-	Project string        `json:"project"`
-	OK      bool          `json:"ok"`
-	Actions []CacheAction `json:"actions"`
+	Project    string        `json:"project"`
+	OK         bool          `json:"ok"`
+	Duration   string        `json:"duration,omitempty"`
+	DurationMs int64         `json:"durationMs,omitempty"`
+	Actions    []CacheAction `json:"actions"`
+}
+
+func cacheDurationFromTimer(timer operationTimer) (int64, string) {
+	ms, _ := durationMsFromMetadata(timer.metadata(nil))
+	return ms, humanDurationMs(ms)
+}
+
+func cacheActionWithDuration(action CacheAction, timer operationTimer) CacheAction {
+	action.DurationMs, action.Duration = cacheDurationFromTimer(timer)
+	return action
+}
+
+func cacheWarmResultWithDuration(result CacheWarmResult, timer operationTimer) CacheWarmResult {
+	result.DurationMs, result.Duration = cacheDurationFromTimer(timer)
+	return result
 }
 
 type CachePruneOptions struct {
@@ -109,14 +128,15 @@ func (a *App) CacheInspect(project string) (CacheInventory, error) {
 }
 
 func (a *App) CacheWarm(project string, opts CacheWarmOptions) (CacheWarmResult, error) {
+	totalTimer := startOperationTimer()
 	rec, err := a.getProject(project)
 	if err != nil {
-		return CacheWarmResult{}, err
+		return cacheWarmResultWithDuration(CacheWarmResult{OK: false}, totalTimer), err
 	}
 	previewID := cacheWarmPreviewID(rec.Name)
 	sources, err := a.cacheWarmSources(rec, opts.Sources, previewID)
 	if err != nil {
-		return CacheWarmResult{}, err
+		return cacheWarmResultWithDuration(CacheWarmResult{Project: rec.Name, OK: false}, totalTimer), err
 	}
 	metadata := map[string]string{"warm.ref": cacheWarmRef(rec.Config, opts.Sources)}
 	if metadata["warm.ref"] == "" {
@@ -124,26 +144,27 @@ func (a *App) CacheWarm(project string, opts CacheWarmOptions) (CacheWarmResult,
 	}
 	cfg, warm, err := a.prepareSmartWarmVolumes(rec, UpRequest{Project: rec.Name, ID: previewID, Sources: opts.Sources, Metadata: metadata}, rec.Config, sources)
 	if err != nil {
-		return CacheWarmResult{Project: rec.Name, OK: false}, err
+		return cacheWarmResultWithDuration(CacheWarmResult{Project: rec.Name, OK: false}, totalTimer), err
 	}
 	if warm.Active && warm.Mode != warmModeBaseline {
-		return CacheWarmResult{Project: rec.Name, OK: false}, fmt.Errorf("cache warm requires a baseline ref; %q is not in warm.baselineRefs", warm.Ref)
+		return cacheWarmResultWithDuration(CacheWarmResult{Project: rec.Name, OK: false}, totalTimer), fmt.Errorf("cache warm requires a baseline ref; %q is not in warm.baselineRefs", warm.Ref)
 	}
 	result := CacheWarmResult{Project: rec.Name, OK: true}
 	for _, binding := range warm.Volumes {
-		result.Actions = append(result.Actions, CacheAction{Kind: cacheKindVolume, Service: binding.Service, Name: binding.Name, Resource: binding.BaselineName, Status: "warmed"})
+		result.Actions = append(result.Actions, CacheAction{Kind: cacheKindVolume, Service: binding.Service, Name: binding.Name, Resource: binding.BaselineName, Status: "warmed", Duration: binding.Duration, DurationMs: binding.DurationMs})
 	}
 	if err := a.finalizeSmartWarmBaseline(previewID, warm); err != nil {
-		return CacheWarmResult{Project: rec.Name, OK: false, Actions: result.Actions}, err
+		return cacheWarmResultWithDuration(CacheWarmResult{Project: rec.Name, OK: false, Actions: result.Actions}, totalTimer), err
 	}
 	if len(rec.Config.Prebuild) > 0 {
+		prebuildTimer := startOperationTimer()
 		prebuild, err := a.Prebuild(rec.Name)
-		action := CacheAction{Kind: "prebuild", Status: "completed"}
+		action := cacheActionWithDuration(CacheAction{Kind: "prebuild", Status: "completed"}, prebuildTimer)
 		if err != nil {
 			action.Status = "failed"
 			action.Error = err.Error()
 			result.Actions = append(result.Actions, action)
-			return CacheWarmResult{Project: rec.Name, OK: false, Actions: result.Actions}, err
+			return cacheWarmResultWithDuration(CacheWarmResult{Project: rec.Name, OK: false, Actions: result.Actions}, totalTimer), err
 		}
 		if prebuild["ok"] == false {
 			action.Status = "failed"
@@ -154,9 +175,9 @@ func (a *App) CacheWarm(project string, opts CacheWarmOptions) (CacheWarmResult,
 	result.Actions = append(result.Actions, buildActions...)
 	if err != nil {
 		result.OK = false
-		return result, err
+		return cacheWarmResultWithDuration(result, totalTimer), err
 	}
-	return result, nil
+	return cacheWarmResultWithDuration(result, totalTimer), nil
 }
 
 func (a *App) CachePrune(project string, opts CachePruneOptions) (CachePruneResult, error) {
@@ -353,14 +374,15 @@ func (a *App) buildCacheEnabledImages(rec ProjectRecord, previewID string, sourc
 			return actions, err
 		}
 		metadata := dockerBuildEventMetadata(spec)
+		timer := startOperationTimer()
 		a.recordEvent(previewID, "info", "cache.build.warming", "warming build cache for service image", service, metadata)
 		if err := a.containerRuntime().BuildImage(spec); err != nil {
-			a.recordEvent(previewID, "error", "cache.build_failed", err.Error(), service, metadata)
-			actions = append(actions, CacheAction{Kind: cacheKindBuild, Service: service, Resource: spec.Tag, Status: "failed", Error: err.Error()})
+			a.recordEvent(previewID, "error", "cache.build_failed", err.Error(), service, timer.metadata(metadata))
+			actions = append(actions, cacheActionWithDuration(CacheAction{Kind: cacheKindBuild, Service: service, Resource: spec.Tag, Status: "failed", Error: err.Error()}, timer))
 			return actions, fmt.Errorf("warm build cache for service %s: %w", service, err)
 		}
-		a.recordEvent(previewID, "info", "cache.build.warmed", "build cache warmed for service image", service, metadata)
-		actions = append(actions, CacheAction{Kind: cacheKindBuild, Service: service, Resource: spec.Tag, Status: "warmed"})
+		a.recordEvent(previewID, "info", "cache.build.warmed", "build cache warmed for service image", service, timer.metadata(metadata))
+		actions = append(actions, cacheActionWithDuration(CacheAction{Kind: cacheKindBuild, Service: service, Resource: spec.Tag, Status: "warmed"}, timer))
 	}
 	return actions, nil
 }

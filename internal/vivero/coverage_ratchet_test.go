@@ -1,12 +1,10 @@
 package vivero
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestSkillInstallPathAndExistingTargetBranches(t *testing.T) {
@@ -59,119 +57,6 @@ func TestSkillVersionFallsBackToRegexAndUnknown(t *testing.T) {
 	}
 	if got := skillVersion([]byte("name: vivero\n")); got != "unknown" {
 		t.Fatalf("missing skill version = %q", got)
-	}
-}
-
-func TestDeployStateLoadersRejectCorruptDriftedAndFutureState(t *testing.T) {
-	a := &App{Home: t.TempDir()}
-
-	assertErrContainsRatchet(t, func() error { _, err := a.loadDeployPlan(""); return err }, "deploy plan id is required")
-	assertErrContainsRatchet(t, func() error { _, err := a.loadDeployPlan("missing-plan"); return err }, "deploy plan not found")
-
-	if err := ensureDir(a.deployPlanDir()); err != nil {
-		t.Fatal(err)
-	}
-	writeDeployStateFile(t, filepath.Join(a.deployPlanDir(), statePathComponent("corrupt-plan")+".json"), `not-json`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadDeployPlan("corrupt-plan"); return err }, "invalid character")
-	writeDeployStateFile(t, filepath.Join(a.deployPlanDir(), statePathComponent("requested-plan")+".json"), `{"id":"other-plan","stateVersion":1}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadDeployPlan("requested-plan"); return err }, "state mismatch")
-	writeDeployStateFile(t, filepath.Join(a.deployPlanDir(), statePathComponent("future-plan")+".json"), `{"id":"future-plan","stateVersion":2}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadDeployPlan("future-plan"); return err }, "unsupported state version")
-
-	assertErrContainsRatchet(t, func() error { _, err := a.loadRelease(""); return err }, "release id is required")
-	assertErrContainsRatchet(t, func() error { _, err := a.loadRelease("missing-release"); return err }, "release not found")
-
-	if err := ensureDir(a.releaseDir()); err != nil {
-		t.Fatal(err)
-	}
-	writeDeployStateFile(t, filepath.Join(a.releaseDir(), statePathComponent("corrupt-release")+".json"), `not-json`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadRelease("corrupt-release"); return err }, "invalid character")
-	writeDeployStateFile(t, filepath.Join(a.releaseDir(), statePathComponent("requested-release")+".json"), `{"id":"other-release","stateVersion":1}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadRelease("requested-release"); return err }, "state mismatch")
-	writeDeployStateFile(t, filepath.Join(a.releaseDir(), statePathComponent("future-release")+".json"), `{"id":"future-release","stateVersion":2}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadRelease("future-release"); return err }, "unsupported state version")
-
-	_, err := a.loadCurrentRelease("demo", "production")
-	if !errors.Is(err, errNoCurrentRelease) {
-		t.Fatalf("missing current release should wrap errNoCurrentRelease, got %v", err)
-	}
-	assertErrContainsRatchet(t, func() error { _, err := a.loadCurrentRelease("", "production"); return err }, "release status requires project")
-	writeDeployStateFile(t, a.currentReleasePath("demo", "production"), `{"id":"rel-1","project":"other","environment":"production","stateVersion":1}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadCurrentRelease("demo", "production"); return err }, "current release state mismatch")
-	writeDeployStateFile(t, a.currentReleasePath("demo", "production"), `{"id":"rel-1","project":"demo","environment":"production","stateVersion":2}`)
-	assertErrContainsRatchet(t, func() error { _, err := a.loadCurrentRelease("demo", "production"); return err }, "unsupported state version")
-}
-
-func TestDeployStateFindsSafeReapplyAndExistingRollback(t *testing.T) {
-	a := &App{Home: t.TempDir()}
-	plan := DeployPlan{ID: "plan-1", Project: "demo", Environment: "production"}
-
-	if release, found, err := a.findSuccessfulReleaseForPlan(plan); err != nil || found || release.ID != "" {
-		t.Fatalf("no current release should be a cache miss, release=%#v found=%v err=%v", release, found, err)
-	}
-
-	applied := ReleaseRecord{ID: "rel-1", PlanID: plan.ID, Project: plan.Project, Environment: plan.Environment, Status: "applied"}
-	if err := a.saveRelease(applied); err != nil {
-		t.Fatal(err)
-	}
-	if release, found, err := a.findSuccessfulReleaseForPlan(plan); err != nil || !found || release.ID != applied.ID {
-		t.Fatalf("safe applied current release should be reused, release=%#v found=%v err=%v", release, found, err)
-	}
-
-	unsafe := applied
-	unsafe.Status = "smoke_failed"
-	if err := a.saveRelease(unsafe); err != nil {
-		t.Fatal(err)
-	}
-	if release, found, err := a.findSuccessfulReleaseForPlan(plan); err == nil || found || release.ID != unsafe.ID || !strings.Contains(err.Error(), "unsafe status smoke_failed") {
-		t.Fatalf("unsafe current release should block reapply, release=%#v found=%v err=%v", release, found, err)
-	}
-
-	otherPlan := plan
-	otherPlan.ID = "plan-2"
-	if release, found, err := a.findSuccessfulReleaseForPlan(otherPlan); err != nil || found || release.ID != "" {
-		t.Fatalf("current release for another plan should be ignored, release=%#v found=%v err=%v", release, found, err)
-	}
-
-	rollback := ReleaseRecord{ID: "rollback-1", Project: plan.Project, Environment: plan.Environment, Status: "rolled_back", RollbackOf: applied.ID}
-	if err := a.saveRelease(rollback); err != nil {
-		t.Fatal(err)
-	}
-	if release, found, err := a.findRollbackForRelease(plan.Project, plan.Environment, applied.ID); err != nil || !found || release.ID != rollback.ID {
-		t.Fatalf("existing rollback should be reused, release=%#v found=%v err=%v", release, found, err)
-	}
-	if release, found, err := a.findRollbackForRelease(plan.Project, plan.Environment, "rel-other"); err != nil || found || release.ID != "" {
-		t.Fatalf("rollback for another release should be ignored, release=%#v found=%v err=%v", release, found, err)
-	}
-}
-
-func TestDeployLocksRemoveStaleRecordsAndBlockLiveHolders(t *testing.T) {
-	a := &App{Home: t.TempDir()}
-	if err := ensureDir(a.deployLockDir()); err != nil {
-		t.Fatal(err)
-	}
-	lockPath := a.deployLockPath("demo", "production")
-	if err := writeIndentedJSONFile(lockPath, map[string]any{"pid": 0, "createdAt": nowUTC().Add(-5 * time.Hour)}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	unlock, err := a.acquireDeployLock("demo", "production")
-	if err != nil {
-		t.Fatalf("stale lock should be removed before acquiring: %v", err)
-	}
-	unlock()
-
-	if a.removeStaleDeployLock(filepath.Join(a.deployLockDir(), "missing.lock")) {
-		t.Fatal("missing lock should not be treated as stale")
-	}
-	writeDeployStateFile(t, lockPath, `not-json`)
-	if a.removeStaleDeployLock(lockPath) {
-		t.Fatal("corrupt lock should not be removed automatically")
-	}
-	if err := writeIndentedJSONFile(lockPath, map[string]any{"pid": os.Getpid(), "createdAt": nowUTC()}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.acquireDeployLock("demo", "production"); err == nil || !strings.Contains(err.Error(), "deploy lock already held") {
-		t.Fatalf("live lock should block acquisition, got %v", err)
 	}
 }
 
@@ -328,16 +213,6 @@ func initCommittedGitBranch(t *testing.T, dir, branch string) {
 	}
 	if out, err := runCmd(dir, nil, "git", "-c", "user.name=Vivero Tests", "-c", "user.email=vivero-tests@example.com", "commit", "-m", "init"); err != nil {
 		t.Fatalf("git commit: %v %s", err, out)
-	}
-}
-
-func writeDeployStateFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := ensureDir(filepath.Dir(path)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
 

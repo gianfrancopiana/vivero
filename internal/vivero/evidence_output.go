@@ -40,20 +40,12 @@ func evidencePayloadOK(payload map[string]any) bool {
 }
 
 func evidenceOKValue(v any) (bool, bool) {
-	switch value := v.(type) {
-	case ReleaseSmokeResult:
-		return value.OK, true
-	case *ReleaseSmokeResult:
-		if value == nil {
-			return false, false
-		}
-		return value.OK, true
-	case map[string]any:
-		okValue, exists := value["ok"].(bool)
-		return okValue, exists
-	default:
+	value, ok := v.(map[string]any)
+	if !ok {
 		return false, false
 	}
+	okValue, exists := value["ok"].(bool)
+	return okValue, exists
 }
 
 func evidenceArtifacts(payload map[string]any) map[string]any {
@@ -65,9 +57,6 @@ func evidenceArtifacts(payload map[string]any) map[string]any {
 	}
 	if paths := screenshotArtifactPaths(payload["screenshots"]); len(paths) > 0 {
 		artifacts["screenshots"] = paths
-	}
-	if releaseArtifacts, ok := releaseArtifactValue(payload["release"]); ok {
-		artifacts["release"] = releaseArtifacts
 	}
 	if smokeArtifact, ok := smokeArtifactValue(payload["smoke"]); ok {
 		artifacts["smoke"] = smokeArtifact
@@ -96,27 +85,15 @@ func evidenceArtifacts(payload map[string]any) map[string]any {
 }
 
 func evidenceNextSuggestedCommands(targetRef map[string]any) []string {
-	kind := stringValue(targetRef["kind"])
 	id := stringValue(targetRef["id"])
-	if id == "" {
+	if id == "" || stringValue(targetRef["kind"]) != "preview" {
 		return nil
 	}
-	switch kind {
-	case "preview":
-		ref := "preview:" + id
-		return []string{
-			fmt.Sprintf("vivero preview inspect %s --json --no-input", ref),
-			fmt.Sprintf("vivero preview events %s --tail --json --no-input", ref),
-			fmt.Sprintf("vivero preview diagnose startup %s --json --no-input", ref),
-		}
-	case "release":
-		ref := "release:" + id
-		return []string{
-			fmt.Sprintf("vivero release events %s --json --no-input", ref),
-			fmt.Sprintf("vivero release logs %s --json --no-input", ref),
-		}
-	default:
-		return nil
+	ref := "preview:" + id
+	return []string{
+		fmt.Sprintf("vivero preview inspect %s --json --no-input", ref),
+		fmt.Sprintf("vivero preview events %s --tail --json --no-input", ref),
+		fmt.Sprintf("vivero preview diagnose startup %s --json --no-input", ref),
 	}
 }
 
@@ -125,44 +102,13 @@ func mapValue(v any) (map[string]any, bool) {
 	return m, ok
 }
 
-func releaseArtifactValue(v any) (any, bool) {
-	switch release := v.(type) {
-	case ReleaseRecord:
-		if len(release.Artifacts) == 0 {
-			return nil, false
-		}
-		return release.Artifacts, true
-	case *ReleaseRecord:
-		if release == nil || len(release.Artifacts) == 0 {
-			return nil, false
-		}
-		return release.Artifacts, true
-	case map[string]any:
-		artifacts, ok := release["artifacts"]
-		return artifacts, ok
-	default:
-		return nil, false
-	}
-}
-
 func smokeArtifactValue(v any) (any, bool) {
-	switch smoke := v.(type) {
-	case ReleaseSmokeResult:
-		if smoke.Artifact == nil {
-			return nil, false
-		}
-		return *smoke.Artifact, true
-	case *ReleaseSmokeResult:
-		if smoke == nil || smoke.Artifact == nil {
-			return nil, false
-		}
-		return *smoke.Artifact, true
-	case map[string]any:
-		artifact, ok := smoke["artifact"]
-		return artifact, ok
-	default:
+	smoke, ok := v.(map[string]any)
+	if !ok {
 		return nil, false
 	}
+	artifact, ok := smoke["artifact"]
+	return artifact, ok
 }
 
 func screenshotArtifactPaths(v any) []string {
