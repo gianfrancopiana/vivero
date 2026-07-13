@@ -215,7 +215,7 @@ func TestGumroadExampleDelegatesRuntimeToOneAppOwnedComposeService(t *testing.T)
 	if !ok {
 		t.Fatal("gumroad example missing gumroad-web service")
 	}
-	if serviceRuntime(svc) != "compose" || svc.Source != "gumroad" || svc.Compose.File != "docker/docker-compose-vivero-preview.yml" || svc.Compose.Service != "gumroad-web" {
+	if serviceRuntime(svc) != "compose" || svc.Source != "gumroad" || svc.Compose.File != "docker/docker-compose-preview.yml" || svc.Compose.Service != "gumroad-web" {
 		t.Fatalf("gumroad web should delegate to a single app-owned preview Compose service: %#v", svc)
 	}
 	if svc.Image != "" || !svc.Command.IsZero() || len(svc.Env) > 0 || len(svc.DependencyVolumes) > 0 {
@@ -390,7 +390,7 @@ func TestGumroadExampleReferencesAppOwnedRuntimeAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := cfg.Services["gumroad-web"]
-	if serviceRuntime(svc) != "compose" || svc.Compose.File != "docker/docker-compose-vivero-preview.yml" || svc.Compose.Service != "gumroad-web" {
+	if serviceRuntime(svc) != "compose" || svc.Compose.File != "docker/docker-compose-preview.yml" || svc.Compose.Service != "gumroad-web" {
 		t.Fatalf("bundled gumroad example should reference Gumroad's app-owned preview Compose service, got %#v", svc)
 	}
 	if strings.Contains(body, "dockerfileInline") {

@@ -19,7 +19,7 @@ services:
     source: gumroad
     runtime: compose
     compose:
-      file: docker/docker-compose-vivero-preview.yml
+      file: docker/docker-compose-preview.yml
       service: gumroad-web
     ports:
       http:
