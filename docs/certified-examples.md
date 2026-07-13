@@ -25,6 +25,11 @@ vivero preview down agent-demo-local --discard --json --no-input
 - Proves: backing service health before app startup, app service networking, warm baseline/derived volumes, setup skip policy, final QA proof paths, and cleanup
 - Gate: `make integration-fixtures`
 
+- Path: `examples/compose-integration`
+- Shape: app-owned Compose target + dependency + omitted worker
+- Proves: real Compose health startup, dependency-closure reporting, fixed host-port stripping, Compose setup commands, two concurrent previews, generated-artifact cleanup, normal-down volume retention, same-ID retry, and discard-only deletion
+- Gate: `make compose-integration-fixtures`
+
 - Path: `examples/nasty-integration`
 - Shapes: static-only, app + database, monorepo app-owned Dockerfile with explicit BuildKit build cache specs, named public route planning, invalid route rejection, warm volumes, and cleanup/routing edge cases
 - Proves: messy preview config patterns that tend to break before real users do, including build cache config next to runtime dependency volumes
@@ -41,7 +46,7 @@ The `examples/nasty-integration` profiles are intentionally explicit:
 
 Keep the matrix tiny and invariant-led. A fixture earns its place only when it proves a behavior class that a frontier agent must be able to rely on in unfamiliar repos.
 
-- **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, and teardown preserves or discards work intentionally. Covered by `make example-e2e`, `make integration-fixtures`, and `make nasty-integration-fixtures`.
+- **Preview invariants:** startup waits for health before URL handoff, source state stays isolated, Docker service names resolve on the preview network, configured public routes plan deterministically, warm volumes are visible, concurrent Compose previews do not inherit fixed host-port collisions, generated runtime files are cleaned, and teardown preserves or discards volumes intentionally. Covered by `make example-e2e`, `make integration-fixtures`, `make compose-integration-fixtures`, and `make nasty-integration-fixtures`.
 - **Evidence invariants:** preview evidence returns target-aware JSON with artifact paths for events, logs, screenshots, app-agnostic evidence flows, QA reports, recordings, and timing/cache fields. Preview evidence should work through `preview:<id>` targets. For browser walkthroughs, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input` validates variants, screenshots, video, console, and artifact planning before the real run.
 
 Do not add a parallel example just because a framework is popular. Extend the smallest existing fixture unless the new case creates a distinct invariant failure mode.
@@ -76,7 +81,7 @@ These are config-quality fixtures. They should keep project-specific selectors, 
 make certify
 ```
 
-`make certify` runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
+`make certify` runs audit, canonical example E2E, Docker and real Compose integration fixtures, nasty integration fixtures, example config validation, and release package smoke (`make release-smoke`). It is the deterministic pre-release certification target.
 
 For external runtime confidence, run the live cloud/browser smoke manually or through the release/scheduled workflow:
 

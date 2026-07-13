@@ -94,13 +94,14 @@ Certified examples are real committed fixtures, not aspirational snippets. See [
 
 - `examples/agent-demo`: web app; proven by `make example-e2e`.
 - `examples/integration-stack`: app + backing service + warm volume; proven by `make integration-fixtures`.
+- `examples/compose-integration`: app-owned Compose target + dependency + omitted worker; proven against real Docker Compose by `make compose-integration-fixtures`.
 - `examples/nasty-integration`: static-only, app + database, monorepo app-owned Dockerfile, public-route planning, and messy config edges; proven by `make nasty-integration-fixtures`.
 
 ## Tiny invariant fixture matrix
 
 The fixture set stays intentionally small. Each fixture exists because it proves an invariant class that frontier agents can reuse without memorizing project-specific behavior.
 
-- **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, and cleanup. Prove the boring path with `make example-e2e`; prove messy preview shapes with `make nasty-integration-fixtures`.
+- **Preview invariants:** health-gated URLs, isolated source state, service networking, public-route planning, warm volumes, cleanup, and real Compose concurrency/volume retention. Prove the boring path with `make example-e2e`, the Compose path with `make compose-integration-fixtures`, and messy preview shapes with `make nasty-integration-fixtures`.
 - **Evidence invariants:** target refs, stable JSON, logs, events, screenshots, app-agnostic evidence flows, QA reports, recordings, cache/timing fields, and handoff paths. Use `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input`, and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` instead of ad hoc notes.
 
 Add a new fixture only when it proves a new invariant class. Do not grow a framework zoo of example apps that all prove the same thing.
@@ -155,12 +156,30 @@ services:
     ports:
       http:
         container: 3000
+      cable:
+        container: 8080
+        # Bind a specific LAN/Tailscale IP instead of loopback when teammates
+        # should be able to open this port directly.
+        hostIp: 127.0.0.1
+        # Multiplex the secondary origin through the primary preview URL.
+        publicPath: /cable
+        publicOrigins:
+          - ws://cable.localhost:8080/cable
+    # Optional: bind Vivero's rewrite/multiplex proxy to a specific interface.
+    proxyListenHost: 127.0.0.1
     health:
       path: /
       expectStatus: 200
+      timeout: 10m
 ```
 
-Use separate `backingServices:` entries only when the app does not have a single Compose service that owns dependency startup. Vivero generates a temporary Compose override with the per-preview network, labels, network aliases, and dynamic loopback port mappings. Do not duplicate Compose services, env contracts, volumes, or setup scripts in `vivero.yml`.
+Use separate `backingServices:` entries only when the app does not have a single Compose service that owns dependency startup. Vivero generates a temporary Compose override with the per-preview network, labels, network aliases, and dynamic loopback port mappings, then deletes it immediately after Compose consumes it. Environment values are inherited from the Compose process instead of being persisted in the override. Vivero replaces target port bindings and strips host ports from dependency services, so concurrent previews do not contend for fixed ports; `doctor config` reports each stripped binding and every service outside the target's `depends_on` closure.
+
+Compose services may declare Vivero-owned `dependencyVolumes` for caches that are not already modeled by the app stack. Vivero injects those as external named volumes, retains Compose and dependency volumes during normal teardown/retry, and removes preview-lifetime volumes only on explicit `--discard`. `setup.afterSeeds` may target a Compose service: Vivero uses `compose run` before the target starts or `compose exec` when it is already running, while preserving the normal per-preview, once-per-project, and once-per-fingerprint marker policies. Keep the commands themselves in app-owned scripts, and set an explicit `health.timeout` for large Compose stacks.
+
+Do not duplicate Compose services, env contracts, app-owned volumes, or setup script bodies in `vivero.yml`.
+
+Named ports bind to loopback by default. Set `ports.<name>.hostIp` to an explicit LAN or Tailscale IP when direct team access is intended. A non-primary port can declare a unique `publicPath` plus one or more `publicOrigins`; Vivero then routes that path to the port and rewrites those HTTP/WebSocket origins to the reported preview URL. All named ports belong to the declared service container; for Compose, a separate WebSocket or dev-server service must be reverse-proxied by the target service or modeled as a separate Vivero service instead of being declared as a target port. `proxyListenHost` controls which interface that local routing proxy listens on.
 
 ## CLI contract
 
@@ -170,6 +189,7 @@ Vivero follows a small, test-ratcheted CLI contract:
 - Machines can discover commands with `vivero commands --json --no-input` and schemas with `vivero schema <command> --json --no-input`.
 - JSON command output goes to stdout; JSON errors go to stderr with `code`, `message`, `hint`, and `details` when available.
 - `vivero version --json --no-input` and `vivero --version` expose version, commit, and build date for release provenance.
+- `vivero exec <preview> <service> --timeout 10m -- <command>` bounds container execution. Timeout results preserve partial `stdout`/`stderr`, return `timedOut: true`, and use exit code 124; flags after `--` belong to the in-container command.
 
 ## Bundled skill
 
@@ -189,7 +209,7 @@ Run the strongest local non-live ladder before release-facing changes:
 make certify
 ```
 
-`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker integration fixtures, nasty integration checks, example config validation, and snapshot release smoke. CI runs the same surfaces as split jobs. The Release workflow also gates tags on live Docker + Cloudflare quick tunnel + Playwright evidence before publishing.
+`make certify` expands to the deterministic release ladder: audit, canonical example E2E, Docker and real Compose integration fixtures, nasty integration checks, example config validation, and snapshot release smoke. CI runs the same surfaces as split jobs. The Release workflow also gates tags on live Docker + Cloudflare quick tunnel + Playwright evidence before publishing.
 
 After a tag publishes, run the install trust postflight against the exact release:
 

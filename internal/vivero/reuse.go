@@ -8,13 +8,14 @@ import (
 )
 
 func (a *App) reusablePreviewForUp(req UpRequest, project ProjectRecord, cfg ProjectConfig) (PreviewRecord, bool, error) {
-	existing, err := a.getPreview(req.ID)
+	existing, err := a.getPreviewRaw(req.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "preview not found") {
 			return PreviewRecord{}, false, nil
 		}
 		return existing, false, err
 	}
+	existing = a.reconcilePreviewRuntime(existing)
 	if reason := a.previewReuseMissReason(existing, req, project, cfg); reason != "" {
 		a.recordEvent(req.ID, "info", "preview.reuse_miss", "existing preview not reusable: "+reason, "", map[string]string{"reason": reason})
 		return existing, false, nil
@@ -45,6 +46,13 @@ func (a *App) previewReuseMissReason(existing PreviewRecord, req UpRequest, proj
 	}
 	if existing.Status != "running" {
 		return "preview status is " + existing.Status
+	}
+	configHash, err := a.previewConfigHash(cfg)
+	if err != nil {
+		return "could not fingerprint current config: " + err.Error()
+	}
+	if existing.ConfigHash == "" || existing.ConfigHash != configHash {
+		return "effective config changed"
 	}
 	if oldBranch, newBranch := canonicalBranchFromMetadata(existing.Metadata), canonicalBranchFromMetadata(req.Metadata); oldBranch != "" && newBranch != "" && oldBranch != newBranch {
 		return "branch metadata changed"
@@ -163,18 +171,25 @@ func (a *App) reuseServiceMissReason(cfg ProjectConfig, forcePublic bool, existi
 		if serviceResourcesStopped(svc) {
 			return "service " + name + " has no running resources"
 		}
-		if svc.ContainerID != "" && !a.containerRuntime().ContainerExists(svc.ContainerID) {
-			return "service " + name + " container is missing"
+		if svc.ContainerID != "" {
+			running, err := a.containerRuntime().ContainerRunning(svc.ContainerID)
+			if err != nil {
+				return fmt.Sprintf("service %s container state unavailable: %v", name, err)
+			}
+			if !running {
+				return "service " + name + " container is not running"
+			}
 		}
 		for _, pid := range []struct {
-			name string
-			pid  int
+			name     string
+			pid      int
+			identity string
 		}{
-			{name: "process", pid: svc.PID},
-			{name: "proxy", pid: svc.ProxyPID},
-			{name: "tunnel", pid: svc.TunnelPID},
+			{name: "process", pid: svc.PID, identity: svc.PIDIdentity},
+			{name: "proxy", pid: svc.ProxyPID, identity: svc.ProxyPIDIdentity},
+			{name: "tunnel", pid: svc.TunnelPID, identity: svc.TunnelPIDIdentity},
 		} {
-			if pid.pid > 0 && !processExists(pid.pid) {
+			if pid.pid > 0 && !trackedProcessRunning(pid.pid, pid.identity) {
 				return fmt.Sprintf("service %s %s pid is missing", name, pid.name)
 			}
 		}
@@ -187,6 +202,9 @@ func (a *App) reuseServiceMissReason(cfg ProjectConfig, forcePublic bool, existi
 		}
 		if serviceIsPublic(cfgSvc, forcePublic) && len(ports) > 0 && svc.URL == "" {
 			return "service " + name + " public URL is missing"
+		}
+		if forcePublic && len(ports) > 0 && (svc.URL == svc.OriginURL || svc.URL == svc.ProxyURL) {
+			return "service " + name + " was not started with a public URL"
 		}
 	}
 	return ""

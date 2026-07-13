@@ -132,9 +132,6 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 			if !svc.Command.IsZero() {
 				return fmt.Errorf("%s service %s uses runtime compose; keep the service command in the app-owned Compose file", configPath, name)
 			}
-			if len(svc.DependencyVolumes) > 0 {
-				return fmt.Errorf("%s service %s uses runtime compose; keep dependency volumes in the app-owned Compose file", configPath, name)
-			}
 		case "host":
 			return fmt.Errorf("%s service %s uses runtime host; Vivero runs app services in containers only", configPath, name)
 		default:
@@ -173,9 +170,6 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 			if len(backing.Env) > 0 {
 				return fmt.Errorf("%s backing service %s uses runtime compose; keep env contracts in the app-owned Compose file", configPath, name)
 			}
-			if len(backing.DependencyVolumes) > 0 {
-				return fmt.Errorf("%s backing service %s uses runtime compose; keep dependency volumes in the app-owned Compose file", configPath, name)
-			}
 		default:
 			return fmt.Errorf("%s backing service %s has unsupported runtime %q; use docker or compose", configPath, name, runtime)
 		}
@@ -203,12 +197,9 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if service == "" {
 			return fmt.Errorf("%s setup.afterSeeds[%d] must target a service", configPath, i)
 		}
-		svc, ok := cfg.Services[service]
+		_, ok := cfg.Services[service]
 		if !ok {
 			return fmt.Errorf("%s setup.afterSeeds[%d] references unknown service %s", configPath, i, service)
-		}
-		if serviceRuntime(svc) == "compose" {
-			return fmt.Errorf("%s setup.afterSeeds[%d] targets compose service %s; keep setup scripts in the app-owned Compose stack", configPath, i, service)
 		}
 	}
 	if err := validateWarmConfig(configPath, cfg.Warm); err != nil {

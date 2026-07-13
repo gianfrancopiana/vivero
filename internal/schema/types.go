@@ -41,6 +41,7 @@ type ServiceConfig struct {
 	Ports             map[string]PortConfig `yaml:"ports" json:"ports,omitempty"`
 	PrimaryPort       string                `yaml:"primaryPort" json:"primaryPort,omitempty"`
 	OriginHost        string                `yaml:"originHost" json:"originHost,omitempty"`
+	ProxyListenHost   string                `yaml:"proxyListenHost" json:"proxyListenHost,omitempty"`
 	TunnelHostHeader  string                `yaml:"tunnelHostHeader" json:"tunnelHostHeader,omitempty"`
 	Public            bool                  `yaml:"public" json:"public,omitempty"`
 	PublicRewrite     PublicRewriteConfig   `yaml:"publicRewrite" json:"publicRewrite,omitempty"`
@@ -57,9 +58,12 @@ type ComposeConfig struct {
 }
 
 type PortConfig struct {
-	Container int    `yaml:"container" json:"container,omitempty"`
-	Host      int    `yaml:"host" json:"host,omitempty"`
-	Protocol  string `yaml:"protocol" json:"protocol,omitempty"`
+	Container     int      `yaml:"container" json:"container,omitempty"`
+	Host          int      `yaml:"host" json:"host,omitempty"`
+	HostIP        string   `yaml:"hostIp" json:"hostIp,omitempty"`
+	Protocol      string   `yaml:"protocol" json:"protocol,omitempty"`
+	PublicPath    string   `yaml:"publicPath" json:"publicPath,omitempty"`
+	PublicOrigins []string `yaml:"publicOrigins" json:"publicOrigins,omitempty"`
 }
 
 type ImageBuildConfig struct {
@@ -342,16 +346,17 @@ type ProjectRecord struct {
 }
 
 type PreviewRecord struct {
-	ID        string                    `json:"id"`
-	Project   string                    `json:"project"`
-	Profile   string                    `json:"profile,omitempty"`
-	Status    string                    `json:"status"`
-	Labels    map[string]string         `json:"labels,omitempty"`
-	Metadata  map[string]string         `json:"metadata,omitempty"`
-	Sources   map[string]PreviewSource  `json:"sources,omitempty"`
-	Services  map[string]PreviewService `json:"services,omitempty"`
-	CreatedAt time.Time                 `json:"createdAt"`
-	UpdatedAt time.Time                 `json:"updatedAt"`
+	ID         string                    `json:"id"`
+	Project    string                    `json:"project"`
+	Profile    string                    `json:"profile,omitempty"`
+	Status     string                    `json:"status"`
+	ConfigHash string                    `json:"-"`
+	Labels     map[string]string         `json:"labels,omitempty"`
+	Metadata   map[string]string         `json:"metadata,omitempty"`
+	Sources    map[string]PreviewSource  `json:"sources,omitempty"`
+	Services   map[string]PreviewService `json:"services,omitempty"`
+	CreatedAt  time.Time                 `json:"createdAt"`
+	UpdatedAt  time.Time                 `json:"updatedAt"`
 }
 
 type PreviewSource struct {
@@ -363,24 +368,27 @@ type PreviewSource struct {
 }
 
 type PreviewService struct {
-	Name          string                 `json:"name"`
-	Source        string                 `json:"source,omitempty"`
-	Runtime       string                 `json:"runtime,omitempty"`
-	ContainerID   string                 `json:"containerId,omitempty"`
-	Status        string                 `json:"status"`
-	PID           int                    `json:"pid,omitempty"`
-	ProxyPID      int                    `json:"proxyPid,omitempty"`
-	TunnelPID     int                    `json:"tunnelPid,omitempty"`
-	Port          int                    `json:"port,omitempty"`
-	Ports         map[string]PreviewPort `json:"ports,omitempty"`
-	URL           string                 `json:"url,omitempty"`
-	OriginURL     string                 `json:"originUrl,omitempty"`
-	ProxyURL      string                 `json:"proxyUrl,omitempty"`
-	LogPath       string                 `json:"logPath,omitempty"`
-	TunnelLogPath string                 `json:"tunnelLogPath,omitempty"`
-	Command       string                 `json:"command,omitempty"`
-	StartedAt     time.Time              `json:"startedAt,omitempty"`
-	LastHealth    string                 `json:"lastHealth,omitempty"`
+	Name              string                 `json:"name"`
+	Source            string                 `json:"source,omitempty"`
+	Runtime           string                 `json:"runtime,omitempty"`
+	ContainerID       string                 `json:"containerId,omitempty"`
+	Status            string                 `json:"status"`
+	PID               int                    `json:"pid,omitempty"`
+	PIDIdentity       string                 `json:"-"`
+	ProxyPID          int                    `json:"proxyPid,omitempty"`
+	ProxyPIDIdentity  string                 `json:"-"`
+	TunnelPID         int                    `json:"tunnelPid,omitempty"`
+	TunnelPIDIdentity string                 `json:"-"`
+	Port              int                    `json:"port,omitempty"`
+	Ports             map[string]PreviewPort `json:"ports,omitempty"`
+	URL               string                 `json:"url,omitempty"`
+	OriginURL         string                 `json:"originUrl,omitempty"`
+	ProxyURL          string                 `json:"proxyUrl,omitempty"`
+	LogPath           string                 `json:"logPath,omitempty"`
+	TunnelLogPath     string                 `json:"tunnelLogPath,omitempty"`
+	Command           string                 `json:"command,omitempty"`
+	StartedAt         time.Time              `json:"startedAt,omitempty"`
+	LastHealth        string                 `json:"lastHealth,omitempty"`
 }
 
 type PreviewPort struct {

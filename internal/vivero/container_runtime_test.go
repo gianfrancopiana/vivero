@@ -34,6 +34,7 @@ type fakeContainerRuntime struct {
 	removedImages          []string
 	copiedVolumes          []string
 	containers             map[string]bool
+	composeProjects        map[string]map[string]runtimeContainerState
 	volumes                map[string]bool
 	images                 map[string]bool
 	logs                   map[string][]string
@@ -41,6 +42,8 @@ type fakeContainerRuntime struct {
 	startErr               error
 	publishedErr           error
 	healthErr              error
+	healthHook             func()
+	composeProjectStateErr error
 	removeContainerErr     error
 	removeContainerOutput  string
 	removeContainerMissing bool
@@ -92,6 +95,9 @@ func (f *fakeContainerRuntime) PublishedPorts(containerID string, ports []Servic
 
 func (f *fakeContainerRuntime) WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error {
 	f.healthCommands = append(f.healthCommands, fmt.Sprintf("%s:%s:%s", containerID, h.Command.Display(), timeout))
+	if f.healthHook != nil {
+		f.healthHook()
+	}
 	return f.healthErr
 }
 
@@ -107,6 +113,35 @@ func (f *fakeContainerRuntime) ContainerExists(containerID string) bool {
 	return f.containers != nil && f.containers[containerID]
 }
 
+func (f *fakeContainerRuntime) ContainerRunning(containerID string) (bool, error) {
+	return f.ContainerExists(containerID), nil
+}
+
+func (f *fakeContainerRuntime) ComposeProjectContainers(previewID, service string) ([]runtimeContainerState, error) {
+	if f.composeProjectStateErr != nil {
+		return nil, f.composeProjectStateErr
+	}
+	if f.composeProjects != nil {
+		containers := f.composeProjects[previewID+":"+service]
+		states := make([]runtimeContainerState, 0, len(containers))
+		for _, id := range sortedMapKeys(containers) {
+			state := containers[id]
+			state.ID = id
+			states = append(states, state)
+		}
+		return states, nil
+	}
+	states := make([]runtimeContainerState, 0, len(f.containers))
+	for _, id := range sortedMapKeys(f.containers) {
+		exitCode := 0
+		if !f.containers[id] {
+			exitCode = 1
+		}
+		states = append(states, runtimeContainerState{ID: id, Running: f.containers[id], ExitCode: exitCode})
+	}
+	return states, nil
+}
+
 func (f *fakeContainerRuntime) RemoveContainer(containerID string) (bool, string, error) {
 	f.removedContainers = append(f.removedContainers, containerID)
 	if f.containers != nil {
@@ -115,8 +150,8 @@ func (f *fakeContainerRuntime) RemoveContainer(containerID string) (bool, string
 	return f.removeContainerMissing, f.removeContainerOutput, f.removeContainerErr
 }
 
-func (f *fakeContainerRuntime) RemoveComposeProject(previewID, service string) error {
-	f.removedComposeProjects = append(f.removedComposeProjects, previewID+":"+service)
+func (f *fakeContainerRuntime) RemoveComposeProject(previewID, service string, discardVolumes bool) error {
+	f.removedComposeProjects = append(f.removedComposeProjects, fmt.Sprintf("%s:%s:discard=%t", previewID, service, discardVolumes))
 	return nil
 }
 
@@ -302,13 +337,26 @@ services:
 	if _, err := a.SyncProject(root); err != nil {
 		t.Fatal(err)
 	}
+	project, err := a.getProject("reusable-runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configHash, err := a.previewConfigHash(project.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer endpoint.Close()
 	existing := PreviewRecord{
-		ID:       "demo-pr-17",
-		Project:  "reusable-runtime",
-		Status:   "running",
-		Metadata: map[string]string{"branch": "feature/demo"},
-		Sources:  map[string]PreviewSource{},
-		Services: map[string]PreviewService{},
+		ID:         "demo-pr-17",
+		Project:    "reusable-runtime",
+		Status:     "running",
+		ConfigHash: configHash,
+		Metadata:   map[string]string{"branch": "feature/demo"},
+		Sources:    map[string]PreviewSource{},
+		Services:   map[string]PreviewService{},
 	}
 	if err := a.upsertPreview(existing); err != nil {
 		t.Fatal(err)
@@ -316,7 +364,7 @@ services:
 	if err := a.saveSource("demo-pr-17", PreviewSource{Name: "app", Mode: "external", Path: root, Owned: false}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.saveService("demo-pr-17", PreviewService{Name: "web", Runtime: "docker", Source: "app", ContainerID: "container-123", Status: "healthy", URL: "http://127.0.0.1:3310", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+	if err := a.saveService("demo-pr-17", PreviewService{Name: "web", Runtime: "docker", Source: "app", ContainerID: "container-123", Status: "healthy", URL: endpoint.URL, OriginURL: endpoint.URL}); err != nil {
 		t.Fatal(err)
 	}
 

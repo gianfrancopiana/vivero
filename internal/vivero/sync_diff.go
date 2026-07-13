@@ -1,10 +1,13 @@
 package vivero
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func (a *App) sourceFor(previewID, source string) (PreviewSource, error) {
@@ -72,7 +75,7 @@ func (a *App) Diff(previewID, source string) (map[string]any, error) {
 	return map[string]any{"preview": previewID, "source": source, "path": src.Path, "status": string(status), "diff": string(diff)}, nil
 }
 
-func (a *App) Exec(previewID, service string, cmdArgs []string) (map[string]any, error) {
+func (a *App) Exec(previewID, service string, cmdArgs []string, requestedTimeout ...time.Duration) (map[string]any, error) {
 	p, err := a.getPreview(previewID)
 	if err != nil {
 		return nil, err
@@ -84,15 +87,23 @@ func (a *App) Exec(previewID, service string, cmdArgs []string) (map[string]any,
 	if len(cmdArgs) == 0 {
 		return nil, fmt.Errorf("command required after --")
 	}
-	if svc.Runtime != "docker" {
+	if (svc.Runtime != "docker" && svc.Runtime != "compose") || svc.ContainerID == "" {
 		return nil, fmt.Errorf("service %s cannot exec command: runtime %q is not supported; Vivero runs app services in containers only", service, svc.Runtime)
 	}
-	stdout, stderr, exit, err := dockerExec(svc.ContainerID, cmdArgs)
-	if err != nil {
+	timeout := 30 * time.Minute
+	if len(requestedTimeout) > 0 {
+		timeout = requestedTimeout[0]
+	}
+	stdout, stderr, exit, err := dockerExecWithTimeout(svc.ContainerID, cmdArgs, timeout)
+	timedOut := errors.Is(err, context.DeadlineExceeded)
+	if err != nil && !timedOut {
 		return nil, err
 	}
-	a.recordEvent(previewID, "info", "service.exec", "command executed in container", service, map[string]string{"command": strings.Join(cmdArgs, " "), "exit": fmt.Sprint(exit), "container": svc.ContainerID})
-	return map[string]any{"preview": previewID, "service": service, "containerId": svc.ContainerID, "command": cmdArgs, "exitCode": exit, "stdout": stdout, "stderr": stderr}, nil
+	if timedOut {
+		exit = 124
+	}
+	a.recordEvent(previewID, "info", "service.exec", "command executed in container", service, map[string]string{"command": strings.Join(cmdArgs, " "), "exit": fmt.Sprint(exit), "container": svc.ContainerID, "timedOut": fmt.Sprint(timedOut), "timeout": timeout.String()})
+	return map[string]any{"preview": previewID, "service": service, "containerId": svc.ContainerID, "command": cmdArgs, "exitCode": exit, "stdout": stdout, "stderr": stderr, "timedOut": timedOut}, nil
 }
 
 func (a *App) Logs(previewID, service string, limit int) (map[string]any, error) {
@@ -104,7 +115,7 @@ func (a *App) Logs(previewID, service string, limit int) (map[string]any, error)
 	if !ok {
 		return nil, fmt.Errorf("service not found: %s", service)
 	}
-	if svc.Runtime == "docker" || svc.ContainerID != "" {
+	if svc.ContainerID != "" {
 		lines, err := dockerLogs(svc.ContainerID, limit)
 		if err != nil {
 			return nil, err

@@ -1,0 +1,23 @@
+services:
+  web:
+    image: python:3.12-alpine
+    command: python3 -m http.server 3000 --bind 0.0.0.0
+    depends_on:
+      - db
+    ports:
+      - "39001:3000"
+    volumes:
+      - app-data:/app-data
+  db:
+    image: alpine:3.20
+    command: sh -c "mkdir -p /data && printf ready > /data/ready && sleep 3600"
+    ports:
+      - "33306:3306"
+    volumes:
+      - app-data:/data
+  worker:
+    image: alpine:3.20
+    command: sleep 3600
+
+volumes:
+  app-data:

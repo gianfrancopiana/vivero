@@ -189,6 +189,114 @@ services:
 	}
 }
 
+func TestConfigDoctorChecksComposeFilesAndHealthTimeout(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: compose-demo
+sources:
+  app:
+    path: .
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    ports:
+      http:
+        container: 3000
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := configDoctorFinding(report, "compose-file-missing"); !ok {
+		t.Fatalf("missing compose-file-missing finding: %#v", report.Findings)
+	}
+	if _, ok := configDoctorFinding(report, "compose-health-timeout-missing"); !ok {
+		t.Fatalf("missing compose-health-timeout-missing finding: %#v", report.Findings)
+	}
+	if report.OK {
+		t.Fatalf("missing compose file should fail config doctor: %#v", report)
+	}
+}
+
+func TestConfigDoctorWarnsWhenComposeSourceIsUnavailable(t *testing.T) {
+	root := writeConfigDoctorFile(t, `project:
+  name: compose-demo
+sources:
+  app:
+    path: ./not-checked-out
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    health:
+      timeout: 10m
+    ports:
+      http:
+        container: 3000
+`)
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding, ok := configDoctorFinding(report, "compose-file-unverified")
+	if !ok || finding.Severity != "warning" || !report.OK {
+		t.Fatalf("unavailable portable source should warn without failing: %#v", report)
+	}
+	if _, ok := configDoctorFinding(report, "compose-file-missing"); ok {
+		t.Fatalf("unavailable source root must not be misreported as a missing compose file: %#v", report.Findings)
+	}
+}
+
+func TestConfigDoctorReportsComposeOmissionsAndStrippedHostPorts(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_COMPOSE_CONFIG_JSON", `{"services":{"web":{"depends_on":{"db":{"condition":"service_started"}}},"db":{"ports":[{"target":3306,"published":"3306"}]},"worker":{}}}`)
+	root := writeConfigDoctorFile(t, `project:
+  name: compose-demo
+sources:
+  app:
+    path: .
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    health:
+      timeout: 10m
+    ports:
+      http:
+        container: 3000
+`)
+	if err := os.WriteFile(filepath.Join(root, "docker-compose.yml"), []byte("services:\n  web:\n    depends_on: [db]\n  db:\n    ports: [3306:3306]\n  worker: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{Home: t.TempDir()}
+	report, err := a.ConfigDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	omitted, ok := configDoctorFinding(report, "compose-services-omitted")
+	if !ok || omitted.Severity != "info" || !strings.Contains(omitted.Message, "worker") {
+		t.Fatalf("expected omitted worker info: %#v", report.Findings)
+	}
+	ports, ok := configDoctorFinding(report, "compose-host-ports-stripped")
+	if !ok || ports.Severity != "warning" || !strings.Contains(ports.Message, "db") || !strings.Contains(ports.Message, "3306") {
+		t.Fatalf("expected stripped db host-port warning: %#v", report.Findings)
+	}
+	if !report.OK {
+		t.Fatalf("compose info/warnings should not fail doctor: %#v", report)
+	}
+}
+
 func TestRunDoctorConfigJSONExitCode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("VIVERO_HOME", home)
@@ -282,7 +390,7 @@ func TestSchemaDoctorConfigDescribesFindingContract(t *testing.T) {
 			t.Fatalf("doctor config schema missing finding field %q: %#v", want, payload.Schema.FindingFields)
 		}
 	}
-	for _, want := range []string{"unsupported-config-key", "unknown-config-key", "config-load"} {
+	for _, want := range []string{"unsupported-config-key", "unknown-config-key", "config-load", "compose-file-missing", "compose-services-omitted", "compose-host-ports-stripped"} {
 		if !stringSliceContains(payload.Schema.FindingCodes, want) {
 			t.Fatalf("doctor config schema missing finding code %q: %#v", want, payload.Schema.FindingCodes)
 		}

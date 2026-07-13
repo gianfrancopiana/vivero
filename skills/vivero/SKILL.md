@@ -37,6 +37,8 @@ App repo:
 
 Keep `vivero.yml` as thin orchestration metadata. Put project-specific routes, selectors, QA scopes, browser flows, and restart hooks there. Prefer one app-owned preview Compose service that starts its own dependencies; otherwise reference app-owned images, Dockerfiles, prebuild commands, or app-owned Compose services/backings (`runtime: compose` + `compose.file`/`compose.service`). Do not copy Dockerfiles, compose files, dependency service images, env contracts, volumes, setup scripts, or restart/bootstrap recipes into YAML when the app repo already owns them. Inline Dockerfiles are intentionally unsupported. Compose-backed services/backings get Vivero network aliases, so a Vivero service may point at an app-owned service with a different name while still being reachable by the Vivero name.
 
+Compose services may add Vivero-owned `dependencyVolumes` when an expensive cache is not already modeled by the app stack, and `setup.afterSeeds` may invoke app-owned setup scripts through the Compose target while preserving per-preview, once-per-project, and once-per-fingerprint policies. Normal teardown/retry retains Compose volumes; only explicit `--discard` removes preview-lifetime volumes. Compose overrides are temporary, inherit environment values by key, and are deleted after Compose consumes them. Always set an explicit `health.timeout` for a large Compose stack. `doctor config` verifies local Compose files and targets, warns when that timeout is missing, and reports stripped dependency host ports plus services outside the target's `depends_on` closure.
+
 ## App-agnostic runtime command contract
 
 Vivero does not know Rails, Node, Postgres, Redis, or any other app framework. It only runs commands declared by the app config:
@@ -84,7 +86,7 @@ Prefer namespaced preview commands for new guidance. Older root preview aliases 
 
 Keep Vivero proof small and invariant-led. The bundled examples are not a framework zoo; they are a tiny matrix of behaviors frontier agents can trust across unfamiliar repos.
 
-- **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
+- **Preview invariants:** a URL is only reportable after health passes; sources stay isolated by preview ID; app and backing services share the preview network; public route planning is explicit; warm volumes and caches are visible; teardown is intentional. Prove the canonical path with `make example-e2e`, broader lifecycle behavior with `make integration-fixtures`, real app-owned Compose concurrency and volume behavior with `make compose-integration-fixtures`, and messy shapes with `make nasty-integration-fixtures`.
 - **Evidence invariants:** preview evidence reports target-aware JSON and artifact paths for events, logs, screenshots, app-agnostic evidence flows, QA reports, recordings, cache state, startup timing, and handoff files. Prefer `vivero evidence logs preview:<id> <service> --json --no-input`, `vivero evidence flow preview:<id> --steps-file qa/visual-flow.yaml --target local --dry-run --json --no-input`, and `vivero evidence qa run preview:<id> --scope smoke --target local --json --no-input` when collecting evidence.
 
 Add or document a fixture only when it proves a distinct invariant failure mode. Otherwise extend the smallest existing fixture.
@@ -183,6 +185,12 @@ vivero preview diff webapp-local app --json --no-input
 vivero preview exec preview:webapp-local web --json --no-input -- npm test
 ```
 
+### Runtime truth and reuse
+
+Treat `vivero preview inspect` and `vivero list` as live observations, not SQLite snapshots. They reconcile tracked Docker/Compose resources and the reported service URL; dead resources are demoted, dead local rewrite proxies are restarted, and ghost rows do not consume preview capacity. `vivero preview wait` probes the reported URL, not only the container origin.
+
+Use `--reuse` only when reusing the same effective preview is intended. Vivero reuses an existing preview only when its effective profiled config and secret digest, source/profile/public shape, service set, containers/Compose project, and tracked side processes still match and are live; otherwise it replaces the preview. Re-running `up --reuse` after an env, secret, command, image, health, or port change therefore starts fresh runtime resources.
+
 ## Evidence/QA flow
 
 Preview target refs identify a running preview, for example `preview:<id>` or the bare preview ID where the command expects a preview. QA screenshot and recording evidence defaults to `--target local`, which uses the local/proxy preview URL and is fastest. Use `--target public` only when explicitly validating the public tunnel.
@@ -240,6 +248,28 @@ vivero cache prune webapp --kind build --yes --json --no-input
 
 Use cache commands deliberately. `cache warm` can run app-owned prebuild steps; `cache prune` deletes project-scoped cache resources and requires `--yes`.
 
+## Multi-port and team-access previews
+
+Named service ports use dynamic loopback bindings by default. Set `ports.<name>.hostIp` only when a port should bind to a specific LAN or Tailscale address. Set `proxyListenHost` when the Vivero rewrite/multiplex proxy itself must listen on that interface.
+
+For a secondary HTTP or WebSocket origin, declare a unique path route instead of hard-coding the primary public host:
+
+```yaml
+ports:
+  http:
+    container: 3000
+  cable:
+    container: 8080
+    publicPath: /cable
+    publicOrigins:
+      - ws://cable.localhost:8080/cable
+primaryPort: http
+```
+
+`publicPath` is matched on path-segment boundaries and routes to that named port; `publicOrigins` are rewritten to the same reported preview origin and path, including `ws://` to `wss://` when the preview is HTTPS. Named ports always belong to that service container. With Compose, do not point a target port at a different Compose service: reverse-proxy that daemon through the target or model it as its own Vivero service.
+
+Bound long-running commands explicitly: `vivero exec preview:webapp-local web --timeout 10m --json --no-input -- bin/rails db:migrate`. On timeout, JSON keeps partial `stdout` and `stderr`, sets `timedOut: true`, and returns exit code 124. Options after `--` are passed through unchanged.
+
 ## Failure playbooks
 
 ### Preview does not start
@@ -252,6 +282,8 @@ vivero doctor config /path/to/project --json --no-input
 ```
 
 Check health configuration, command form, Dockerfile paths, Compose service names, network aliases, and secret-key requirements. Fix the app-owned runtime asset first.
+
+Health waits fail immediately when a target container or required Compose dependency exits. Before failed-start cleanup, Vivero snapshots redacted log tails for every tracked service and every container in the affected Compose project. `vivero evidence logs` falls back to the durable `logPath` after the container has been removed, so use it for post-mortem evidence too.
 
 ### Browser evidence fails
 
@@ -282,7 +314,7 @@ vivero preview down webapp-local --archive-patch --json --no-input --quiet
 vivero preview down webapp-local --discard --json --no-input --quiet
 ```
 
-Use `--archive-patch` when the preview worktree may contain useful changes. Use `--discard` only when the caller accepts losing preview-only edits.
+Use `--archive-patch` when the preview worktree may contain useful changes. Managed worktrees are unregistered during replacement or teardown unless explicitly kept. Use `--discard` only when the caller accepts losing preview-only edits and preview-lifetime Compose volumes; normal teardown retains Compose volumes for a warm retry.
 
 ## Secrets rules
 
@@ -303,13 +335,14 @@ Use the smallest gate that proves the change, then the full ladder before releas
 ```sh
 make example-e2e
 make integration-fixtures
+make compose-integration-fixtures
 make nasty-integration-fixtures
 make example-configs
 make release-smoke
 make certify
 ```
 
-`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, and release package smoke. `make cover` enforces the coverage ratchet. `make nasty-integration-fixtures` covers messy preview shapes.
+`make certify` is the deterministic pre-release ladder and runs audit, canonical example E2E, Docker and real Compose integration fixtures, nasty integration fixtures, example config validation, and release package smoke. `make cover` enforces the coverage ratchet. `make compose-integration-fixtures` proves concurrent app-owned Compose previews and discard-only volume deletion; `make nasty-integration-fixtures` covers messy preview shapes.
 
 For install trust after publishing a Vivero CLI release, use `release-postflight` with checksums, attestations, the installer, and Homebrew verification. `RELEASE_POSTFLIGHT_FLAGS="--example-e2e"` runs the checksum-installed release binary through the certified preview E2E:
 

@@ -137,7 +137,7 @@ func (a *App) validateNamedPublicRouteConflicts(req UpRequest, cfg ProjectConfig
 	if len(planned) == 0 {
 		return nil
 	}
-	previews, err := a.listPreviews()
+	previews, err := a.listPreviewsReconciled()
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (a *App) validateNamedPublicRouteConflicts(req UpRequest, cfg ProjectConfig
 			continue
 		}
 		for name, svc := range p.Services {
-			if !previewServiceHasPublicURL(svc) {
+			if !previewServiceHasPublicURL(svc) || !a.previewServiceHasLiveRouteResource(p, name, svc) {
 				continue
 			}
 			host := strings.ToLower(hostnameOnly(hostFromOrigin(svc.URL)))
@@ -156,6 +156,34 @@ func (a *App) validateNamedPublicRouteConflicts(req UpRequest, cfg ProjectConfig
 		}
 	}
 	return nil
+}
+
+func (a *App) previewServiceHasLiveRouteResource(preview PreviewRecord, name string, service PreviewService) bool {
+	runtime := service.Runtime
+	if project, err := a.getProject(preview.Project); err == nil {
+		if configs := reconciliationServiceConfigs(project, preview.Profile); configs != nil {
+			if cfg, ok := configs[name]; ok {
+				runtime = serviceRuntime(cfg)
+			}
+		}
+	}
+	if runtime == "compose" {
+		containers, err := a.containerRuntime().ComposeProjectContainers(preview.ID, name)
+		if err != nil {
+			return service.ContainerID != ""
+		}
+		for _, container := range containers {
+			if sameContainerID(container.ID, service.ContainerID) {
+				return container.Running
+			}
+		}
+		return false
+	}
+	if service.ContainerID == "" {
+		return false
+	}
+	running, err := a.containerRuntime().ContainerRunning(service.ContainerID)
+	return err != nil || running
 }
 
 func plannedNamedPublicHosts(req UpRequest, cfg ProjectConfig) (map[string]string, error) {

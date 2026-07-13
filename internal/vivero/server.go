@@ -113,7 +113,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 		return map[string]any{"preview": p}, 200, err
 	}))
 	mux.HandleFunc("GET /previews", jsonHandler(func(r *http.Request) (any, int, error) {
-		ps, err := a.listPreviews()
+		ps, err := a.listPreviewsReconciled()
 		return map[string]any{"previews": ps}, 200, err
 	}))
 	mux.HandleFunc("GET /previews/{id}/qa", jsonHandler(func(r *http.Request) (any, int, error) {
@@ -213,7 +213,7 @@ func (a *App) controlPlaneHandler() http.Handler {
 			ev, err := a.events(id, 0)
 			return map[string]any{"events": ev}, 200, err
 		}
-		p, err := a.getPreview(id)
+		p, err := a.getPreviewReconciled(id)
 		return map[string]any{"preview": p}, 200, err
 	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

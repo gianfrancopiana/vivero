@@ -113,6 +113,7 @@ func TestReleaseCertificationAndInstallTrustDocsStayAligned(t *testing.T) {
 		"certify:\n\t$(MAKE) audit",
 		"\t$(MAKE) example-e2e",
 		"\t$(MAKE) integration-fixtures",
+		"\t$(MAKE) compose-integration-fixtures",
 		"\t$(MAKE) nasty-integration-fixtures",
 		"\t$(MAKE) example-configs",
 		"\t$(MAKE) release-smoke",
@@ -154,9 +155,10 @@ func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
 	}
 	doc := string(docBytes)
 	examples := map[string]string{
-		"../../examples/agent-demo":        "agent-demo",
-		"../../examples/integration-stack": "integration-stack",
-		"../../examples/nasty-integration": "nasty-integration",
+		"../../examples/agent-demo":          "agent-demo",
+		"../../examples/compose-integration": "compose-integration",
+		"../../examples/integration-stack":   "integration-stack",
+		"../../examples/nasty-integration":   "nasty-integration",
 	}
 	for path, wantName := range examples {
 		t.Run(wantName, func(t *testing.T) {
@@ -172,7 +174,7 @@ func TestCertifiedExamplesAreDocumentedAndLoad(t *testing.T) {
 			}
 		})
 	}
-	for _, want := range []string{"static-only", "web app", "app + database", "monorepo app-owned Dockerfile", "make example-e2e", "make integration-fixtures", "make nasty-integration-fixtures"} {
+	for _, want := range []string{"static-only", "web app", "app + database", "app-owned Compose target", "monorepo app-owned Dockerfile", "make example-e2e", "make integration-fixtures", "make compose-integration-fixtures", "make nasty-integration-fixtures"} {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("certified examples doc should include %q", want)
 		}
@@ -286,7 +288,7 @@ func TestDocsFrameTinyInvariantMatrixAndFrontierAgentRecipes(t *testing.T) {
 			t.Fatalf("bundled skill should include frontier-agent recipe %q", want)
 		}
 	}
-	for _, want := range []string{"make example-e2e", "make nasty-integration-fixtures", "vivero evidence logs", "vivero evidence qa"} {
+	for _, want := range []string{"make example-e2e", "make compose-integration-fixtures", "make nasty-integration-fixtures", "vivero evidence logs", "vivero evidence qa"} {
 		if !strings.Contains(bodies["readme"], want) || !strings.Contains(bodies["skill"], want) {
 			t.Fatalf("README and skill should ground matrix/recipes in %q", want)
 		}
@@ -312,8 +314,37 @@ func TestBundledSkillStatesThinRuntimeBoundary(t *testing.T) {
 	}
 }
 
+func TestBundledSkillDocumentsRuntimeTruthAndComposeSafety(t *testing.T) {
+	skill, err := os.ReadFile("../../skills/vivero/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(skill)
+	for _, want := range []string{
+		"### Runtime truth and reuse",
+		"reconcile tracked Docker/Compose resources and the reported service URL",
+		"effective profiled config and secret digest",
+		"ghost rows do not consume preview capacity",
+		"once-per-project, and once-per-fingerprint policies",
+		"Compose overrides are temporary",
+		"warns when that timeout is missing",
+		"Named ports always belong to that service container",
+		"`ports.<name>.hostIp`",
+		"`proxyListenHost`",
+		"sets `timedOut: true`, and returns exit code 124",
+		"snapshots redacted log tails for every tracked service",
+		"falls back to the durable `logPath`",
+		"normal teardown retains Compose volumes for a warm retry",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("bundled skill should document audited runtime behavior %q", want)
+		}
+	}
+}
+
 func TestBundledExamplesLoad(t *testing.T) {
 	examples := map[string]string{
+		"../../examples/compose-integration":  "compose-integration",
 		"../../examples/gumroad":              "gumroad-main",
 		"../../examples/helper-host-products": "helper-host-products",
 		"../../examples/nasty-integration":    "nasty-integration",

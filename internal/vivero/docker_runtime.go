@@ -49,9 +49,13 @@ func dockerRunArgs(spec dockerServiceSpec) ([]string, error) {
 	args := []string{"run", "--detach", "--name", dockerContainerName(spec.PreviewID, spec.Service)}
 	args = append(args, "--label", "vivero.preview="+spec.PreviewID, "--label", "vivero.service="+spec.Service)
 	for _, port := range dockerPortsForSpec(spec) {
-		publish := fmt.Sprintf("127.0.0.1::%d", port.Container)
+		hostIP := port.HostIP
+		if hostIP == "" {
+			hostIP = "127.0.0.1"
+		}
+		publish := fmt.Sprintf("%s::%d", hostIP, port.Container)
 		if port.Host > 0 {
-			publish = fmt.Sprintf("127.0.0.1:%d:%d", port.Host, port.Container)
+			publish = fmt.Sprintf("%s:%d:%d", hostIP, port.Host, port.Container)
 		}
 		if port.Protocol != "" && port.Protocol != "tcp" {
 			publish += "/" + port.Protocol
@@ -101,7 +105,7 @@ func dockerPortsForSpec(spec dockerServiceSpec) []ServicePort {
 		return spec.Ports
 	}
 	if spec.Port > 0 {
-		return []ServicePort{{Name: defaultPrimaryPortName, Container: spec.Port, Host: spec.Port, Protocol: "tcp", Primary: true, Legacy: true}}
+		return []ServicePort{{Name: defaultPrimaryPortName, Container: spec.Port, Host: spec.Port, HostIP: "127.0.0.1", Protocol: "tcp", Primary: true, Legacy: true}}
 	}
 	return nil
 }
@@ -220,7 +224,7 @@ func (a *App) startDockerService(projectName, previewID, service string, svc Ser
 
 func startDockerService(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (string, error) {
 	if serviceRuntime(svc) == "compose" {
-		return startDockerComposeService(home, previewID, service, svc, sources, env)
+		return startDockerComposeService(home, projectName, previewID, service, svc, sources, env)
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return "", fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
@@ -314,7 +318,10 @@ func dockerPublishedPorts(containerID string, ports []ServicePort) ([]PreviewPor
 			protocol = "tcp"
 		}
 		hostPort := port.Host
-		hostIP := "127.0.0.1"
+		hostIP := port.HostIP
+		if hostIP == "" {
+			hostIP = "127.0.0.1"
+		}
 		if hostPort <= 0 {
 			query := fmt.Sprintf("%d/%s", port.Container, protocol)
 			body, err := runCmd("", nil, "docker", "port", containerID, query)
@@ -414,10 +421,6 @@ func appendDockerEnvArgs(args []string, spec dockerServiceSpec) ([]string, error
 	return args, nil
 }
 
-func dockerExec(containerID string, cmdArgs []string) (stdout, stderr string, exit int, err error) {
-	return dockerExecWithTimeout(containerID, cmdArgs, 30*time.Minute)
-}
-
 func dockerExecWithTimeout(containerID string, cmdArgs []string, timeout time.Duration) (stdout, stderr string, exit int, err error) {
 	if strings.TrimSpace(containerID) == "" {
 		return "", "", 0, fmt.Errorf("container id is required")
@@ -425,7 +428,23 @@ func dockerExecWithTimeout(containerID string, cmdArgs []string, timeout time.Du
 	if timeout <= 0 {
 		return "", "", 0, context.DeadlineExceeded
 	}
-	args := append([]string{"exec", containerID}, cmdArgs...)
+	deadline := time.Now().Add(timeout)
+	pidFile := fmt.Sprintf("/tmp/vivero-exec-%d-%d.pid", os.Getpid(), time.Now().UnixNano())
+	const wrapper = `pidfile=$1
+shift
+if command -v setsid >/dev/null 2>&1; then
+  setsid "$@" &
+else
+  "$@" &
+fi
+child=$!
+printf '%s\n' "$child" > "$pidfile"
+wait "$child"
+status=$?
+rm -f "$pidfile"
+exit "$status"`
+	args := []string{"exec", containerID, "sh", "-c", wrapper, "vivero-exec", pidFile}
+	args = append(args, cmdArgs...)
 	cmd := exec.Command("docker", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var out, errBuf bytes.Buffer
@@ -442,6 +461,7 @@ func dockerExecWithTimeout(containerID string, cmdArgs []string, timeout time.Du
 	select {
 	case runErr = <-done:
 	case <-timer.C:
+		killDockerExecProcess(containerID, pidFile)
 		if cmd.Process != nil {
 			_ = killProcessGroup(cmd.Process.Pid)
 			_ = cmd.Process.Kill()
@@ -451,11 +471,69 @@ func dockerExecWithTimeout(containerID string, cmdArgs []string, timeout time.Du
 	}
 	if runErr != nil {
 		if ee, ok := runErr.(*exec.ExitError); ok {
+			lowerStderr := strings.ToLower(errBuf.String())
+			if strings.Contains(lowerStderr, `exec: "sh": executable file not found`) || (strings.Contains(lowerStderr, "sh") && strings.Contains(lowerStderr, "executable file not found in $path")) {
+				return dockerExecDirectWithTimeout(containerID, cmdArgs, time.Until(deadline))
+			}
 			return out.String(), errBuf.String(), ee.ExitCode(), nil
 		}
 		return out.String(), errBuf.String(), 0, runErr
 	}
 	return out.String(), errBuf.String(), 0, nil
+}
+
+func dockerExecDirectWithTimeout(containerID string, cmdArgs []string, timeout time.Duration) (stdout, stderr string, exit int, err error) {
+	if timeout <= 0 {
+		return "", "", 0, context.DeadlineExceeded
+	}
+	args := append([]string{"exec", containerID}, cmdArgs...)
+	cmd := exec.Command("docker", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Start(); err != nil {
+		return out.String(), errBuf.String(), 0, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case runErr := <-done:
+		if runErr == nil {
+			return out.String(), errBuf.String(), 0, nil
+		}
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			return out.String(), errBuf.String(), ee.ExitCode(), nil
+		}
+		return out.String(), errBuf.String(), 0, runErr
+	case <-timer.C:
+		if cmd.Process != nil {
+			_ = killProcessGroup(cmd.Process.Pid)
+			_ = cmd.Process.Kill()
+		}
+		<-done
+		return out.String(), errBuf.String(), 0, context.DeadlineExceeded
+	}
+}
+
+func killDockerExecProcess(containerID, pidFile string) {
+	const killer = `pidfile=$1
+if [ -r "$pidfile" ]; then
+  pid=$(cat "$pidfile")
+  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 10 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  rm -f "$pidfile"
+fi`
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "docker", "exec", containerID, "sh", "-c", killer, "vivero-exec-kill", pidFile).Run()
 }
 
 func dockerLogs(containerID string, limit int) ([]string, error) {
@@ -515,6 +593,30 @@ func dockerContainerExists(containerID string) bool {
 	}
 	_, err := runCmd("", nil, "docker", "container", "inspect", containerID)
 	return err == nil
+}
+
+func dockerContainerRunning(containerID string) (bool, error) {
+	if strings.TrimSpace(containerID) == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false, fmt.Errorf("docker is required: %w", err)
+	}
+	out, err := runCmd("", nil, "docker", "container", "inspect", "--format", "{{.State.Running}}", containerID)
+	if err != nil {
+		if isDockerNoSuchContainer(string(out)) {
+			return false, nil
+		}
+		return false, fmt.Errorf("docker inspect %s: %w: %s", containerID, err, strings.TrimSpace(string(out)))
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("docker inspect %s returned invalid running state %q", containerID, strings.TrimSpace(string(out)))
+	}
 }
 
 func removeDockerContainersForPreview(previewID string) error {

@@ -127,10 +127,20 @@ func (a *App) prepareSmartWarmVolumes(project ProjectRecord, req UpRequest, cfg 
 				return cfg, state, err
 			}
 		}
-		if mode == warmModeDerived {
-			if err := a.clearPreviewWarmSetupMarkers(req.ID, fingerprint); err != nil {
-				return cfg, state, err
-			}
+	}
+
+	if mode == warmModeDerived && a.smartWarmPreviewVolumesReady(req.ID, state) {
+		for i := range state.Volumes {
+			binding := &state.Volumes[i]
+			timer := startOperationTimer()
+			binding.DurationMs, binding.Duration = cacheDurationFromTimer(timer)
+			a.recordEvent(req.ID, "info", "warm.derived.reused", "reusing existing preview-local smart warm volume", binding.Service, timer.metadata(map[string]string{"volume": binding.ActiveName, "fingerprint": fingerprint, "ref": ref}))
+		}
+		return cfg, state, nil
+	}
+	if mode == warmModeDerived {
+		if err := a.clearPreviewWarmSetupMarkers(req.ID, fingerprint); err != nil {
+			return cfg, state, err
 		}
 	}
 
@@ -161,8 +171,32 @@ func (a *App) prepareSmartWarmVolumes(project ProjectRecord, req UpRequest, cfg 
 			binding.DurationMs, binding.Duration = cacheDurationFromTimer(timer)
 			a.recordEvent(req.ID, "info", "warm.derived", "created empty preview-local smart warm volume; baseline is missing", binding.Service, timer.metadata(map[string]string{"baseline": binding.BaselineName, "volume": binding.ActiveName, "fingerprint": fingerprint, "ref": ref}))
 		}
+		if err := a.writePreviewWarmVolumeState(req.ID, warmVolumeState{
+			Project:     cfg.Project.Name,
+			Service:     binding.Service,
+			Name:        binding.Name,
+			VolumeName:  binding.ActiveName,
+			Fingerprint: fingerprint,
+			Ref:         ref,
+			UpdatedAt:   nowUTC(),
+		}); err != nil {
+			return cfg, state, err
+		}
 	}
 	return cfg, state, nil
+}
+
+func (a *App) smartWarmPreviewVolumesReady(previewID string, warm warmRunState) bool {
+	if strings.TrimSpace(previewID) == "" || strings.TrimSpace(warm.Fingerprint) == "" || len(warm.Volumes) == 0 {
+		return false
+	}
+	for _, binding := range warm.Volumes {
+		state, err := a.readPreviewWarmVolumeState(previewID, binding.Service, binding.Name)
+		if err != nil || state.Project != warm.Project || state.Fingerprint != warm.Fingerprint || state.VolumeName != binding.ActiveName || !a.containerRuntime().VolumeExists(binding.ActiveName) {
+			return false
+		}
+	}
+	return true
 }
 
 func projectUsesSmartWarmVolumes(cfg ProjectConfig) bool {
@@ -249,6 +283,30 @@ func smartWarmVolumeBindings(projectName string, cfg ProjectConfig) []warmVolume
 
 func (a *App) warmVolumeStatePath(project, service, name string) string {
 	return filepath.Join(a.Home, "warm", sanitizeDockerName(project), sanitizeDockerName(service), sanitizeDockerName(name)+".json")
+}
+
+func (a *App) previewWarmVolumeStatePath(previewID, service, name string) string {
+	return filepath.Join(a.Home, "warm", "previews", safePathComponent(previewID, "preview"), sanitizeDockerName(service), sanitizeDockerName(name)+".json")
+}
+
+func (a *App) readPreviewWarmVolumeState(previewID, service, name string) (warmVolumeState, error) {
+	body, err := os.ReadFile(a.previewWarmVolumeStatePath(previewID, service, name))
+	if err != nil {
+		return warmVolumeState{}, err
+	}
+	var state warmVolumeState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return warmVolumeState{}, err
+	}
+	return state, nil
+}
+
+func (a *App) writePreviewWarmVolumeState(previewID string, state warmVolumeState) error {
+	path := a.previewWarmVolumeStatePath(previewID, state.Service, state.Name)
+	if err := ensureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return writeIndentedJSONFile(path, state, 0o644)
 }
 
 func (a *App) readWarmVolumeState(project, service, name string) (warmVolumeState, error) {

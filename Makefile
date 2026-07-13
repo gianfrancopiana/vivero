@@ -9,7 +9,7 @@ STATICCHECK ?= honnef.co/go/tools/cmd/staticcheck@v0.6.1
 DEADCODE ?= golang.org/x/tools/cmd/deadcode@v0.36.0
 LDFLAGS := -ldflags "-s -w -X github.com/gianfrancopiana/vivero/internal/vivero.Version=$(VERSION) -X github.com/gianfrancopiana/vivero/internal/vivero.Commit=$(COMMIT) -X github.com/gianfrancopiana/vivero/internal/vivero.BuildDate=$(DATE)"
 
-.PHONY: build test test-short test-race vet fmt-check cover verify staticcheck deadcode stale-markers script-refs ignored-artifacts package-boundaries audit cross-build install snapshot release-smoke release-postflight certify live-cloud-browser-smoke example-e2e integration-fixtures nasty-integration-fixtures example-configs clean
+.PHONY: build test test-short test-race vet fmt-check cover verify staticcheck deadcode stale-markers script-refs ignored-artifacts package-boundaries audit cross-build install snapshot release-smoke release-postflight certify live-cloud-browser-smoke example-e2e integration-fixtures compose-integration-fixtures nasty-integration-fixtures example-configs clean
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/vivero
@@ -89,6 +89,7 @@ certify:
 	$(MAKE) audit
 	$(MAKE) example-e2e
 	$(MAKE) integration-fixtures
+	$(MAKE) compose-integration-fixtures
 	$(MAKE) nasty-integration-fixtures
 	$(MAKE) example-configs
 	$(MAKE) release-smoke
@@ -101,6 +102,9 @@ example-e2e:
 
 integration-fixtures:
 	scripts/integration-fixtures.sh
+
+compose-integration-fixtures:
+	scripts/compose-integration-fixtures.sh
 
 nasty-integration-fixtures:
 	scripts/nasty-integration-fixtures.sh
