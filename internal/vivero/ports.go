@@ -11,12 +11,15 @@ import (
 const defaultPrimaryPortName = "http"
 
 type ServicePort struct {
-	Name      string
-	Container int
-	Host      int
-	Protocol  string
-	Primary   bool
-	Legacy    bool
+	Name          string
+	Container     int
+	Host          int
+	HostIP        string
+	Protocol      string
+	Primary       bool
+	Legacy        bool
+	PublicPath    string
+	PublicOrigins []string
 }
 
 func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
@@ -27,7 +30,7 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 		return nil, fmt.Errorf("cannot declare both legacy port and named ports")
 	}
 	if svc.Port > 0 {
-		return []ServicePort{{Name: defaultPrimaryPortName, Container: svc.Port, Host: svc.Port, Protocol: "tcp", Primary: true, Legacy: true}}, nil
+		return []ServicePort{{Name: defaultPrimaryPortName, Container: svc.Port, Host: svc.Port, HostIP: "127.0.0.1", Protocol: "tcp", Primary: true, Legacy: true}}, nil
 	}
 	if len(svc.Ports) == 0 {
 		return nil, nil
@@ -51,6 +54,7 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 	}
 	out := make([]ServicePort, 0, len(keys))
 	seen := map[string]bool{}
+	publicPaths := map[string]string{}
 	primarySeen := false
 	for _, name := range keys {
 		if seen[name] {
@@ -67,6 +71,9 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 		if cfg.Host < 0 {
 			return nil, fmt.Errorf("named port %s host port must be positive or zero for dynamic", name)
 		}
+		if hostIP := strings.TrimSpace(cfg.HostIP); hostIP != "" && net.ParseIP(hostIP) == nil {
+			return nil, fmt.Errorf("named port %s hostIp %q must be an IP address", name, hostIP)
+		}
 		protocol := strings.ToLower(strings.TrimSpace(cfg.Protocol))
 		if protocol == "" {
 			protocol = "tcp"
@@ -78,7 +85,34 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 		if primary {
 			primarySeen = true
 		}
-		out = append(out, ServicePort{Name: name, Container: cfg.Container, Host: cfg.Host, Protocol: protocol, Primary: primary})
+		hostIP := strings.TrimSpace(cfg.HostIP)
+		if hostIP == "" {
+			hostIP = "127.0.0.1"
+		}
+		publicPath := strings.TrimSpace(cfg.PublicPath)
+		if len(cfg.PublicOrigins) > 0 && publicPath == "" {
+			return nil, fmt.Errorf("named port %s publicOrigins requires publicPath", name)
+		}
+		if publicPath != "" {
+			if primary {
+				return nil, fmt.Errorf("named port %s is primary and cannot declare publicPath", name)
+			}
+			if !strings.HasPrefix(publicPath, "/") || publicPath == "/" || strings.HasSuffix(publicPath, "/") {
+				return nil, fmt.Errorf("named port %s publicPath must start with /, must not be /, and must not end with /", name)
+			}
+			if previous, exists := publicPaths[publicPath]; exists {
+				return nil, fmt.Errorf("named ports %s and %s declare duplicate publicPath %s", previous, name, publicPath)
+			}
+			publicPaths[publicPath] = name
+		}
+		origins := make([]string, 0, len(cfg.PublicOrigins))
+		for _, origin := range cfg.PublicOrigins {
+			if origin = strings.TrimSpace(origin); origin == "" {
+				return nil, fmt.Errorf("named port %s publicOrigins cannot contain an empty origin", name)
+			}
+			origins = append(origins, origin)
+		}
+		out = append(out, ServicePort{Name: name, Container: cfg.Container, Host: cfg.Host, HostIP: hostIP, Protocol: protocol, Primary: primary, PublicPath: publicPath, PublicOrigins: origins})
 	}
 	if !primarySeen {
 		return nil, fmt.Errorf("primaryPort %q does not match a named port", primaryName)
@@ -106,6 +140,14 @@ func primaryPreviewPort(ports map[string]PreviewPort) (PreviewPort, bool) {
 func originHostForService(svc ServiceConfig) string {
 	host := strings.TrimSpace(svc.OriginHost)
 	if host == "" {
+		ports, err := servicePortPlan(svc)
+		if err == nil {
+			for _, port := range ports {
+				if port.Primary && port.HostIP != "" && port.HostIP != "0.0.0.0" && port.HostIP != "::" {
+					return port.HostIP
+				}
+			}
+		}
 		return "127.0.0.1"
 	}
 	return host
@@ -129,7 +171,17 @@ func previewPortsFromPublished(configured []ServicePort, published []PreviewPort
 		if got.Host <= 0 {
 			return nil, fmt.Errorf("published port %s has invalid host port %d", want.Name, got.Host)
 		}
-		got.URL = fmt.Sprintf("http://%s:%d", originHost, got.Host)
+		urlHost := got.HostIP
+		if urlHost == "" {
+			urlHost = want.HostIP
+		}
+		if want.Primary && strings.TrimSpace(originHost) != "" {
+			urlHost = originHost
+		}
+		if urlHost == "" || urlHost == "0.0.0.0" || urlHost == "::" {
+			urlHost = "127.0.0.1"
+		}
+		got.URL = "http://" + net.JoinHostPort(urlHost, fmt.Sprint(got.Host))
 		out[want.Name] = got
 	}
 	return out, nil

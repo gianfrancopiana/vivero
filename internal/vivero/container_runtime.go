@@ -2,6 +2,13 @@ package vivero
 
 import "time"
 
+type runtimeContainerState struct {
+	ID                 string
+	Running            bool
+	ExitCode           int
+	ExpectedCompletion bool
+}
+
 type containerRuntime interface {
 	BuildImage(spec dockerBuildSpec) error
 	EnsureNetwork(previewID string) error
@@ -11,8 +18,10 @@ type containerRuntime interface {
 	WaitHealthCommand(containerID string, h HealthConfig, timeout time.Duration) error
 	ContainerLogs(containerID string, limit int) ([]string, error)
 	ContainerExists(containerID string) bool
+	ContainerRunning(containerID string) (bool, error)
+	ComposeProjectContainers(previewID, service string) ([]runtimeContainerState, error)
 	RemoveContainer(containerID string) (missing bool, output string, err error)
-	RemoveComposeProject(previewID, service string) error
+	RemoveComposeProject(previewID, service string, discardVolumes bool) error
 	RemoveContainersForPreview(previewID string) error
 	RemoveNetwork(previewID string) error
 	VolumeExists(name string) bool
@@ -64,6 +73,14 @@ func (dockerContainerRuntime) ContainerExists(containerID string) bool {
 	return dockerContainerExists(containerID)
 }
 
+func (dockerContainerRuntime) ContainerRunning(containerID string) (bool, error) {
+	return dockerContainerRunning(containerID)
+}
+
+func (dockerContainerRuntime) ComposeProjectContainers(previewID, service string) ([]runtimeContainerState, error) {
+	return dockerComposeProjectContainers(previewID, service)
+}
+
 func (dockerContainerRuntime) RemoveContainer(containerID string) (bool, string, error) {
 	out, err := runCmd("", nil, "docker", "rm", "-f", containerID)
 	if err == nil {
@@ -72,8 +89,8 @@ func (dockerContainerRuntime) RemoveContainer(containerID string) (bool, string,
 	return isDockerNoSuchContainer(string(out)), string(out), err
 }
 
-func (dockerContainerRuntime) RemoveComposeProject(previewID, service string) error {
-	return removeDockerComposeProject(previewID, service)
+func (dockerContainerRuntime) RemoveComposeProject(previewID, service string, discardVolumes bool) error {
+	return removeDockerComposeProjectWithOptions(previewID, service, discardVolumes)
 }
 
 func (dockerContainerRuntime) RemoveContainersForPreview(previewID string) error {

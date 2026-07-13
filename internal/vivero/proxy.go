@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,17 +24,21 @@ import (
 
 type publicOriginContextKey struct{}
 
+type publicProxyRoute struct {
+	Path       string   `json:"path"`
+	Target     string   `json:"target"`
+	HostHeader string   `json:"hostHeader,omitempty"`
+	Origins    []string `json:"origins,omitempty"`
+}
+
 var scriptNonceRE = regexp.MustCompile(`'nonce-([^']+)'`)
 
-func runHeaderRewriteProxy(listen, target, hostHeader string, publicRewrite PublicRewriteConfig) error {
+func runHeaderRewriteProxy(listen, target, hostHeader string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute) error {
 	if listen == "" {
 		return fmt.Errorf("--listen is required")
 	}
 	if target == "" {
 		return fmt.Errorf("--target is required")
-	}
-	if hostHeader == "" {
-		return fmt.Errorf("--host is required")
 	}
 	targetURL, err := url.Parse(target)
 	if err != nil {
@@ -41,7 +46,7 @@ func runHeaderRewriteProxy(listen, target, hostHeader string, publicRewrite Publ
 	}
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           newHeaderRewriteProxy(targetURL, hostHeader, publicRewrite),
+		Handler:           newRoutedHeaderRewriteProxy(targetURL, hostHeader, publicRewrite, routes),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return server.ListenAndServe()
@@ -59,9 +64,21 @@ func newPublicRouteHeaderRewriteProxy(target *url.URL, hostHeader, rewriteHostHe
 }
 
 func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHostHeader, basePublicOrigin string, publicRewrite PublicRewriteConfig) *httputil.ReverseProxy {
+	return newHeaderRewriteProxyWithRoutes(target, hostHeader, rewriteHostHeader, basePublicOrigin, publicRewrite, nil)
+}
+
+func newHeaderRewriteProxyWithRoutes(target *url.URL, hostHeader, rewriteHostHeader, basePublicOrigin string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	baseDirector := proxy.Director
 	rewriter := newPublicPreviewRewriter(target, rewriteHostHeader, basePublicOrigin, publicRewrite)
+	for _, route := range routes {
+		for _, origin := range route.Origins {
+			origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+			if origin != "" {
+				rewriter.routedOrigins = append(rewriter.routedOrigins, routedOriginRewrite{From: origin, Path: route.Path})
+			}
+		}
+	}
 	proxy.Director = func(req *http.Request) {
 		publicOrigin := publicOriginForIncomingRequest(req)
 		publicScheme := schemeFromOrigin(publicOrigin)
@@ -69,6 +86,9 @@ func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHo
 		baseDirector(req)
 		if publicOrigin != "" {
 			rewriteRequestOriginHeaders(req.Header, publicOrigin, maskedOrigin)
+			// Rewritable response bodies must arrive uncompressed. Otherwise the
+			// response rewriter has to silently pass through localhost origins.
+			req.Header.Set("Accept-Encoding", "identity")
 			*req = *req.WithContext(context.WithValue(req.Context(), publicOriginContextKey{}, publicOrigin))
 		}
 		if publicScheme != "" {
@@ -77,9 +97,13 @@ func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHo
 				req.Header.Set("X-Forwarded-Port", "443")
 			}
 		}
-		req.Host = hostHeader
-		req.Header.Set("X-Forwarded-Host", hostHeader)
-		req.Header.Set("X-Forwarded-Server", hostHeader)
+		upstreamHost := hostHeader
+		if upstreamHost == "" {
+			upstreamHost = target.Host
+		}
+		req.Host = upstreamHost
+		req.Header.Set("X-Forwarded-Host", upstreamHost)
+		req.Header.Set("X-Forwarded-Server", upstreamHost)
 		req.Header.Del("Forwarded")
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -109,6 +133,44 @@ func newHeaderRewriteProxyWithRewriteHost(target *url.URL, hostHeader, rewriteHo
 	return proxy
 }
 
+func newRoutedHeaderRewriteProxy(target *url.URL, hostHeader string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute) http.Handler {
+	ordered := append([]publicProxyRoute(nil), routes...)
+	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i].Path) > len(ordered[j].Path) })
+	type routeHandler struct {
+		path    string
+		handler http.Handler
+	}
+	handlers := make([]routeHandler, 0, len(ordered))
+	for _, route := range ordered {
+		routeTarget, err := url.Parse(route.Target)
+		if err != nil || routeTarget.Scheme == "" || routeTarget.Host == "" {
+			continue
+		}
+		routeHost := route.HostHeader
+		if routeHost == "" {
+			routeHost = hostHeader
+		}
+		handlers = append(handlers, routeHandler{path: route.Path, handler: newHeaderRewriteProxyWithRoutes(routeTarget, routeHost, hostHeader, "", publicRewrite, ordered)})
+	}
+	primary := newHeaderRewriteProxyWithRoutes(target, hostHeader, hostHeader, "", publicRewrite, ordered)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		for _, route := range handlers {
+			if publicRoutePathMatches(req.URL.Path, route.path) {
+				route.handler.ServeHTTP(w, req)
+				return
+			}
+		}
+		primary.ServeHTTP(w, req)
+	})
+}
+
+func publicRoutePathMatches(requestPath, routePath string) bool {
+	if requestPath == routePath {
+		return true
+	}
+	return strings.HasPrefix(requestPath, routePath+"/")
+}
+
 type publicPreviewRewriter struct {
 	exactOrigins          []string
 	encodedOrigins        []encodedOriginRewrite
@@ -116,9 +178,15 @@ type publicPreviewRewriter struct {
 	protocolRelativeHosts []string
 	basePaths             []string
 	replacements          []PublicRewriteTemplate
+	routedOrigins         []routedOriginRewrite
 	originHost            string
 	basePublicOrigin      string
 	devOriginRE           *regexp.Regexp
+}
+
+type routedOriginRewrite struct {
+	From string
+	Path string
 }
 
 type encodedOriginRewrite struct {
@@ -172,6 +240,18 @@ func (r publicPreviewRewriter) rewrite(input, publicOrigin string) string {
 	templateContext.BasePublicHost = hostFromOrigin(templateContext.BasePublicOrigin)
 	templateContext.BasePublicScheme = schemeFromOrigin(templateContext.BasePublicOrigin)
 	out := input
+	for _, routed := range r.routedOrigins {
+		to := strings.TrimRight(publicOrigin, "/") + routed.Path
+		if strings.HasPrefix(strings.ToLower(routed.From), "ws://") {
+			to = "ws://" + strings.TrimPrefix(to, "http://")
+			if strings.HasPrefix(to, "ws://https://") {
+				to = "wss://" + strings.TrimPrefix(to, "ws://https://")
+			}
+		} else if strings.HasPrefix(strings.ToLower(routed.From), "wss://") {
+			to = "wss://" + strings.TrimPrefix(strings.TrimPrefix(to, "http://"), "https://")
+		}
+		out = strings.ReplaceAll(out, routed.From, to)
+	}
 	for _, origin := range r.exactOrigins {
 		out = strings.ReplaceAll(out, origin, publicOrigin)
 	}
@@ -725,8 +805,11 @@ func hostnameOnly(host string) string {
 	return strings.Trim(host, "[]")
 }
 
-func allocateTCPPort() (int, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func allocateTCPPortOnHost(host string) (int, error) {
+	if strings.TrimSpace(host) == "" {
+		host = "127.0.0.1"
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		return 0, err
 	}
@@ -734,13 +817,38 @@ func allocateTCPPort() (int, error) {
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
-func (a *App) startHeaderRewriteProxy(previewID, service, originURL, hostHeader string, publicRewrite PublicRewriteConfig, h HealthConfig) (string, int, error) {
-	port, err := allocateTCPPort()
-	if err != nil {
-		return "", 0, err
+func (a *App) startHeaderRewriteProxy(previewID, service, runtime, containerID, originURL, hostHeader string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute, h HealthConfig, listenHost string) (string, int, error) {
+	return a.startHeaderRewriteProxyAt(previewID, service, runtime, containerID, originURL, hostHeader, publicRewrite, routes, h, listenHost, "", 10*time.Second)
+}
+
+func (a *App) startHeaderRewriteProxyAt(previewID, service, runtime, containerID, originURL, hostHeader string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute, h HealthConfig, listenHost, preferredURL string, maxWait time.Duration) (string, int, error) {
+	listenHost = strings.TrimSpace(listenHost)
+	port := 0
+	if preferredURL != "" {
+		parsed, parseErr := url.Parse(preferredURL)
+		if parseErr == nil {
+			port, _ = strconv.Atoi(parsed.Port())
+			if listenHost == "" {
+				listenHost = parsed.Hostname()
+			}
+		}
 	}
-	listen := fmt.Sprintf("127.0.0.1:%d", port)
-	proxyURL := fmt.Sprintf("http://%s", listen)
+	if listenHost == "" {
+		listenHost = "127.0.0.1"
+	}
+	if port == 0 {
+		var err error
+		port, err = allocateTCPPortOnHost(listenHost)
+		if err != nil {
+			return "", 0, err
+		}
+	}
+	listen := net.JoinHostPort(listenHost, fmt.Sprint(port))
+	urlHost := listenHost
+	if urlHost == "0.0.0.0" || urlHost == "::" {
+		urlHost = "127.0.0.1"
+	}
+	proxyURL := "http://" + net.JoinHostPort(urlHost, fmt.Sprint(port))
 	logPath := serviceLogPath(a.Home, previewID, service, ".proxy.log")
 	if err := ensureDir(filepath.Dir(logPath)); err != nil {
 		return "", 0, err
@@ -763,6 +871,14 @@ func (a *App) startHeaderRewriteProxy(previewID, service, originURL, hostHeader 
 		}
 		args = append(args, "--rewrite-json", string(rewriteJSON))
 	}
+	if len(routes) > 0 {
+		routesJSON, err := json.Marshal(routes)
+		if err != nil {
+			lf.Close()
+			return "", 0, err
+		}
+		args = append(args, "--routes-json", string(routesJSON))
+	}
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = lf
 	cmd.Stderr = lf
@@ -771,9 +887,22 @@ func (a *App) startHeaderRewriteProxy(previewID, service, originURL, hostHeader 
 		lf.Close()
 		return "", 0, err
 	}
+	go func() { _ = cmd.Wait() }()
 	_ = lf.Close()
 	pid := cmd.Process.Pid
-	if err := waitHTTP(proxyURL, h, serviceHealthTimeout(h, 10*time.Second)); err != nil {
+	proxyTimeout := serviceHealthTimeout(h, maxWait)
+	if maxWait > 0 && proxyTimeout > maxWait {
+		proxyTimeout = maxWait
+	}
+	if err := waitHTTPWithCheck(proxyURL, h, proxyTimeout, func() error {
+		if !processExists(pid) {
+			return fmt.Errorf("header rewrite proxy pid %d exited during startup", pid)
+		}
+		if err := a.checkServiceRuntime(previewID, service, runtime, containerID); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		_ = killProcessGroup(pid)
 		return "", pid, fmt.Errorf("header rewrite proxy health failed: %w", err)
 	}

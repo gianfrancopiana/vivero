@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 )
 
 func (a *App) cleanupExistingPreviewForUp(previewID string) (PreviewRecord, bool, error) {
-	existing, err := a.getPreview(previewID)
+	existing, err := a.getPreviewRaw(previewID)
 	if err != nil {
 		if strings.Contains(err.Error(), "preview not found") {
 			return PreviewRecord{}, false, nil
@@ -22,6 +23,15 @@ func (a *App) cleanupExistingPreviewForUp(previewID string) (PreviewRecord, bool
 	}
 	if err := a.deletePreviewServices(previewID); err != nil {
 		return existing, true, err
+	}
+	for _, name := range sortedMapKeys(existing.Sources) {
+		source := existing.Sources[name]
+		if !source.Owned {
+			continue
+		}
+		if err := runGitWorktreeRemove(source.Path); err != nil {
+			return existing, true, fmt.Errorf("cleanup managed source %s: %w", name, err)
+		}
 	}
 	if err := a.deletePreviewSources(previewID); err != nil {
 		return existing, true, err
@@ -80,36 +90,61 @@ func (a *App) cleanupPreviewServices(previewID string, services map[string]Previ
 }
 
 func (a *App) stopPreviewServiceResources(previewID, name string, svc PreviewService) (PreviewService, error) {
+	return a.stopPreviewServiceResourcesWithOptions(previewID, name, svc, false)
+}
+
+func (a *App) stopPreviewServiceResourcesWithOptions(previewID, name string, svc PreviewService, discardVolumes bool) (PreviewService, error) {
 	var errs []string
 	if svc.TunnelPID > 0 {
 		pid := svc.TunnelPID
-		if err := killProcessGroup(pid); err != nil {
-			errs = append(errs, fmt.Sprintf("stop tunnel pid %d: %v", pid, err))
+		if err := killTrackedProcessGroup(pid, svc.TunnelPIDIdentity); err != nil {
+			if errors.Is(err, errProcessIdentityMissing) || errors.Is(err, errProcessIdentityChanged) {
+				svc.TunnelPID = 0
+				svc.TunnelPIDIdentity = ""
+				a.recordEvent(previewID, "warning", "tunnel.pid_unowned", err.Error(), name, map[string]string{"pid": fmt.Sprint(pid)})
+			} else {
+				errs = append(errs, fmt.Sprintf("stop tunnel pid %d: %v", pid, err))
+			}
 		} else {
 			svc.TunnelPID = 0
+			svc.TunnelPIDIdentity = ""
 			a.recordEvent(previewID, "info", "tunnel.stopped", "tunnel process stopped", name, map[string]string{"pid": fmt.Sprint(pid)})
 		}
 	}
 	if svc.ProxyPID > 0 {
 		pid := svc.ProxyPID
-		if err := killProcessGroup(pid); err != nil {
-			errs = append(errs, fmt.Sprintf("stop proxy pid %d: %v", pid, err))
+		if err := killTrackedProcessGroup(pid, svc.ProxyPIDIdentity); err != nil {
+			if errors.Is(err, errProcessIdentityMissing) || errors.Is(err, errProcessIdentityChanged) {
+				svc.ProxyPID = 0
+				svc.ProxyPIDIdentity = ""
+				a.recordEvent(previewID, "warning", "proxy.pid_unowned", err.Error(), name, map[string]string{"pid": fmt.Sprint(pid)})
+			} else {
+				errs = append(errs, fmt.Sprintf("stop proxy pid %d: %v", pid, err))
+			}
 		} else {
 			svc.ProxyPID = 0
+			svc.ProxyPIDIdentity = ""
 			a.recordEvent(previewID, "info", "proxy.stopped", "header rewrite proxy stopped", name, map[string]string{"pid": fmt.Sprint(pid)})
 		}
 	}
 	if svc.PID > 0 {
 		pid := svc.PID
-		if err := killProcessGroup(pid); err != nil {
-			errs = append(errs, fmt.Sprintf("stop service pid %d: %v", pid, err))
+		if err := killTrackedProcessGroup(pid, svc.PIDIdentity); err != nil {
+			if errors.Is(err, errProcessIdentityMissing) || errors.Is(err, errProcessIdentityChanged) {
+				svc.PID = 0
+				svc.PIDIdentity = ""
+				a.recordEvent(previewID, "warning", "service.pid_unowned", err.Error(), name, map[string]string{"pid": fmt.Sprint(pid)})
+			} else {
+				errs = append(errs, fmt.Sprintf("stop service pid %d: %v", pid, err))
+			}
 		} else {
 			svc.PID = 0
+			svc.PIDIdentity = ""
 			a.recordEvent(previewID, "info", "service.stopped", "service process stopped", name, map[string]string{"pid": fmt.Sprint(pid)})
 		}
 	}
 	if svc.Runtime == "compose" {
-		if err := a.containerRuntime().RemoveComposeProject(previewID, name); err != nil {
+		if err := a.containerRuntime().RemoveComposeProject(previewID, name, discardVolumes); err != nil {
 			errs = append(errs, fmt.Sprintf("compose cleanup %s/%s: %v", previewID, name, err))
 		} else {
 			a.recordEvent(previewID, "info", "service.stopped", "compose project stopped", name, map[string]string{"project": dockerComposeProjectName(previewID, name)})
@@ -188,7 +223,12 @@ func (a *App) removePreviewDependencyVolumes(previewID string, cfg ProjectConfig
 }
 
 func (a *App) Down(id, mode string) (PreviewRecord, error) {
-	p, err := a.getPreview(id)
+	lock, err := a.lockPreview(id)
+	if err != nil {
+		return PreviewRecord{}, err
+	}
+	defer lock.unlock()
+	p, err := a.getPreviewRaw(id)
 	if err != nil {
 		return p, err
 	}
@@ -197,8 +237,12 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 	}
 	var cleanupErrs []string
 	var safeDirtyErr error
+	cleanedComposeServices := map[string]bool{}
 	for name, svc := range p.Services {
-		stopped, stopErr := a.stopPreviewServiceResources(id, name, svc)
+		if svc.Runtime == "compose" {
+			cleanedComposeServices[name] = true
+		}
+		stopped, stopErr := a.stopPreviewServiceResourcesWithOptions(id, name, svc, mode == "discard")
 		if stopErr != nil {
 			cleanupErrs = append(cleanupErrs, stopErr.Error())
 		}
@@ -208,6 +252,41 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 		p.Services[name] = stopped
 		if saveErr := a.saveService(id, stopped); saveErr != nil {
 			cleanupErrs = append(cleanupErrs, fmt.Sprintf("save service %s: %v", name, saveErr))
+		}
+	}
+	if mode == "discard" {
+		project, projectErr := a.getProject(p.Project)
+		if projectErr != nil {
+			if !strings.HasPrefix(projectErr.Error(), "project not found:") {
+				cleanupErrs = append(cleanupErrs, fmt.Sprintf("load project %s for compose cleanup: %v", p.Project, projectErr))
+			}
+		} else {
+			effective, _, profileErr := projectConfigForRequestedProfile(project.Config, p.Profile)
+			if profileErr != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Sprintf("resolve project %s profile for compose cleanup: %v", p.Project, profileErr))
+			} else {
+				composeServices := map[string]bool{}
+				for name, service := range effective.Services {
+					if serviceRuntime(service) == "compose" {
+						composeServices[name] = true
+					}
+				}
+				for name, backing := range effective.BackingServices {
+					if serviceRuntime(serviceConfigForBacking(backing)) == "compose" {
+						composeServices[name] = true
+					}
+				}
+				for _, name := range sortedMapKeys(composeServices) {
+					if cleanedComposeServices[name] {
+						continue
+					}
+					if err := a.containerRuntime().RemoveComposeProject(id, name, true); err != nil {
+						cleanupErrs = append(cleanupErrs, fmt.Sprintf("compose cleanup %s/%s: %v", id, name, err))
+					} else {
+						a.recordEvent(id, "info", "service.stopped", "unpersisted compose project discarded", name, map[string]string{"project": dockerComposeProjectName(id, name)})
+					}
+				}
+			}
 		}
 	}
 	if err := a.containerRuntime().RemoveContainersForPreview(id); err != nil {
@@ -251,7 +330,7 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 	}
 	if safeDirtyErr != nil {
 		_ = a.setPreviewStatus(id, "unhealthy")
-		updated, _ := a.getPreview(id)
+		updated, _ := a.getPreviewRaw(id)
 		if len(cleanupErrs) > 0 {
 			return updated, fmt.Errorf("%w; cleanup failed: %s", safeDirtyErr, strings.Join(cleanupErrs, "; "))
 		}
@@ -259,12 +338,12 @@ func (a *App) Down(id, mode string) (PreviewRecord, error) {
 	}
 	if len(cleanupErrs) > 0 {
 		_ = a.setPreviewStatus(id, "unhealthy")
-		updated, _ := a.getPreview(id)
+		updated, _ := a.getPreviewRaw(id)
 		return updated, fmt.Errorf("%s", strings.Join(cleanupErrs, "; "))
 	}
 	_ = a.setPreviewStatus(id, "dead")
 	a.recordEvent(id, "info", "preview.dead", "preview torn down", "", map[string]string{"mode": mode})
-	return a.getPreview(id)
+	return a.getPreviewRaw(id)
 }
 
 func killProcessGroup(pid int) error {

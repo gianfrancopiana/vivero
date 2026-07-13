@@ -1,6 +1,7 @@
 package vivero
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -193,7 +194,6 @@ func TestLoadProjectConfigRejectsComposeRuntimeDuplication(t *testing.T) {
 		{name: "image", body: "    image: app/web:latest\n", want: "image/build"},
 		{name: "build", body: "    build:\n      context: .\n", want: "image/build"},
 		{name: "command", body: "    command: bundle exec rails s\n", want: "service command"},
-		{name: "dependency volume", body: "    dependencyVolumes:\n      - name: bundle\n        target: /bundle\n", want: "dependency volumes"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,7 +237,6 @@ func TestLoadProjectConfigRejectsComposeBackingDuplication(t *testing.T) {
 		{name: "image", body: "    image: mysql:8\n", want: "image definitions"},
 		{name: "command", body: "    command: mysqld\n", want: "service command"},
 		{name: "env", body: "    env:\n      MYSQL_ROOT_PASSWORD: password\n", want: "env contracts"},
-		{name: "dependency volume", body: "    dependencyVolumes:\n      - name: data\n        target: /var/lib/mysql\n", want: "dependency volumes"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -269,7 +268,7 @@ backingServices:
 	}
 }
 
-func TestLoadProjectConfigRejectsComposeRuntimeSetupSteps(t *testing.T) {
+func TestLoadProjectConfigAllowsComposeRuntimeVolumesAndSetupSteps(t *testing.T) {
 	root := t.TempDir()
 	cfg := []byte(`project:
   name: compose-setup
@@ -286,6 +285,10 @@ services:
     ports:
       http:
         container: 3000
+    dependencyVolumes:
+      - name: bundle
+        target: /bundle
+        lifetime: project
 setup:
   afterSeeds:
     - service: web
@@ -294,12 +297,12 @@ setup:
 	if err := os.WriteFile(filepath.Join(root, "vivero.yml"), cfg, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := loadProjectConfig(root)
-	if err == nil {
-		t.Fatal("expected compose setup step to be rejected")
+	_, loaded, err := loadProjectConfig(root)
+	if err != nil {
+		t.Fatalf("compose dependency volumes and setup should be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "app-owned Compose stack") {
-		t.Fatalf("error should point setup back to app-owned compose: %v", err)
+	if len(loaded.Services["web"].DependencyVolumes) != 1 || len(loaded.Setup.AfterSeeds) != 1 {
+		t.Fatalf("compose volume/setup config not preserved: %#v", loaded)
 	}
 }
 
@@ -392,6 +395,7 @@ backingServices:
 func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 	home := t.TempDir()
 	spec := dockerComposeServiceSpec{
+		Project:        "compose-app",
 		PreviewID:      "preview-pr-9",
 		Service:        "web-preview",
 		ComposeService: "web",
@@ -400,8 +404,9 @@ func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 		NetworkAliases: []string{"web-preview", "web"},
 		Ports:          []ServicePort{{Name: "http", Container: 3000, Protocol: "tcp"}},
 		Env:            map[string]string{"VIVERO_PUBLIC_URL": "https://preview.example"},
+		Volumes:        []VolumeConfig{{Name: "bundle", Target: "/bundle", Lifetime: "project"}},
 	}
-	if err := writeDockerComposeOverride(spec, []string{"web", "db"}); err != nil {
+	if err := writeDockerComposeOverride(spec, []string{"web", "db"}, map[string]bool{"db": true}); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(spec.OverrideFile)
@@ -411,12 +416,19 @@ func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 	yml := string(body)
 	for _, want := range []string{
 		"vivero.preview: preview-pr-9",
+		composeExpectedCompletionLabel + ": \"true\"",
+		composeExpectedCompletionLabel + ": \"false\"",
 		"vivero.service: web-preview",
 		"127.0.0.1::3000",
 		"aliases:",
 		"- web-preview",
 		"- web",
-		"VIVERO_PUBLIC_URL: https://preview.example",
+		"environment:",
+		"- VIVERO_PUBLIC_URL",
+		"ports: !override",
+		"ports: !reset []",
+		"vivero_dependency_0",
+		"target: /bundle",
 		"external: true",
 		"name: " + dockerNetworkName("preview-pr-9"),
 	} {
@@ -424,10 +436,31 @@ func TestDockerComposeOverrideAddsOnlyPreviewLayer(t *testing.T) {
 			t.Fatalf("compose override missing %q:\n%s", want, yml)
 		}
 	}
+	if strings.Contains(yml, "https://preview.example") {
+		t.Fatalf("compose override must not persist environment values:\n%s", yml)
+	}
 	for _, forbidden := range []string{"image:", "build:", "command:"} {
 		if strings.Contains(yml, forbidden) {
 			t.Fatalf("compose override should not duplicate app runtime field %q:\n%s", forbidden, yml)
 		}
+	}
+}
+
+func TestDockerComposeExpectedCompletionServicesUsesDependencyConditions(t *testing.T) {
+	model := dockerComposeConfigModel{Services: map[string]dockerComposeConfigService{
+		"web": {DependsOn: map[string]json.RawMessage{
+			"db":   json.RawMessage(`{"condition":"service_started"}`),
+			"init": json.RawMessage(`{"condition":"service_completed_successfully"}`),
+		}},
+		"db": {},
+		"init": {DependsOn: map[string]json.RawMessage{
+			"nested-init": json.RawMessage(`{"condition":"service_completed_successfully"}`),
+		}},
+		"nested-init": {},
+	}}
+	got := dockerComposeExpectedCompletionServices(model, "web")
+	if !got["init"] || !got["nested-init"] || got["db"] || got["web"] {
+		t.Fatalf("expected-completion services = %#v", got)
 	}
 }
 
@@ -459,12 +492,8 @@ func TestStartDockerServiceSupportsComposeRuntime(t *testing.T) {
 	if len(ports) != 1 || ports[0].Name != "http" || ports[0].HostIP != "127.0.0.1" || ports[0].Host != 3310 {
 		t.Fatalf("unexpected published port: %#v", ports)
 	}
-	overrideBody, err := os.ReadFile(dockerComposeOverridePath(home, "preview-compose", "web"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(overrideBody), "vivero.preview: preview-compose") || !strings.Contains(string(overrideBody), "VIVERO_PUBLIC_URL") {
-		t.Fatalf("compose override did not include Vivero metadata/env:\n%s", overrideBody)
+	if _, err := os.Stat(dockerComposeOverridePath(home, "preview-compose", "web")); !os.IsNotExist(err) {
+		t.Fatalf("compose override should be deleted after startup, stat err=%v", err)
 	}
 }
 
@@ -489,15 +518,209 @@ func TestComposeRuntimeSupportsBackingServiceAlias(t *testing.T) {
 	if !strings.Contains(containerID, "preview-compose-db") || !strings.Contains(containerID, "db_test") {
 		t.Fatalf("unexpected compose backing container id: %s", containerID)
 	}
-	overrideBody, err := os.ReadFile(dockerComposeOverridePath(home, "preview-compose-db", "db"))
+	if _, err := os.Stat(dockerComposeOverridePath(home, "preview-compose-db", "db")); !os.IsNotExist(err) {
+		t.Fatalf("compose backing override should be deleted after startup, stat err=%v", err)
+	}
+}
+
+func TestComposeRuntimeInjectsDependencyVolumes(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_COMPOSE_SERVICES", "web db")
+	home := t.TempDir()
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "docker-compose.yml"), []byte("services:\n  web:\n    image: app/web\n  db:\n    image: postgres\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := ServiceConfig{
+		Source:            "app",
+		Runtime:           "compose",
+		Compose:           ComposeConfig{File: "docker-compose.yml", Service: "web"},
+		Ports:             map[string]PortConfig{"http": {Container: 3310}},
+		DependencyVolumes: []VolumeConfig{{Name: "bundle", Target: "/bundle", Lifetime: "project"}},
+	}
+	if _, err := startDockerService(home, "compose-app", "preview-compose-volume", "web", svc, map[string]PreviewSource{"app": {Path: source}}, nil); err != nil {
+		t.Fatalf("start compose service: %v", err)
+	}
+	volume := dockerProjectVolumeName("compose-app", "web", "bundle")
+	if _, err := os.Stat(filepath.Join(os.Getenv("FAKE_DOCKER_STATE"), "volume-"+volume)); err != nil {
+		t.Fatalf("compose dependency volume %s was not created: %v", volume, err)
+	}
+}
+
+func TestRunDockerComposeOneShotUsesRunThenExecAndCleansOverride(t *testing.T) {
+	installFakeDocker(t)
+	t.Setenv("FAKE_DOCKER_COMPOSE_SERVICES", "web db")
+	home := t.TempDir()
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "docker-compose.yml"), []byte("services:\n  web:\n    image: app/web\n  db:\n    image: postgres\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := ServiceConfig{
+		Source:  "app",
+		Runtime: "compose",
+		Compose: ComposeConfig{File: "docker-compose.yml", Service: "web"},
+		Ports:   map[string]PortConfig{"http": {Container: 3310}},
+	}
+	sources := map[string]PreviewSource{"app": {Path: source}}
+	if _, err := runDockerComposeOneShot(home, "compose-app", "preview-compose-setup", "web", svc, sources, nil, RuntimeCommand{Shell: "printf seeded > setup-run.txt"}); err != nil {
+		t.Fatalf("compose run setup: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(source, "setup-run.txt")); err != nil || string(body) != "seeded" {
+		t.Fatalf("compose run did not execute setup command: body=%q err=%v", body, err)
+	}
+	if _, err := startDockerService(home, "compose-app", "preview-compose-setup", "web", svc, sources, nil); err != nil {
+		t.Fatalf("start compose service: %v", err)
+	}
+	if _, err := runDockerComposeOneShot(home, "compose-app", "preview-compose-setup", "web", svc, sources, nil, RuntimeCommand{Shell: "printf seeded > setup-exec.txt"}); err != nil {
+		t.Fatalf("compose exec setup: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(source, "setup-exec.txt")); err != nil || string(body) != "seeded" {
+		t.Fatalf("compose exec did not execute setup command: body=%q err=%v", body, err)
+	}
+	modePath := filepath.Join(os.Getenv("FAKE_DOCKER_STATE"), "compose-"+dockerComposeProjectName("preview-compose-setup", "web")+"-web.setup-mode")
+	if body, err := os.ReadFile(modePath); err != nil || string(body) != "exec" {
+		t.Fatalf("expected running compose target to use exec: mode=%q err=%v", body, err)
+	}
+	if _, err := os.Stat(dockerComposeOverridePath(home, "preview-compose-setup", "web")); !os.IsNotExist(err) {
+		t.Fatalf("compose setup override should be deleted, stat err=%v", err)
+	}
+}
+
+func TestRemoveDockerComposeProjectRetainsVolumesUnlessDiscarded(t *testing.T) {
+	installFakeDocker(t)
+	state := os.Getenv("FAKE_DOCKER_STATE")
+	project := dockerComposeProjectName("preview-compose-retain", "web")
+	volume := "app-db-data"
+	if err := os.WriteFile(filepath.Join(state, "compose-volume-"+volume), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, volume+".compose-project"), []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDockerComposeProject("preview-compose-retain", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "compose-volume-"+volume)); err != nil {
+		t.Fatalf("compose volume should survive normal cleanup: %v", err)
+	}
+	if err := removeDockerComposeProjectWithOptions("preview-compose-retain", "web", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "compose-volume-"+volume)); !os.IsNotExist(err) {
+		t.Fatalf("compose volume should be removed on explicit discard, stat err=%v", err)
+	}
+}
+
+func TestRemoveDockerComposeProjectRemovesOnlyProjectNetworks(t *testing.T) {
+	installFakeDocker(t)
+	state := os.Getenv("FAKE_DOCKER_STATE")
+	project := dockerComposeProjectName("preview-compose-network", "web")
+	for _, network := range []string{"compose-custom", dockerNetworkName("preview-compose-network")} {
+		if err := os.WriteFile(filepath.Join(state, "network-"+network), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(state, "compose-custom.compose-project"), []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDockerComposeProject("preview-compose-network", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "network-compose-custom")); !os.IsNotExist(err) {
+		t.Fatalf("project-labeled compose network survived cleanup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "network-"+dockerNetworkName("preview-compose-network"))); err != nil {
+		t.Fatalf("external Vivero network should not be removed by compose cleanup: %v", err)
+	}
+}
+
+func TestDockerComposeProjectLogsIncludesEveryProjectContainer(t *testing.T) {
+	installFakeDocker(t)
+	state := os.Getenv("FAKE_DOCKER_STATE")
+	project := dockerComposeProjectName("preview-compose-logs", "web")
+	for _, fixture := range []struct {
+		name string
+		log  string
+	}{{name: "compose-web", log: "web boot failed\n"}, {name: "compose-db", log: "mysql crashed\n"}} {
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".pid"), []byte("999999"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".compose-project"), []byte(project), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".log"), []byte(fixture.log), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines, err := dockerComposeProjectLogs("preview-compose-logs", "web", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	override := string(overrideBody)
-	for _, want := range []string{"vivero.service: db", "aliases:", "- db", "- db_test"} {
-		if !strings.Contains(override, want) {
-			t.Fatalf("compose backing override missing %q:\n%s", want, override)
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"compose-web", "web boot failed", "compose-db", "mysql crashed"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("compose project logs missing %q: %s", want, joined)
 		}
+	}
+}
+
+func TestDockerComposeProjectContainersIncludesRunningAndExitedStates(t *testing.T) {
+	installFakeDocker(t)
+	state := os.Getenv("FAKE_DOCKER_STATE")
+	previewID := "preview-compose-state"
+	project := dockerComposeProjectName(previewID, "web")
+	targetID := strings.Repeat("a", 64)
+	for _, fixture := range []struct {
+		name     string
+		exited   bool
+		exitCode int
+	}{
+		{name: targetID},
+		{name: "compose-init", exited: true, exitCode: 0},
+		{name: "compose-db", exited: true, exitCode: 7},
+	} {
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".pid"), []byte("999999"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".compose-project"), []byte(project), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, fixture.name+".preview"), []byte(previewID), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if fixture.exited {
+			if err := os.WriteFile(filepath.Join(state, fixture.name+".exited"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(state, fixture.name+".exit-code"), []byte(strconv.Itoa(fixture.exitCode)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if fixture.name == "compose-init" {
+				if err := os.WriteFile(filepath.Join(state, fixture.name+".expected-completion"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	states, err := dockerComposeProjectContainers(previewID, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]runtimeContainerState{}
+	for _, container := range states {
+		got[container.ID] = container
+	}
+	if !got[targetID].Running || got[targetID].ExitCode != 0 {
+		t.Fatalf("full target state = %#v", got[targetID])
+	}
+	if _, _, reason := composeProjectRuntimeStatus(states, targetID); strings.Contains(reason, "target container is missing") {
+		t.Fatalf("full persisted target id did not match project state: %s", reason)
+	}
+	if got["compose-init"].Running || got["compose-init"].ExitCode != 0 || !got["compose-init"].ExpectedCompletion {
+		t.Fatalf("init state = %#v", got["compose-init"])
+	}
+	if got["compose-db"].Running || got["compose-db"].ExitCode != 7 {
+		t.Fatalf("db state = %#v", got["compose-db"])
 	}
 }
 
@@ -1186,23 +1409,142 @@ func TestValidateNamedPublicRouteConflictsRejectsExistingPreviewHost(t *testing.
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if err := a.upsertPreview(PreviewRecord{ID: "demo-pr-16", Project: "demo", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.saveService("demo-pr-16", PreviewService{Name: "web", Status: "healthy", URL: "https://pr-17.preview.example.com", OriginURL: "http://127.0.0.1:3310"}); err != nil {
-		t.Fatal(err)
-	}
-	err = a.validateNamedPublicRouteConflicts(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, ProjectConfig{
-		Public: PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
+	fake := &fakeContainerRuntime{containers: map[string]bool{"live-container": true}}
+	a.containers = fake
+	projectConfig := ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
 		Services: map[string]ServiceConfig{
 			"web": {Image: "alpine:latest", Port: 3000, Public: true},
 		},
-	})
+	}
+	if _, err := a.saveProject(t.TempDir(), projectConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.upsertPreview(PreviewRecord{ID: "demo-pr-16", Project: "demo", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("demo-pr-16", PreviewService{Name: "web", Runtime: "docker", ContainerID: "live-container", Status: "healthy", URL: "https://pr-17.preview.example.com", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := a.lockPreview("demo-pr-16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.unlock()
+	err = a.validateNamedPublicRouteConflicts(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, projectConfig)
 	if err == nil {
 		t.Fatal("expected existing public hostname conflict")
 	}
 	if !strings.Contains(err.Error(), "already used") {
 		t.Fatalf("error should identify existing route owner: %v", err)
+	}
+}
+
+func TestValidateNamedPublicRouteConflictsIgnoresDeadPreviewOwner(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.containers = &fakeContainerRuntime{containers: map[string]bool{"dead-container": false}}
+	projectConfig := ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
+		Services: map[string]ServiceConfig{
+			"web": {Image: "alpine:latest", Port: 3000, Public: true},
+		},
+	}
+	if _, err := a.saveProject(t.TempDir(), projectConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.upsertPreview(PreviewRecord{ID: "ghost", Project: "demo", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("ghost", PreviewService{Name: "web", Runtime: "docker", ContainerID: "dead-container", Status: "healthy", URL: "https://pr-17.preview.example.com", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.validateNamedPublicRouteConflicts(UpRequest{Project: "demo", ID: "replacement", Public: true}, projectConfig); err != nil {
+		t.Fatalf("dead preview must not retain public hostname ownership: %v", err)
+	}
+}
+
+func TestValidateNamedPublicRouteConflictsRetainsLiveUnhealthyOwner(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.containers = &fakeContainerRuntime{containers: map[string]bool{"live-container": true}}
+	projectConfig := ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
+		Services: map[string]ServiceConfig{
+			"web": {Image: "alpine:latest", Port: 3000, Public: true},
+		},
+	}
+	if _, err := a.saveProject(t.TempDir(), projectConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.upsertPreview(PreviewRecord{ID: "unhealthy-live", Project: "demo", Status: "unhealthy"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("unhealthy-live", PreviewService{Name: "web", Runtime: "docker", ContainerID: "live-container", Status: "unhealthy", URL: "https://pr-17.preview.example.com", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := a.lockPreview("unhealthy-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.unlock()
+	if err := a.validateNamedPublicRouteConflicts(UpRequest{Project: "demo", ID: "replacement", Public: true}, projectConfig); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("live unhealthy preview must retain public hostname ownership: %v", err)
+	}
+}
+
+func TestValidateNamedPublicRouteConflictsRequiresLiveComposeTarget(t *testing.T) {
+	t.Setenv("VIVERO_HOME", t.TempDir())
+	a, err := NewApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	projectStates := map[string]runtimeContainerState{
+		"target": {Running: false, ExitCode: 1},
+		"db":     {Running: true},
+	}
+	a.containers = &fakeContainerRuntime{composeProjects: map[string]map[string]runtimeContainerState{"compose-owner:web": projectStates}}
+	projectConfig := ProjectConfig{
+		Project: ProjectMeta{Name: "demo"},
+		Public:  PublicConfig{Provider: "cloudflare", Mode: "named-tunnel", BaseDomain: "preview.example.com", Hostname: "pr-17.preview.example.com"},
+		Services: map[string]ServiceConfig{
+			"web": {Runtime: "compose", Compose: ComposeConfig{File: "compose.yml", Service: "web"}, Port: 3000, Public: true},
+		},
+	}
+	if _, err := a.saveProject(t.TempDir(), projectConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.upsertPreview(PreviewRecord{ID: "compose-owner", Project: "demo", Status: "unhealthy"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.saveService("compose-owner", PreviewService{Name: "web", Runtime: "compose", ContainerID: "target", Status: "unhealthy", URL: "https://pr-17.preview.example.com", OriginURL: "http://127.0.0.1:3310"}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := a.lockPreview("compose-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.unlock()
+	request := UpRequest{Project: "demo", ID: "replacement", Public: true}
+	if err := a.validateNamedPublicRouteConflicts(request, projectConfig); err != nil {
+		t.Fatalf("dead Compose target must not retain public hostname ownership: %v", err)
+	}
+	projectStates["target"] = runtimeContainerState{Running: true}
+	projectStates["db"] = runtimeContainerState{Running: false, ExitCode: 2}
+	if err := a.validateNamedPublicRouteConflicts(request, projectConfig); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("live unhealthy Compose target must retain public hostname ownership: %v", err)
 	}
 }
 
@@ -2116,7 +2458,7 @@ func TestRunSetupStepsSmartWarmMarkersProtectBranchDerivedVolumes(t *testing.T) 
 	}
 }
 
-func TestPrepareSmartWarmVolumesClearsStaleDerivedPreviewMarkers(t *testing.T) {
+func TestPrepareSmartWarmVolumesReusesSameFingerprintAndRebuildsChangedFingerprint(t *testing.T) {
 	t.Setenv("VIVERO_HOME", t.TempDir())
 	installFakeDocker(t)
 	a, err := NewApp()
@@ -2166,8 +2508,25 @@ func TestPrepareSmartWarmVolumesClearsStaleDerivedPreviewMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if string(got) != "x" {
+		t.Fatalf("same-ID retry with the same fingerprint should retain the derived volume and setup marker, got %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(source, "Gemfile.lock"), []byte("changed dependency graph\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	warmCfg, warmState, err = a.prepareSmartWarmVolumes(project, UpRequest{Project: "demo", ID: "feature-preview", Metadata: map[string]string{"branch": "feature/new-migration"}}, cfg, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.runSetupSteps("feature-preview", warmCfg.Setup.AfterSeeds, warmCfg, sources, warmState); err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(filepath.Join(source, "setup-count.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(got) != "xx" {
-		t.Fatalf("recreated derived volume must rerun setup instead of trusting a stale preview marker, got %q", got)
+		t.Fatalf("changed fingerprint should rebuild the derived volume and rerun setup, got %q", got)
 	}
 }
 

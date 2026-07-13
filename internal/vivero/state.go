@@ -61,9 +61,9 @@ func (a *App) initDB() error {
 		`PRAGMA busy_timeout = 30000;`,
 		`PRAGMA journal_mode=WAL;`,
 		`CREATE TABLE IF NOT EXISTS projects (name TEXT PRIMARY KEY, path TEXT NOT NULL, config_json TEXT NOT NULL, synced_at TEXT NOT NULL);`,
-		`CREATE TABLE IF NOT EXISTS previews (id TEXT PRIMARY KEY, project TEXT NOT NULL, profile TEXT, status TEXT NOT NULL, labels_json TEXT, metadata_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS previews (id TEXT PRIMARY KEY, project TEXT NOT NULL, profile TEXT, status TEXT NOT NULL, config_hash TEXT, labels_json TEXT, metadata_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS preview_sources (preview_id TEXT NOT NULL, name TEXT NOT NULL, mode TEXT NOT NULL, ref TEXT, path TEXT NOT NULL, owned INTEGER NOT NULL, PRIMARY KEY(preview_id, name));`,
-		`CREATE TABLE IF NOT EXISTS preview_services (preview_id TEXT NOT NULL, name TEXT NOT NULL, source TEXT, runtime TEXT, container_id TEXT, status TEXT NOT NULL, pid INTEGER, proxy_pid INTEGER, tunnel_pid INTEGER, port INTEGER, url TEXT, origin_url TEXT, proxy_url TEXT, log_path TEXT, tunnel_log_path TEXT, command TEXT, started_at TEXT, last_health TEXT, ports_json TEXT, PRIMARY KEY(preview_id, name));`,
+		`CREATE TABLE IF NOT EXISTS preview_services (preview_id TEXT NOT NULL, name TEXT NOT NULL, source TEXT, runtime TEXT, container_id TEXT, status TEXT NOT NULL, pid INTEGER, pid_identity TEXT, proxy_pid INTEGER, proxy_pid_identity TEXT, tunnel_pid INTEGER, tunnel_pid_identity TEXT, port INTEGER, url TEXT, origin_url TEXT, proxy_url TEXT, log_path TEXT, tunnel_log_path TEXT, command TEXT, started_at TEXT, last_health TEXT, ports_json TEXT, PRIMARY KEY(preview_id, name));`,
 		`CREATE TABLE IF NOT EXISTS preview_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, preview_id TEXT NOT NULL, timestamp TEXT NOT NULL, level TEXT NOT NULL, type TEXT NOT NULL, message TEXT NOT NULL, service_name TEXT, metadata_json TEXT);`,
 	}
 	for _, s := range stmts {
@@ -77,7 +77,11 @@ func (a *App) initDB() error {
 		def   string
 	}{
 		{"previews", "profile", "TEXT"},
+		{"previews", "config_hash", "TEXT"},
+		{"preview_services", "pid_identity", "TEXT"},
 		{"preview_services", "proxy_pid", "INTEGER"},
+		{"preview_services", "proxy_pid_identity", "TEXT"},
+		{"preview_services", "tunnel_pid_identity", "TEXT"},
 		{"preview_services", "proxy_url", "TEXT"},
 		{"preview_services", "runtime", "TEXT"},
 		{"preview_services", "container_id", "TEXT"},
@@ -153,7 +157,7 @@ func (a *App) upsertPreview(p PreviewRecord) error {
 	}
 	labels := jsonString(p.Labels)
 	meta := jsonString(p.Metadata)
-	_, err := a.db.Exec(`INSERT INTO previews(id,project,profile,status,labels_json,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project=excluded.project,profile=excluded.profile,status=excluded.status,labels_json=excluded.labels_json,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`, p.ID, p.Project, p.Profile, p.Status, labels, meta, p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
+	_, err := a.db.Exec(`INSERT INTO previews(id,project,profile,status,config_hash,labels_json,metadata_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project=excluded.project,profile=excluded.profile,status=excluded.status,config_hash=excluded.config_hash,labels_json=excluded.labels_json,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`, p.ID, p.Project, p.Profile, p.Status, p.ConfigHash, labels, meta, p.CreatedAt.Format(time.RFC3339Nano), p.UpdatedAt.Format(time.RFC3339Nano))
 	return err
 }
 
@@ -172,15 +176,24 @@ func (a *App) saveSource(previewID string, s PreviewSource) error {
 }
 
 func (a *App) saveService(previewID string, s PreviewService) error {
+	if s.PID > 0 && s.PIDIdentity == "" {
+		s.PIDIdentity, _ = processIdentity(s.PID)
+	}
+	if s.ProxyPID > 0 && s.ProxyPIDIdentity == "" {
+		s.ProxyPIDIdentity, _ = processIdentity(s.ProxyPID)
+	}
+	if s.TunnelPID > 0 && s.TunnelPIDIdentity == "" {
+		s.TunnelPIDIdentity, _ = processIdentity(s.TunnelPID)
+	}
 	ports := jsonString(s.Ports)
-	_, err := a.db.Exec(`INSERT INTO preview_services(preview_id,name,source,runtime,container_id,status,pid,proxy_pid,tunnel_pid,port,url,origin_url,proxy_url,log_path,tunnel_log_path,command,started_at,last_health,ports_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(preview_id,name) DO UPDATE SET source=excluded.source,runtime=excluded.runtime,container_id=excluded.container_id,status=excluded.status,pid=excluded.pid,proxy_pid=excluded.proxy_pid,tunnel_pid=excluded.tunnel_pid,port=excluded.port,url=excluded.url,origin_url=excluded.origin_url,proxy_url=excluded.proxy_url,log_path=excluded.log_path,tunnel_log_path=excluded.tunnel_log_path,command=excluded.command,started_at=excluded.started_at,last_health=excluded.last_health,ports_json=excluded.ports_json`, previewID, s.Name, s.Source, s.Runtime, s.ContainerID, s.Status, s.PID, s.ProxyPID, s.TunnelPID, s.Port, s.URL, s.OriginURL, s.ProxyURL, s.LogPath, s.TunnelLogPath, s.Command, s.StartedAt.Format(time.RFC3339Nano), s.LastHealth, ports)
+	_, err := a.db.Exec(`INSERT INTO preview_services(preview_id,name,source,runtime,container_id,status,pid,pid_identity,proxy_pid,proxy_pid_identity,tunnel_pid,tunnel_pid_identity,port,url,origin_url,proxy_url,log_path,tunnel_log_path,command,started_at,last_health,ports_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(preview_id,name) DO UPDATE SET source=excluded.source,runtime=excluded.runtime,container_id=excluded.container_id,status=excluded.status,pid=excluded.pid,pid_identity=excluded.pid_identity,proxy_pid=excluded.proxy_pid,proxy_pid_identity=excluded.proxy_pid_identity,tunnel_pid=excluded.tunnel_pid,tunnel_pid_identity=excluded.tunnel_pid_identity,port=excluded.port,url=excluded.url,origin_url=excluded.origin_url,proxy_url=excluded.proxy_url,log_path=excluded.log_path,tunnel_log_path=excluded.tunnel_log_path,command=excluded.command,started_at=excluded.started_at,last_health=excluded.last_health,ports_json=excluded.ports_json`, previewID, s.Name, s.Source, s.Runtime, s.ContainerID, s.Status, s.PID, s.PIDIdentity, s.ProxyPID, s.ProxyPIDIdentity, s.TunnelPID, s.TunnelPIDIdentity, s.Port, s.URL, s.OriginURL, s.ProxyURL, s.LogPath, s.TunnelLogPath, s.Command, s.StartedAt.Format(time.RFC3339Nano), s.LastHealth, ports)
 	return err
 }
 
-func (a *App) getPreview(id string) (PreviewRecord, error) {
+func (a *App) getPreviewRaw(id string) (PreviewRecord, error) {
 	var p PreviewRecord
 	var labels, meta, created, updated string
-	err := a.db.QueryRow(`SELECT id,project,COALESCE(profile,''),status,labels_json,metadata_json,created_at,updated_at FROM previews WHERE id=?`, id).Scan(&p.ID, &p.Project, &p.Profile, &p.Status, &labels, &meta, &created, &updated)
+	err := a.db.QueryRow(`SELECT id,project,COALESCE(profile,''),status,COALESCE(config_hash,''),labels_json,metadata_json,created_at,updated_at FROM previews WHERE id=?`, id).Scan(&p.ID, &p.Project, &p.Profile, &p.Status, &p.ConfigHash, &labels, &meta, &created, &updated)
 	if err == sql.ErrNoRows {
 		return p, fmt.Errorf("preview not found: %s", id)
 	}
@@ -211,7 +224,7 @@ func (a *App) getPreview(id string) (PreviewRecord, error) {
 	}
 	rows.Close()
 	p.Services = map[string]PreviewService{}
-	rows, err = a.db.Query(`SELECT name,source,COALESCE(runtime,''),COALESCE(container_id,''),status,COALESCE(pid,0),COALESCE(proxy_pid,0),COALESCE(tunnel_pid,0),COALESCE(port,0),COALESCE(url,''),COALESCE(origin_url,''),COALESCE(proxy_url,''),COALESCE(log_path,''),COALESCE(tunnel_log_path,''),COALESCE(command,''),COALESCE(started_at,''),COALESCE(last_health,''),COALESCE(ports_json,'') FROM preview_services WHERE preview_id=? ORDER BY name`, id)
+	rows, err = a.db.Query(`SELECT name,source,COALESCE(runtime,''),COALESCE(container_id,''),status,COALESCE(pid,0),COALESCE(pid_identity,''),COALESCE(proxy_pid,0),COALESCE(proxy_pid_identity,''),COALESCE(tunnel_pid,0),COALESCE(tunnel_pid_identity,''),COALESCE(port,0),COALESCE(url,''),COALESCE(origin_url,''),COALESCE(proxy_url,''),COALESCE(log_path,''),COALESCE(tunnel_log_path,''),COALESCE(command,''),COALESCE(started_at,''),COALESCE(last_health,''),COALESCE(ports_json,'') FROM preview_services WHERE preview_id=? ORDER BY name`, id)
 	if err != nil {
 		return p, err
 	}
@@ -219,7 +232,7 @@ func (a *App) getPreview(id string) (PreviewRecord, error) {
 	for rows.Next() {
 		var s PreviewService
 		var started, ports string
-		if err := rows.Scan(&s.Name, &s.Source, &s.Runtime, &s.ContainerID, &s.Status, &s.PID, &s.ProxyPID, &s.TunnelPID, &s.Port, &s.URL, &s.OriginURL, &s.ProxyURL, &s.LogPath, &s.TunnelLogPath, &s.Command, &started, &s.LastHealth, &ports); err != nil {
+		if err := rows.Scan(&s.Name, &s.Source, &s.Runtime, &s.ContainerID, &s.Status, &s.PID, &s.PIDIdentity, &s.ProxyPID, &s.ProxyPIDIdentity, &s.TunnelPID, &s.TunnelPIDIdentity, &s.Port, &s.URL, &s.OriginURL, &s.ProxyURL, &s.LogPath, &s.TunnelLogPath, &s.Command, &started, &s.LastHealth, &ports); err != nil {
 			return p, err
 		}
 		s.StartedAt, _ = time.Parse(time.RFC3339Nano, started)
@@ -227,6 +240,26 @@ func (a *App) getPreview(id string) (PreviewRecord, error) {
 		p.Services[s.Name] = s
 	}
 	return p, rows.Err()
+}
+
+func (a *App) getPreview(id string) (PreviewRecord, error) {
+	return a.getPreviewRaw(id)
+}
+
+func (a *App) getPreviewReconciled(id string) (PreviewRecord, error) {
+	p, err := a.getPreviewRaw(id)
+	if err != nil {
+		return p, err
+	}
+	if !previewStatusNeedsReconciliation(p.Status) {
+		return p, nil
+	}
+	lock, acquired, err := a.tryLockPreview(id)
+	if err != nil || !acquired {
+		return p, err
+	}
+	defer lock.unlock()
+	return a.reconcilePreviewRuntime(p), nil
 }
 
 func (a *App) listPreviews() ([]PreviewRecord, error) {
@@ -251,6 +284,28 @@ func (a *App) listPreviews() ([]PreviewRecord, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+func (a *App) listPreviewsReconciled() ([]PreviewRecord, error) {
+	previews, err := a.listPreviews()
+	if err != nil {
+		return nil, err
+	}
+	for i := range previews {
+		if !previewStatusNeedsReconciliation(previews[i].Status) {
+			continue
+		}
+		lock, acquired, lockErr := a.tryLockPreview(previews[i].ID)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		if !acquired {
+			continue
+		}
+		previews[i] = a.reconcilePreviewRuntime(previews[i])
+		lock.unlock()
+	}
+	return previews, nil
 }
 
 func (a *App) recordEvent(previewID, level, typ, msg, service string, metadata map[string]string) {

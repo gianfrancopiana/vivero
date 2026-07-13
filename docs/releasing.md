@@ -19,7 +19,7 @@ make certify
 make live-cloud-browser-smoke
 ```
 
-`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, integration fixtures, nasty integration fixtures, example config validation, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
+`make certify` runs the deterministic pre-release ladder: audit, canonical example E2E, Docker and real Compose integration fixtures, nasty integration fixtures, example config validation, and release package smoke. `make audit` runs the local quality ratchet inside that ladder: formatting, vet, tests, race tests, coverage, staticcheck, dead-code checks, stale-marker scans, script-reference checks, ignored-artifact checks, and package-boundary checks.
 
 `make live-cloud-browser-smoke` is intentionally not required on every PR. It is now a required tag gate in the Release workflow; run it locally before cutting a release when Docker, `cloudflared`, npm/Playwright, Chrome, and network access are available.
 

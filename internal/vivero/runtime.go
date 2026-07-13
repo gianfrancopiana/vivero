@@ -12,6 +12,11 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if req.ID == "" {
 		return PreviewRecord{}, fmt.Errorf("--id is required")
 	}
+	lock, err := a.lockPreview(req.ID)
+	if err != nil {
+		return PreviewRecord{}, err
+	}
+	defer lock.unlock()
 	project, err := a.getProject(req.Project)
 	if err != nil {
 		return PreviewRecord{}, err
@@ -26,6 +31,10 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	}
 	req.Profile = activeProfile
 	ensureCanonicalPreviewMetadata(&req, runtimeConfig)
+	configHash, err := a.previewConfigHash(runtimeConfig)
+	if err != nil {
+		return PreviewRecord{}, fmt.Errorf("fingerprint preview config: %w", err)
+	}
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
 	}
@@ -40,20 +49,21 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return existing, err
 	} else if found {
-		if err := a.removePreviewDependencyVolumes(req.ID, project.Config); err != nil {
-			_ = a.setPreviewStatus(req.ID, "unhealthy")
-			return existing, fmt.Errorf("cleanup existing preview dependency volumes %s: %w", req.ID, err)
-		}
 		a.recordEvent(req.ID, "info", "preview.replacing", "existing preview resources pruned before restart", "", nil)
 	}
+	capacityLock, err := a.lockRuntimeCapacity()
+	if err != nil {
+		return PreviewRecord{}, err
+	}
+	defer capacityLock.unlock()
 	if project.Config.Resources.MaxConcurrentPreviews > 0 {
-		previews, _ := a.listPreviews()
+		previews, _ := a.listPreviewsReconciled()
 		running := 0
 		for _, p := range previews {
 			if p.ID == req.ID {
 				continue
 			}
-			if p.Status == "running" || p.Status == "pending" || p.Status == "starting_apps" {
+			if a.previewConsumesRuntimeCapacity(p) {
 				running++
 			}
 		}
@@ -61,10 +71,12 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 			return PreviewRecord{}, fmt.Errorf("resource cap reached: %d previews running", running)
 		}
 	}
-	p := PreviewRecord{ID: req.ID, Project: req.Project, Profile: activeProfile, Status: "pending", Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
+	p := PreviewRecord{ID: req.ID, Project: req.Project, Profile: activeProfile, Status: "pending", ConfigHash: configHash, Labels: req.Labels, Metadata: req.Metadata, Sources: map[string]PreviewSource{}, Services: map[string]PreviewService{}, CreatedAt: nowUTC()}
 	if err := a.upsertPreview(p); err != nil {
 		return p, err
 	}
+	capacityLock.unlock()
+	capacityLock = nil
 	eventMetadata := map[string]string{}
 	if activeProfile != "" {
 		eventMetadata["profile"] = activeProfile
@@ -110,41 +122,37 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
+	cleanupFailedStartup := func(primary error) error {
+		a.snapshotPreviewServiceLogs(req.ID, p.Services, runtimeConfig)
+		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
+			return fmt.Errorf("%w; cleanup failed: %v", primary, cleanupErr)
+		}
+		return primary
+	}
 	if err := a.startBackingServices(req, runtimeConfig, p.Sources, p.Services); err != nil {
 		a.recordEvent(req.ID, "error", "backing.failed", err.Error(), "", nil)
-		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-		}
+		err = cleanupFailedStartup(err)
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
 	setupTimer := startOperationTimer()
 	if err := a.runSetupSteps(req.ID, runtimeConfig.Setup.AfterSeeds, runtimeConfig, p.Sources, warmState, project.Path); err != nil {
 		a.recordEvent(req.ID, "error", "setup.failed", err.Error(), "", setupTimer.metadata(nil))
-		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-		}
+		err = cleanupFailedStartup(err)
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
 	if err := a.finalizeSmartWarmBaseline(req.ID, warmState); err != nil {
 		a.recordEvent(req.ID, "error", "warm.finalize_failed", err.Error(), "", nil)
-		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-		}
+		err = cleanupFailedStartup(err)
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}
 	if err := a.setPreviewStatus(req.ID, "starting_apps"); err != nil {
-		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-		}
-		return p, err
+		return p, cleanupFailedStartup(err)
 	}
 	if err := a.startAppServices(req, runtimeConfig, p.Sources, p.Services); err != nil {
-		if cleanupErr := a.cleanupPreviewServices(req.ID, p.Services); cleanupErr != nil {
-			err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
-		}
+		err = cleanupFailedStartup(err)
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,9 +160,9 @@ func (a *App) writeComposeManifest(previewID string, cfg ProjectConfig, sources 
 			b.WriteString("    ports:\n")
 			for _, port := range ports {
 				if port.Host > 0 {
-					b.WriteString(fmt.Sprintf("      - \"127.0.0.1:%d:%d\"\n", port.Host, port.Container))
+					b.WriteString(fmt.Sprintf("      - \"%s:%d:%d\"\n", port.HostIP, port.Host, port.Container))
 				} else {
-					b.WriteString(fmt.Sprintf("      - \"127.0.0.1::%d\"\n", port.Container))
+					b.WriteString(fmt.Sprintf("      - \"%s::%d\"\n", port.HostIP, port.Container))
 				}
 			}
 		}
@@ -218,10 +219,40 @@ func (a *App) envForService(projectName string, svc ServiceConfig, includeSecret
 	return env
 }
 
-type headerRewriteProxyStarter func(previewID, service, originURL, hostHeader string, publicRewrite PublicRewriteConfig, h HealthConfig) (string, int, error)
+type headerRewriteProxyStarter func(previewID, service, runtime, containerID, originURL, hostHeader string, publicRewrite PublicRewriteConfig, routes []publicProxyRoute, h HealthConfig, listenHost string) (string, int, error)
 
 func serviceIsPublic(svc ServiceConfig, forcePublic bool) bool {
 	return forcePublic || svc.Public
+}
+
+func serviceNeedsHeaderRewriteProxy(svc ServiceConfig, routes []publicProxyRoute) bool {
+	return strings.TrimSpace(svc.TunnelHostHeader) != "" || len(routes) > 0 || !isZeroPublicRewriteConfig(svc.PublicRewrite)
+}
+
+func publicProxyRoutesForService(ps PreviewService, svc ServiceConfig) []publicProxyRoute {
+	ports, err := servicePortPlan(svc)
+	if err != nil {
+		return nil
+	}
+	routes := make([]publicProxyRoute, 0, len(ports))
+	for _, port := range ports {
+		if port.PublicPath == "" {
+			continue
+		}
+		published, ok := ps.Ports[port.Name]
+		if !ok || published.URL == "" {
+			continue
+		}
+		hostHeader := ""
+		for _, origin := range port.PublicOrigins {
+			if parsed, parseErr := url.Parse(origin); parseErr == nil && parsed.Host != "" {
+				hostHeader = parsed.Host
+				break
+			}
+		}
+		routes = append(routes, publicProxyRoute{Path: port.PublicPath, Target: published.URL, HostHeader: hostHeader, Origins: append([]string(nil), port.PublicOrigins...)})
+	}
+	return routes
 }
 
 func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewService, svc ServiceConfig, forcePublic bool, start headerRewriteProxyStarter) (PreviewService, string, error) {
@@ -230,10 +261,11 @@ func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewSe
 		tunnelOriginURL = ps.URL
 	}
 	hostHeader := strings.TrimSpace(svc.TunnelHostHeader)
-	if hostHeader == "" || tunnelOriginURL == "" {
+	routes := publicProxyRoutesForService(ps, svc)
+	if tunnelOriginURL == "" || !serviceNeedsHeaderRewriteProxy(svc, routes) {
 		return ps, tunnelOriginURL, nil
 	}
-	proxyURL, proxyPID, err := start(previewID, name, tunnelOriginURL, hostHeader, svc.PublicRewrite, svc.Health)
+	proxyURL, proxyPID, err := start(previewID, name, ps.Runtime, ps.ContainerID, tunnelOriginURL, hostHeader, svc.PublicRewrite, routes, svc.Health, svc.ProxyListenHost)
 	if err != nil {
 		return ps, tunnelOriginURL, err
 	}
@@ -241,6 +273,7 @@ func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewSe
 		return ps, tunnelOriginURL, fmt.Errorf("header rewrite proxy returned an empty URL")
 	}
 	ps.ProxyPID = proxyPID
+	ps.ProxyPIDIdentity, _ = processIdentity(proxyPID)
 	ps.ProxyURL = proxyURL
 	tunnelOriginURL = proxyURL
 	if !serviceIsPublic(svc, forcePublic) {
@@ -285,6 +318,9 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 	}
 	containerID, err := a.startDockerService(cfg.Project.Name, previewID, name, svc, sources, env)
 	if err != nil {
+		if runtime == "compose" {
+			return ps, a.serviceFailureError(previewID, name, svc, ps, env, err)
+		}
 		return ps, err
 	}
 	ps.ContainerID = containerID
@@ -316,6 +352,23 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.URL = originURL
 		}
 	}
+	ensureRuntimeHealthy := func(phase string) error {
+		if err := a.checkServiceRuntime(previewID, name, runtime, containerID); err != nil {
+			ps.Status = "unhealthy"
+			ps.LastHealth = err.Error()
+			a.recordEvent(previewID, "error", "service.runtime_failed", err.Error(), name, map[string]string{"container": containerID, "phase": phase})
+			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
+			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
+			}
+			_ = a.saveService(previewID, ps)
+			return failureErr
+		}
+		return nil
+	}
+	if err := ensureRuntimeHealthy("started"); err != nil {
+		return ps, err
+	}
 	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via "+runtime+"\n"), 0o644)
 	startMetadata := map[string]string{"container": containerID, "runtime": runtime, "command": svc.Command.Display()}
 	if svc.Image != "" {
@@ -342,11 +395,14 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"
 		a.recordEvent(previewID, "info", "service.healthy", "health command passed", name, healthTimer.metadata(map[string]string{"container": containerID}))
+		if err := ensureRuntimeHealthy("health_command"); err != nil {
+			return ps, err
+		}
 	}
 	if originURL != "" {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
 		healthTimer := startOperationTimer()
-		if err := waitHTTP(originURL, svc.Health, timeout); err != nil {
+		if err := a.waitHTTPForServiceRuntime(originURL, previewID, name, ps, svc.Health, timeout); err != nil {
 			ps.Status = "unhealthy"
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"url": originURL}))
@@ -388,7 +444,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 					return ps, err
 				}
 				tunnelTimer := startOperationTimer()
-				if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
+				if err := a.waitHTTPForServiceResources(url, previewID, name, ps, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
 					ps.Status = "unhealthy"
 					ps.LastHealth = err.Error()
 					a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
@@ -412,10 +468,11 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 				return ps, err
 			}
 			ps.TunnelPID = pid
+			ps.TunnelPIDIdentity, _ = processIdentity(pid)
 			ps.TunnelLogPath = tlog
 			ps.URL = url
 			// Verify the public URL before returning it. Vivero's core guarantee is URL = works.
-			if err := waitHTTP(url, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
+			if err := a.waitHTTPForServiceResources(url, previewID, name, ps, svc.Health, serviceHealthTimeout(svc.Health, 3*time.Minute)); err != nil {
 				ps.Status = "unhealthy"
 				ps.LastHealth = err.Error()
 				a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
@@ -469,6 +526,7 @@ func (a *App) startQuickTunnel(previewID, service, originURL, hostHeader string)
 		return "", 0, "", err
 	}
 	pid := cmd.Process.Pid
+	go func() { _ = cmd.Wait() }()
 	_ = lf.Close()
 	url, err := waitForQuickTunnelURL(logPath, startOffset, 45*time.Second)
 	if err != nil {

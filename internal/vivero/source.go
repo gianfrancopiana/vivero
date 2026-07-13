@@ -52,6 +52,12 @@ func (a *App) resolveSource(project, projectPath, previewID, name string, src So
 	}
 	wt := managedWorktreePath(a.Home, project, previewID, name)
 	_ = os.RemoveAll(wt)
+	// A previous interrupted replace may have removed the directory before it
+	// could unregister the worktree. Prune stale registrations before reusing
+	// the deterministic preview path.
+	if out, err := runCmd(repoPath, nil, "git", "worktree", "prune"); err != nil {
+		return PreviewSource{}, fmt.Errorf("git worktree prune: %w: %s", err, string(out))
+	}
 	if err := ensureDir(filepath.Dir(wt)); err != nil {
 		return PreviewSource{}, err
 	}

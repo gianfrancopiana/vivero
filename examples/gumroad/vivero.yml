@@ -38,7 +38,6 @@ services:
         - http://api.localhost:3000
         - http://s.localhost:3000
         - http://analytics.localhost:3000
-        - ws://cable.localhost:8080
       hosts:
         - localhost:3000
         - localhost:3310
@@ -46,10 +45,7 @@ services:
         - api.localhost:3000
         - s.localhost:3000
         - analytics.localhost:3000
-        - cable.localhost:8080
       replacements:
-        - from: ws://cable.localhost:8080/cable
-          to: wss://{publicHost}/cable
         - from: '&quot;scheme&quot;:&quot;http&quot;'
           to: '&quot;scheme&quot;:&quot;{publicScheme}&quot;'
         - from: '"scheme":"http"'

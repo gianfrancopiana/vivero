@@ -3,6 +3,7 @@ package vivero
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -59,12 +60,127 @@ func (a *App) ConfigDoctor(path string) (ConfigDoctorReport, error) {
 		report.Path = abs
 	}
 	configDoctorCheckSources(&report, cfg)
+	configDoctorCheckCompose(&report, root, cfg)
 	configDoctorCheckBuildCache(&report, cfg)
 	configDoctorCheckSetup(&report, root, cfg)
 	configDoctorCheckAgent(&report, root, cfg)
 	configDoctorCheckPublicRoutes(&report, cfg)
 	report.finish()
 	return report, nil
+}
+
+func configDoctorCheckCompose(report *ConfigDoctorReport, root string, cfg ProjectConfig) {
+	type composeTarget struct {
+		kind    string
+		name    string
+		source  string
+		compose ComposeConfig
+		health  HealthConfig
+	}
+	targets := []composeTarget{}
+	for _, name := range sortedMapKeys(cfg.Services) {
+		svc := cfg.Services[name]
+		if serviceRuntime(svc) == "compose" {
+			targets = append(targets, composeTarget{kind: "services", name: name, source: svc.Source, compose: svc.Compose, health: svc.Health})
+		}
+	}
+	for _, name := range sortedMapKeys(cfg.BackingServices) {
+		svc := cfg.BackingServices[name]
+		if backingRuntime(svc) == "compose" {
+			targets = append(targets, composeTarget{kind: "backingServices", name: name, source: svc.Source, compose: svc.Compose, health: svc.Health})
+		}
+	}
+	for _, target := range targets {
+		base := target.kind + "." + target.name
+		if strings.TrimSpace(target.health.Timeout) == "" {
+			report.addFinding("warning", "compose-health-timeout-missing", base+".health.timeout", fmt.Sprintf("compose service %s has no explicit health timeout; large application stacks often need longer than the default", target.name))
+		}
+		source, ok := cfg.Sources[target.source]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(source.Path) == "" {
+			report.addFinding("warning", "compose-file-unverified", base+".compose", fmt.Sprintf("compose files for %s cannot be verified until managed source %s is checked out", target.name, target.source))
+			continue
+		}
+		sourcePath, err := resolveSourcePath(root, source.Path)
+		if err != nil {
+			report.addFinding("warning", "compose-file-unverified", base+".compose", fmt.Sprintf("compose files for %s could not be resolved: %v", target.name, err))
+			continue
+		}
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				report.addFinding("warning", "compose-file-unverified", base+".compose", fmt.Sprintf("compose files for %s cannot be verified because source root %s is unavailable", target.name, sourcePath))
+			} else {
+				report.addFinding("warning", "compose-file-unverified", base+".compose", fmt.Sprintf("compose files for %s cannot be verified: %v", target.name, err))
+			}
+			continue
+		}
+		if !info.IsDir() {
+			report.addFinding("error", "compose-source-invalid", "sources."+target.source+".path", fmt.Sprintf("compose source root is not a directory: %s", sourcePath))
+			continue
+		}
+		files, err := resolveComposeFiles(sourcePath, target.compose)
+		if err != nil {
+			report.addFinding("error", "compose-file-invalid", base+".compose", err.Error())
+			continue
+		}
+		missing := false
+		for i, file := range files {
+			stat, statErr := os.Stat(file)
+			if statErr != nil {
+				missing = true
+				path := base + ".compose.file"
+				if len(files) > 1 {
+					path = fmt.Sprintf("%s.compose.files[%d]", base, i)
+				}
+				report.addFinding("error", "compose-file-missing", path, fmt.Sprintf("compose file does not exist: %s", file))
+				continue
+			}
+			if stat.IsDir() {
+				missing = true
+				report.addFinding("error", "compose-file-invalid", base+".compose", fmt.Sprintf("compose file is a directory: %s", file))
+			}
+		}
+		if missing {
+			continue
+		}
+		if _, err := exec.LookPath("docker"); err != nil {
+			report.addFinding("warning", "compose-inspection-unavailable", base+".compose", fmt.Sprintf("cannot inspect the Compose dependency closure for %s because Docker is unavailable", target.name))
+			continue
+		}
+		spec := dockerComposeServiceSpec{
+			Project:        cfg.Project.Name,
+			PreviewID:      "doctor",
+			Service:        target.name,
+			ComposeProject: dockerComposeProjectName("doctor", target.name),
+			ComposeService: composeServiceName(target.compose, target.name),
+			Source:         sourcePath,
+			Files:          files,
+		}
+		model, err := dockerComposeConfig(spec)
+		if err != nil {
+			report.addFinding("error", "compose-config-invalid", base+".compose", err.Error())
+			continue
+		}
+		if _, ok := model.Services[spec.ComposeService]; !ok {
+			report.addFinding("error", "compose-service-missing", base+".compose.service", fmt.Sprintf("compose service %s is not defined in %s", spec.ComposeService, strings.Join(files, ", ")))
+			continue
+		}
+		if omitted := dockerComposeOmittedServices(model, spec.ComposeService); len(omitted) > 0 {
+			report.addFinding("info", "compose-services-omitted", base+".compose.service", fmt.Sprintf("target %s will not start Compose services outside its depends_on closure: %s", spec.ComposeService, strings.Join(omitted, ", ")))
+		}
+		closure := dockerComposeTargetClosure(model, spec.ComposeService)
+		for _, service := range sortedMapKeys(model.Services) {
+			if service == spec.ComposeService || !closure[service] {
+				continue
+			}
+			if ports := dockerComposePublishedPorts(model.Services[service]); len(ports) > 0 {
+				report.addFinding("warning", "compose-host-ports-stripped", base+".compose", fmt.Sprintf("dependency service %s publishes host port(s) %s; Vivero will strip them to prevent concurrent-preview collisions", service, strings.Join(ports, ", ")))
+			}
+		}
+	}
 }
 
 func (r *ConfigDoctorReport) addFinding(severity, code, path, message string) {

@@ -8,10 +8,37 @@ case "$cmd" in
   container)
     sub="${1:-}"
     if [ $# -gt 0 ]; then shift; fi
-    name="${1:-}"
     case "$sub" in
       inspect)
-        if [ -f "$state/$name.pid" ]; then echo "$name"; exit 0; fi
+		formatted=""
+		if [ "${1:-}" = "--format" ]; then
+		  formatted="${2:-}"
+		  shift 2
+		fi
+		name="${1:-}"
+		if [ -f "$state/$name.pid" ]; then
+		  if [ -n "$formatted" ]; then
+			if [ -f "$state/$name.exited" ]; then running="false"; else running="true"; fi
+			case "$formatted" in
+			  *vivero.compose.expected-completion*)
+				exit_code="0"
+				if [ -f "$state/$name.exited" ]; then exit_code="$(cat "$state/$name.exit-code" 2>/dev/null || echo 1)"; fi
+				expected=""
+				if [ -f "$state/$name.expected-completion" ]; then expected="true"; fi
+				printf '%s|%s|%s\n' "$running" "$exit_code" "$expected"
+				;;
+			  *ExitCode*)
+				exit_code="0"
+				if [ -f "$state/$name.exited" ]; then exit_code="$(cat "$state/$name.exit-code" 2>/dev/null || echo 1)"; fi
+				printf '%s %s\n' "$running" "$exit_code"
+				;;
+			  *) echo "$running" ;;
+			esac
+		  else
+			echo "$name"
+		  fi
+		  exit 0
+		fi
         echo "No such container: $name" >&2
         exit 1
         ;;
@@ -37,8 +64,35 @@ case "$cmd" in
       rm)
         if [ "${FAKE_DOCKER_NETWORK_RM_FAIL:-}" != "" ]; then echo "$FAKE_DOCKER_NETWORK_RM_FAIL" >&2; exit 7; fi
         rm -f "$state/network-$name"
+		rm -f "$state/$name.compose-project"
         exit 0
         ;;
+	  ls)
+		compose_filter=""
+		while [ $# -gt 0 ]; do
+		  case "$1" in
+			-q) shift ;;
+			--filter)
+			  case "$2" in
+				label=com.docker.compose.project=*) compose_filter="${2#label=com.docker.compose.project=}" ;;
+			  esac
+			  shift 2
+			  ;;
+			*) shift ;;
+		  esac
+		done
+		for f in "$state"/network-*; do
+		  [ -e "$f" ] || continue
+		  network="$(basename "$f")"
+		  network="${network#network-}"
+		  if [ -n "$compose_filter" ]; then
+			[ -f "$state/$network.compose-project" ] || continue
+			[ "$(cat "$state/$network.compose-project")" = "$compose_filter" ] || continue
+		  fi
+		  echo "$network"
+		done
+		exit 0
+		;;
     esac
     echo "unsupported docker network command $sub" >&2
     exit 2
@@ -60,7 +114,7 @@ case "$cmd" in
         ;;
       rm)
         if [ "${FAKE_DOCKER_VOLUME_RM_FAIL:-}" != "" ]; then echo "$FAKE_DOCKER_VOLUME_RM_FAIL" >&2; exit 7; fi
-        rm -f "$state/volume-$name"
+		rm -f "$state/volume-$name" "$state/compose-volume-$name" "$state/$name.compose-project"
         echo "$name"
         exit 0
         ;;
@@ -167,6 +221,14 @@ case "$cmd" in
           printf '%s\n' ${FAKE_DOCKER_COMPOSE_SERVICES:-web}
           exit 0
         fi
+		if [ "${1:-}" = "--format" ] && [ "${2:-}" = "json" ]; then
+		  if [ -n "${FAKE_DOCKER_COMPOSE_CONFIG_JSON:-}" ]; then
+			printf '%s\n' "$FAKE_DOCKER_COMPOSE_CONFIG_JSON"
+		  else
+			printf '%s\n' '{"services":{"web":{}}}'
+		  fi
+		  exit 0
+		fi
         ;;
       up)
         service=""
@@ -200,8 +262,14 @@ case "$cmd" in
         if [ ! -s "$state/$name.ports" ]; then
           printf '3000/tcp|127.0.0.1:3000\n' >> "$state/$name.ports"
         fi
-        (sleep 3600) > "$state/$name.log" 2>&1 &
+        : > "$state/$name.log"
+        (sleep 3600) >/dev/null 2>&1 &
         echo $! > "$state/$name.pid"
+		if [ -n "${FAKE_DOCKER_COMPOSE_UP_FAIL:-}" ]; then
+		  printf '%s\n' "$FAKE_DOCKER_COMPOSE_UP_FAIL" > "$state/$name.log"
+		  echo "$FAKE_DOCKER_COMPOSE_UP_FAIL" >&2
+		  exit 7
+		fi
         echo "$name"
         exit 0
         ;;
@@ -213,6 +281,36 @@ case "$cmd" in
         if [ -f "$state/$name.pid" ]; then echo "$name"; exit 0; fi
         exit 1
         ;;
+	  run)
+		while [ $# -gt 0 ]; do
+		  case "$1" in
+			--rm|-T|--no-TTY) shift ;;
+			*) break ;;
+		  esac
+		done
+		service="${1:-web}"
+		shift || true
+		[ -n "$project" ] || project="fake-compose"
+		printf 'run' > "$state/compose-${project}-${service}.setup-mode"
+		cd "$(pwd)"
+		exec "$@"
+		;;
+	  exec)
+		while [ $# -gt 0 ]; do
+		  case "$1" in
+			-T|--no-TTY) shift ;;
+			*) break ;;
+		  esac
+		done
+		service="${1:-web}"
+		shift || true
+		[ -n "$project" ] || project="fake-compose"
+		printf 'exec' > "$state/compose-${project}-${service}.setup-mode"
+		name="compose-${project}-${service}"
+		cwd="$(cat "$state/$name.cwd" 2>/dev/null || pwd)"
+		cd "$cwd"
+		exec "$@"
+		;;
       down)
         [ -n "$project" ] || project="fake-compose"
         for f in "$state"/*.compose-project; do
@@ -220,7 +318,7 @@ case "$cmd" in
           name="$(basename "$f" .compose-project)"
           [ "$(cat "$f")" = "$project" ] || continue
           if [ -f "$state/$name.pid" ]; then kill "$(cat "$state/$name.pid")" 2>/dev/null || true; fi
-          rm -f "$state/$name.pid" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
+          rm -f "$state/$name.pid" "$state/$name.exited" "$state/$name.exit-code" "$state/$name.expected-completion" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
         done
         exit 0
         ;;
@@ -231,9 +329,11 @@ case "$cmd" in
   ps)
     preview_filter=""
     compose_filter=""
+	no_trunc=0
     while [ $# -gt 0 ]; do
       case "$1" in
         -a|-q|-aq|-qa) shift ;;
+		--no-trunc) no_trunc=1; shift ;;
         --filter)
           case "$2" in
             label=vivero.preview=*) preview_filter="${2#label=vivero.preview=}" ;;
@@ -255,7 +355,16 @@ case "$cmd" in
         [ -f "$state/$name.compose-project" ] || continue
         [ "$(cat "$state/$name.compose-project")" = "$compose_filter" ] || continue
       fi
-      echo "$name"
+	  rendered="$name"
+	  if [ "$no_trunc" -eq 0 ]; then
+		case "$name" in
+		  *[!0-9a-f]*) ;;
+		  *)
+			if [ "${#name}" -eq 64 ]; then rendered="$(printf '%s' "$name" | cut -c1-12)"; fi
+			;;
+		esac
+	  fi
+	  echo "$rendered"
     done
     exit 0
     ;;
@@ -266,7 +375,7 @@ case "$cmd" in
       name="${1:-}"
       if [ -n "$name" ] && [ -f "$state/$name.pid" ]; then
         kill "$(cat "$state/$name.pid")" 2>/dev/null || true
-        rm -f "$state/$name.pid" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
+        rm -f "$state/$name.pid" "$state/$name.exited" "$state/$name.exit-code" "$state/$name.expected-completion" "$state/$name.preview" "$state/$name.service" "$state/$name.cwd" "$state/$name.compose-project"
       fi
       shift || true
     done

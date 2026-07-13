@@ -40,11 +40,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		target, _ := flagValue(args[1:], "--target")
 		host, _ := flagValue(args[1:], "--host")
 		rewriteJSON, _ := flagValue(args[1:], "--rewrite-json")
+		routesJSON, _ := flagValue(args[1:], "--routes-json")
 		publicRewrite, err := fromJSONString[PublicRewriteConfig](rewriteJSON)
 		if err != nil {
 			return errOut(stderr, jsonOut, fmt.Errorf("invalid --rewrite-json: %w", err))
 		}
-		if err := runHeaderRewriteProxy(listen, target, host, publicRewrite); err != nil {
+		routes, err := fromJSONString[[]publicProxyRoute](routesJSON)
+		if err != nil {
+			return errOut(stderr, jsonOut, fmt.Errorf("invalid --routes-json: %w", err))
+		}
+		if err := runHeaderRewriteProxy(listen, target, host, publicRewrite, routes); err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
 		return 0
@@ -265,7 +270,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		output(stdout, jsonOut, map[string]any{"preview": p}, "down "+pos[0])
 		return 0
 	case "list":
-		ps, err := a.listPreviews()
+		ps, err := a.listPreviewsReconciled()
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
@@ -280,7 +285,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		p, err := a.getPreview(previewID)
+		p, err := a.getPreviewReconciled(previewID)
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
@@ -355,7 +360,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}
-		v, err := a.Exec(previewID, pos[1], cmdArgs)
+		optionArgs := rest
+		for i, arg := range rest {
+			if arg == "--" {
+				optionArgs = rest[:i]
+				break
+			}
+		}
+		timeout, err := durationFlag(optionArgs, "--timeout", 30*time.Minute)
+		if err != nil {
+			return errOut(stderr, jsonOut, err)
+		}
+		v, err := a.Exec(previewID, pos[1], cmdArgs, timeout)
 		if err != nil {
 			return errOut(stderr, jsonOut, err)
 		}

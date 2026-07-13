@@ -93,7 +93,11 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 		var out []byte
 		if step.Service != "" {
 			svc := cfg.Services[step.Service]
-			out, err = a.runDockerOneShot(cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command)
+			if serviceRuntime(svc) == "compose" {
+				out, err = runDockerComposeOneShot(a.Home, cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command)
+			} else {
+				out, err = a.runDockerOneShot(cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command)
+			}
 		} else {
 			return fmt.Errorf("setup.afterSeeds[%d] must target a containerized service", i)
 		}

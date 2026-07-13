@@ -63,6 +63,19 @@ jobs:
       - run: docker version
       - run: make integration-fixtures
 
+  compose-integration-fixtures:
+    name: Compose integration fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: docker version
+      - run: docker compose version
+      - run: make compose-integration-fixtures
+
   nasty-integration-fixtures:
     name: Nasty integration matrix
     runs-on: ubuntu-latest

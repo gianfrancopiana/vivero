@@ -1,0 +1,43 @@
+project:
+  name: compose-integration
+
+sources:
+  app:
+    mode: external
+    path: .
+
+services:
+  web:
+    source: app
+    runtime: compose
+    compose:
+      file: docker-compose.yml
+      service: web
+    dependencyVolumes:
+      - name: setup-cache
+        target: /cache
+        lifetime: project
+      - name: scratch
+        target: /scratch
+    ports:
+      http:
+        container: 3000
+    health:
+      path: /
+      expectStatus: 200
+      timeout: 1m
+      interval: 1s
+
+setup:
+  afterSeeds:
+    - service: web
+      policy: once-per-project
+      command: mkdir -p /cache && printf seeded > /cache/seed.txt
+
+agent:
+  defaultPreviewService: web
+  smokeTests:
+    - name: homepage
+      service: web
+      path: /
+      expectStatus: 200

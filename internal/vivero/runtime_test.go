@@ -563,11 +563,11 @@ func TestSecretsAreWriteOnlyByList(t *testing.T) {
 	}
 }
 
-func TestServiceHealthTimeoutUsesFallbackAsMinimum(t *testing.T) {
+func TestServiceHealthTimeoutHonorsExplicitValue(t *testing.T) {
 	if got := serviceHealthTimeout(HealthConfig{}, 3*time.Minute); got != 3*time.Minute {
 		t.Fatalf("empty timeout = %s", got)
 	}
-	if got := serviceHealthTimeout(HealthConfig{Timeout: "2m"}, 3*time.Minute); got != 3*time.Minute {
+	if got := serviceHealthTimeout(HealthConfig{Timeout: "2m"}, 3*time.Minute); got != 2*time.Minute {
 		t.Fatalf("short timeout = %s", got)
 	}
 	if got := serviceHealthTimeout(HealthConfig{Timeout: "5m"}, 3*time.Minute); got != 5*time.Minute {
@@ -835,7 +835,7 @@ func TestExposeLocalServiceThroughHeaderRewriteProxyUsesProxyURL(t *testing.T) {
 	}
 	var called bool
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, svc, false, func(previewID, service, runtime, containerID, originURL, hostHeader string, rewrite PublicRewriteConfig, routes []publicProxyRoute, health HealthConfig, listenHost string) (string, int, error) {
 		called = true
 		if previewID != "storefront-main" || service != "web" || originURL != ps.OriginURL || hostHeader != "localhost" {
 			t.Fatalf("unexpected proxy args: preview=%s service=%s origin=%s host=%s", previewID, service, originURL, hostHeader)
@@ -869,7 +869,7 @@ func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *t
 	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
 	svc := ServiceConfig{TunnelHostHeader: "localhost", Public: true}
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-pr", "web", ps, svc, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-pr", "web", ps, svc, false, func(previewID, service, runtime, containerID, originURL, hostHeader string, rewrite PublicRewriteConfig, routes []publicProxyRoute, health HealthConfig, listenHost string) (string, int, error) {
 		return "http://127.0.0.1:56073", 5678, nil
 	})
 	if err != nil {
@@ -889,7 +889,7 @@ func TestExposePublicServiceThroughHeaderRewriteProxyKeepsPublicURLSeparate(t *t
 func TestExposeServiceThroughHeaderRewriteProxySkipsServicesWithoutHostHeader(t *testing.T) {
 	ps := PreviewService{Name: "web", Status: "healthy", URL: "http://localhost:3310", OriginURL: "http://localhost:3310"}
 
-	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, ServiceConfig{}, false, func(previewID, service, originURL, hostHeader string, rewrite PublicRewriteConfig, health HealthConfig) (string, int, error) {
+	got, tunnelOriginURL, err := exposeServiceThroughHeaderRewriteProxy("storefront-main", "web", ps, ServiceConfig{}, false, func(previewID, service, runtime, containerID, originURL, hostHeader string, rewrite PublicRewriteConfig, routes []publicProxyRoute, health HealthConfig, listenHost string) (string, int, error) {
 		t.Fatal("proxy should not start without tunnelHostHeader")
 		return "", 0, nil
 	})
