@@ -266,7 +266,7 @@ ports:
 primaryPort: http
 ```
 
-`publicPath` is matched on path-segment boundaries and routes to that named port; `publicOrigins` are rewritten to the same reported preview origin and path, including `ws://` to `wss://` when the preview is HTTPS. Named ports always belong to that service container. With Compose, do not point a target port at a different Compose service: reverse-proxy that daemon through the target or model it as its own Vivero service.
+`publicPath` is matched on path-segment boundaries and routes to that named port; `publicOrigins` are rewritten to the same reported preview origin and path, including `ws://` to `wss://` when the preview is HTTPS. Named ports always belong to that service container unless a Compose named port sets `composeService` to a sibling service in the target's `depends_on` closure. Vivero then publishes that sibling port on loopback and routes `publicPath` to it, so app repos do not need in-container forwarder glue.
 
 Bound long-running commands explicitly: `vivero exec preview:webapp-local web --timeout 10m --json --no-input -- bin/rails db:migrate`. On timeout, JSON keeps partial `stdout` and `stderr`, sets `timedOut: true`, and returns exit code 124. Options after `--` are passed through unchanged.
 

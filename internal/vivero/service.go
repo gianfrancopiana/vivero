@@ -88,10 +88,10 @@ func startServicesBounded(names []string, concurrency int, start func(name strin
 	return results, nil
 }
 
-func (a *App) startAppServices(req UpRequest, cfg ProjectConfig, sources map[string]PreviewSource, services map[string]PreviewService) error {
+func (a *App) startAppServices(req UpRequest, cfg ProjectConfig, sources map[string]PreviewSource, services map[string]PreviewService, deferReadiness bool) error {
 	names := sortedMapKeys(cfg.Services)
 	started, err := startServicesBounded(names, startupConcurrency(cfg.Resources, len(names)), func(name string) (PreviewService, error) {
-		ps, err := a.startService(req, name, cfg.Services[name], sources, cfg, req.Public, true)
+		ps, err := a.startService(req, name, cfg.Services[name], sources, cfg, req.Public, true, deferReadiness)
 		if err != nil {
 			a.recordEvent(req.ID, "error", "service.failed", err.Error(), name, nil)
 			return ps, fmt.Errorf("start service %s: %w", name, err)
@@ -108,11 +108,33 @@ func (a *App) startAppServices(req UpRequest, cfg ProjectConfig, sources map[str
 	return err
 }
 
+func (a *App) finalizeAppServicesReadiness(req UpRequest, cfg ProjectConfig, services map[string]PreviewService) error {
+	for _, name := range sortedMapKeys(cfg.Services) {
+		ps, ok := services[name]
+		if !ok {
+			continue
+		}
+		svc := cfg.Services[name]
+		updated, err := a.finalizeServiceReadiness(req, name, svc, cfg, req.Public, ps)
+		if err != nil {
+			a.recordEvent(req.ID, "error", "service.failed", err.Error(), name, nil)
+			services[name] = updated
+			_ = a.saveService(req.ID, updated)
+			return fmt.Errorf("ready service %s: %w", name, err)
+		}
+		if err := a.saveService(req.ID, updated); err != nil {
+			return fmt.Errorf("save service %s: %w", name, err)
+		}
+		services[name] = updated
+	}
+	return nil
+}
+
 func (a *App) startBackingServices(req UpRequest, cfg ProjectConfig, sources map[string]PreviewSource, services map[string]PreviewService) error {
 	names := sortedMapKeys(cfg.BackingServices)
 	started, err := startServicesBounded(names, startupConcurrency(cfg.Resources, len(names)), func(name string) (PreviewService, error) {
 		svc := serviceConfigForBacking(cfg.BackingServices[name])
-		ps, err := a.startService(req, name, svc, sources, cfg, false, false)
+		ps, err := a.startService(req, name, svc, sources, cfg, false, false, false)
 		if err != nil {
 			return ps, fmt.Errorf("start backing service %s: %w", name, err)
 		}
@@ -282,7 +304,7 @@ func exposeServiceThroughHeaderRewriteProxy(previewID, name string, ps PreviewSe
 	return ps, tunnelOriginURL, nil
 }
 
-func (a *App) startService(req UpRequest, name string, svc ServiceConfig, sources map[string]PreviewSource, cfg ProjectConfig, forcePublic bool, includeSecrets bool) (PreviewService, error) {
+func (a *App) startService(req UpRequest, name string, svc ServiceConfig, sources map[string]PreviewSource, cfg ProjectConfig, forcePublic bool, includeSecrets bool, deferReadiness bool) (PreviewService, error) {
 	previewID := req.ID
 	serviceTimer := startOperationTimer()
 	runtime := serviceRuntime(svc)
@@ -324,22 +346,17 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		return ps, err
 	}
 	ps.ContainerID = containerID
-	cleanupStarted := func() error {
-		var cleanupErr error
-		ps, cleanupErr = a.stopPreviewServiceResources(previewID, name, ps)
-		return cleanupErr
-	}
 	if len(ports) > 0 {
 		published, err := a.containerRuntime().PublishedPorts(containerID, ports)
 		if err != nil {
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+			if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 			}
 			return ps, err
 		}
 		portMap, err := previewPortsFromPublished(ports, published, originHost)
 		if err != nil {
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+			if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 				err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 			}
 			return ps, err
@@ -352,21 +369,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.URL = originURL
 		}
 	}
-	ensureRuntimeHealthy := func(phase string) error {
-		if err := a.checkServiceRuntime(previewID, name, runtime, containerID); err != nil {
-			ps.Status = "unhealthy"
-			ps.LastHealth = err.Error()
-			a.recordEvent(previewID, "error", "service.runtime_failed", err.Error(), name, map[string]string{"container": containerID, "phase": phase})
-			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
-				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
-			}
-			_ = a.saveService(previewID, ps)
-			return failureErr
-		}
-		return nil
-	}
-	if err := ensureRuntimeHealthy("started"); err != nil {
+	if err := a.ensureServiceRuntimeHealthy(previewID, name, runtime, containerID, svc, env, &ps, "started"); err != nil {
 		return ps, err
 	}
 	_ = os.WriteFile(logPath, []byte("container "+containerID+" started via "+runtime+"\n"), 0o644)
@@ -378,6 +381,39 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 	if workdir != "" {
 		a.recordEvent(previewID, "info", "service.workdir", "container source mounted", name, map[string]string{"hostPath": workdir})
 	}
+	if deferReadiness {
+		return ps, nil
+	}
+	return a.finalizeServiceReadiness(req, name, svc, cfg, forcePublic, ps)
+}
+
+func (a *App) cleanupStartedService(previewID, name string, ps *PreviewService) error {
+	updated, err := a.stopPreviewServiceResources(previewID, name, *ps)
+	*ps = updated
+	return err
+}
+
+func (a *App) ensureServiceRuntimeHealthy(previewID, name, runtime, containerID string, svc ServiceConfig, env map[string]string, ps *PreviewService, phase string) error {
+	if err := a.checkServiceRuntime(previewID, name, runtime, containerID); err != nil {
+		ps.Status = "unhealthy"
+		ps.LastHealth = err.Error()
+		a.recordEvent(previewID, "error", "service.runtime_failed", err.Error(), name, map[string]string{"container": containerID, "phase": phase})
+		failureErr := a.serviceFailureError(previewID, name, svc, *ps, env, err)
+		if cleanupErr := a.cleanupStartedService(previewID, name, ps); cleanupErr != nil {
+			failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
+		}
+		_ = a.saveService(previewID, *ps)
+		return failureErr
+	}
+	return nil
+}
+
+func (a *App) finalizeServiceReadiness(req UpRequest, name string, svc ServiceConfig, cfg ProjectConfig, forcePublic bool, ps PreviewService) (PreviewService, error) {
+	previewID := req.ID
+	runtime := serviceRuntime(svc)
+	containerID := ps.ContainerID
+	originURL := serviceOriginURL(ps)
+	env := a.envForService(cfg.Project.Name, svc, true)
 	if !svc.Health.Command.IsZero() {
 		timeout := serviceHealthTimeout(svc.Health, 30*time.Second)
 		healthTimer := startOperationTimer()
@@ -386,7 +422,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"container": containerID}))
 			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+			if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
 			}
 			_ = a.saveService(previewID, ps)
@@ -395,7 +431,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		ps.Status = "healthy"
 		ps.LastHealth = "ok"
 		a.recordEvent(previewID, "info", "service.healthy", "health command passed", name, healthTimer.metadata(map[string]string{"container": containerID}))
-		if err := ensureRuntimeHealthy("health_command"); err != nil {
+		if err := a.ensureServiceRuntimeHealthy(previewID, name, runtime, containerID, svc, env, &ps, "health_command"); err != nil {
 			return ps, err
 		}
 	}
@@ -407,7 +443,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			ps.LastHealth = err.Error()
 			a.recordEvent(previewID, "error", "service.health_failed", err.Error(), name, healthTimer.metadata(map[string]string{"url": originURL}))
 			failureErr := a.serviceFailureError(previewID, name, svc, ps, env, err)
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+			if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 				failureErr = fmt.Errorf("%w; cleanup failed: %v", failureErr, cleanupErr)
 			}
 			_ = a.saveService(previewID, ps)
@@ -422,7 +458,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 		var proxyErr error
 		ps, tunnelOriginURL, proxyErr = exposeServiceThroughHeaderRewriteProxy(previewID, name, ps, svc, forcePublic, a.startHeaderRewriteProxy)
 		if proxyErr != nil {
-			if cleanupErr := cleanupStarted(); cleanupErr != nil {
+			if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 				proxyErr = fmt.Errorf("%w; cleanup failed: %v", proxyErr, cleanupErr)
 			}
 			return ps, proxyErr
@@ -431,14 +467,14 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			if isNamedPublicTunnel(cfg.Public) {
 				url, err := publicURLForService(cfg.Public, req, name)
 				if err != nil {
-					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+					if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 					}
 					return ps, err
 				}
 				ps.URL = url
 				if err := a.saveService(previewID, ps); err != nil {
-					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+					if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 					}
 					return ps, err
@@ -449,7 +485,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 					ps.LastHealth = err.Error()
 					a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 					err = fmt.Errorf("public named tunnel health failed for %s: %w", name, err)
-					if cleanupErr := cleanupStarted(); cleanupErr != nil {
+					if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 						err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 					}
 					_ = a.saveService(previewID, ps)
@@ -462,7 +498,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 			url, pid, tlog, err := a.startQuickTunnel(previewID, name, tunnelOriginURL, "")
 			if err != nil {
 				a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"origin": tunnelOriginURL}))
-				if cleanupErr := cleanupStarted(); cleanupErr != nil {
+				if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 				}
 				return ps, err
@@ -477,7 +513,7 @@ func (a *App) startService(req UpRequest, name string, svc ServiceConfig, source
 				ps.LastHealth = err.Error()
 				a.recordEvent(previewID, "error", "tunnel.failed", err.Error(), name, tunnelTimer.metadata(map[string]string{"url": url, "origin": tunnelOriginURL}))
 				err = fmt.Errorf("public tunnel health failed for %s: %w", name, err)
-				if cleanupErr := cleanupStarted(); cleanupErr != nil {
+				if cleanupErr := a.cleanupStartedService(previewID, name, &ps); cleanupErr != nil {
 					err = fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
 				}
 				_ = a.saveService(previewID, ps)

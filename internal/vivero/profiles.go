@@ -49,6 +49,7 @@ func projectConfigForProfile(cfg ProjectConfig, profile string) (ProjectConfig, 
 		return ProjectConfig{}, "", err
 	}
 	out.Setup.AfterSeeds = filterSetupStepsForServices(cfg.Setup.AfterSeeds, out.Services)
+	out.Setup.EveryBoot = filterSetupStepsForServices(cfg.Setup.EveryBoot, out.Services)
 	out.Agent = filterAgentForProfile(cfg.Agent, out.Services, prof, name)
 	return out, name, nil
 }

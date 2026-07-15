@@ -2226,7 +2226,7 @@ func TestPublicServiceRejectsNonLoopbackOriginHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	_, err = a.startService(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, "web", ServiceConfig{Runtime: "docker", Image: "alpine:latest", Port: 3000, OriginHost: "10.0.0.5", Public: true}, nil, ProjectConfig{}, true, true)
+	_, err = a.startService(UpRequest{Project: "demo", ID: "demo-pr-17", Public: true}, "web", ServiceConfig{Runtime: "docker", Image: "alpine:latest", Port: 3000, OriginHost: "10.0.0.5", Public: true}, nil, ProjectConfig{}, true, true, false)
 	if err == nil {
 		t.Fatal("expected non-loopback public originHost to be rejected")
 	}

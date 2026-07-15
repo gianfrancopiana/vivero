@@ -58,12 +58,13 @@ type ComposeConfig struct {
 }
 
 type PortConfig struct {
-	Container     int      `yaml:"container" json:"container,omitempty"`
-	Host          int      `yaml:"host" json:"host,omitempty"`
-	HostIP        string   `yaml:"hostIp" json:"hostIp,omitempty"`
-	Protocol      string   `yaml:"protocol" json:"protocol,omitempty"`
-	PublicPath    string   `yaml:"publicPath" json:"publicPath,omitempty"`
-	PublicOrigins []string `yaml:"publicOrigins" json:"publicOrigins,omitempty"`
+	Container      int      `yaml:"container" json:"container,omitempty"`
+	Host           int      `yaml:"host" json:"host,omitempty"`
+	HostIP         string   `yaml:"hostIp" json:"hostIp,omitempty"`
+	Protocol       string   `yaml:"protocol" json:"protocol,omitempty"`
+	ComposeService string   `yaml:"composeService" json:"composeService,omitempty"`
+	PublicPath     string   `yaml:"publicPath" json:"publicPath,omitempty"`
+	PublicOrigins  []string `yaml:"publicOrigins" json:"publicOrigins,omitempty"`
 }
 
 type ImageBuildConfig struct {
@@ -153,11 +154,14 @@ type PrebuildConfig struct {
 
 type SetupConfig struct {
 	AfterSeeds []SetupStep `yaml:"afterSeeds" json:"afterSeeds,omitempty"`
+	EveryBoot  []SetupStep `yaml:"everyBoot" json:"everyBoot,omitempty"`
 }
 
 type SetupStep struct {
+	Name        string                `yaml:"name" json:"name,omitempty"`
 	Service     string                `yaml:"service" json:"service"`
 	Command     RuntimeCommand        `yaml:"command" json:"command"`
+	Stdin       string                `yaml:"stdin" json:"stdin,omitempty"`
 	Policy      string                `yaml:"policy" json:"policy,omitempty"`
 	Fingerprint WarmFingerprintConfig `yaml:"fingerprint" json:"fingerprint,omitempty"`
 }

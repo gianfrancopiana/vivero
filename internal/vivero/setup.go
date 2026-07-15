@@ -9,22 +9,38 @@ import (
 )
 
 func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConfig, sources map[string]PreviewSource, warm warmRunState, projectPath ...string) error {
+	return a.runSetupStepsNamed("setup.afterSeeds", previewID, steps, cfg, sources, warm, projectPath...)
+}
+
+func (a *App) runSetupStepsNamed(eventKind string, previewID string, steps []SetupStep, cfg ProjectConfig, sources map[string]PreviewSource, warm warmRunState, projectPath ...string) error {
+	if eventKind == "" {
+		eventKind = "setup.afterSeeds"
+	}
 	root := ""
 	if len(projectPath) > 0 {
 		root = projectPath[0]
 	}
 	for i, step := range steps {
 		if step.Command.IsZero() {
+			if strings.TrimSpace(step.Stdin) != "" {
+				return fmt.Errorf("%s[%d]: stdin requires command", eventKind, i)
+			}
 			continue
 		}
 		policy, err := normalizeSetupPolicy(step.Policy)
 		if err != nil {
-			return fmt.Errorf("setup.afterSeeds[%d]: %w", i, err)
+			return fmt.Errorf("%s[%d]: %w", eventKind, i, err)
 		}
 		timer := startOperationTimer()
 		metadata := map[string]string{"command": step.Command.Display(), "index": fmt.Sprint(i), "policy": policy}
 		if step.Service != "" {
 			metadata["service"] = step.Service
+		}
+		if name := strings.TrimSpace(step.Name); name != "" {
+			metadata["name"] = name
+		}
+		if strings.TrimSpace(step.Stdin) != "" {
+			metadata["stdin"] = "true"
 		}
 		markerPath := ""
 		skipMessage := "setup command skipped by " + policy + " policy"
@@ -40,10 +56,10 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 						if _, err := os.Stat(canonicalMarker); err == nil {
 							metadata["marker"] = canonicalMarker
 							metadata["reason"] = "warm-baseline-match"
-							a.recordEvent(previewID, "info", "setup.afterSeeds.skipped", "setup command skipped because derived warm volume matches baseline", step.Service, timer.metadata(metadata))
+							a.recordEvent(previewID, "info", eventKind+".skipped", "setup command skipped because derived warm volume matches baseline", step.Service, timer.metadata(metadata))
 							continue
 						} else if !os.IsNotExist(err) {
-							return fmt.Errorf("setup.afterSeeds[%d] marker check failed: %w", i, err)
+							return fmt.Errorf("%s[%d] marker check failed: %w", eventKind, i, err)
 						}
 					}
 					markerPath = a.setupStepPreviewWarmMarkerPath(previewID, warm.Fingerprint, i, step)
@@ -53,14 +69,14 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 		if policy == "once-per-fingerprint" {
 			svc, ok := cfg.Services[step.Service]
 			if !ok {
-				return fmt.Errorf("setup.afterSeeds[%d] references unknown service %s", i, step.Service)
+				return fmt.Errorf("%s[%d] references unknown service %s", eventKind, i, step.Service)
 			}
 			if !serviceHasPersistentDependencyVolume(svc) {
-				return fmt.Errorf("setup.afterSeeds[%d] once-per-fingerprint requires service %s to declare a persistent dependency volume with lifetime project or smart", i, step.Service)
+				return fmt.Errorf("%s[%d] once-per-fingerprint requires service %s to declare a persistent dependency volume with lifetime project or smart", eventKind, i, step.Service)
 			}
 			paths, err := setupStepFingerprintPaths(step, cfg)
 			if err != nil {
-				return fmt.Errorf("setup.afterSeeds[%d] once-per-fingerprint: %w", i, err)
+				return fmt.Errorf("%s[%d] once-per-fingerprint: %w", eventKind, i, err)
 			}
 			fingerprintRoot, err := setupStepFingerprintRoot(i, step, cfg, sources, root)
 			if err != nil {
@@ -68,7 +84,7 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			}
 			fingerprint, err := fingerprintForPaths(fingerprintRoot, paths)
 			if err != nil {
-				return fmt.Errorf("setup.afterSeeds[%d] fingerprint: %w", i, err)
+				return fmt.Errorf("%s[%d] fingerprint: %w", eventKind, i, err)
 			}
 			metadata["fingerprint"] = fingerprint
 			metadata["fingerprintPaths"] = strings.Join(paths, ",")
@@ -79,10 +95,10 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			if _, err := os.Stat(markerPath); err == nil {
 				metadata["marker"] = markerPath
 				metadata["reason"] = "marker-exists"
-				a.recordEvent(previewID, "info", "setup.afterSeeds.skipped", skipMessage, step.Service, timer.metadata(metadata))
+				a.recordEvent(previewID, "info", eventKind+".skipped", skipMessage, step.Service, timer.metadata(metadata))
 				continue
 			} else if !os.IsNotExist(err) {
-				return fmt.Errorf("setup.afterSeeds[%d] marker check failed: %w", i, err)
+				return fmt.Errorf("%s[%d] marker check failed: %w", eventKind, i, err)
 			}
 		}
 		workdir, env, err := a.setupStepContext(step, cfg, sources)
@@ -94,16 +110,16 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 		if step.Service != "" {
 			svc := cfg.Services[step.Service]
 			if serviceRuntime(svc) == "compose" {
-				out, err = runDockerComposeOneShot(a.Home, cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command)
+				out, err = runDockerComposeOneShotWithStdin(a.Home, cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command, step.Stdin)
 			} else {
-				out, err = a.runDockerOneShot(cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command)
+				out, err = a.runDockerOneShotWithStdin(cfg.Project.Name, previewID, step.Service, svc, sources, env, step.Command, step.Stdin)
 			}
 		} else {
-			return fmt.Errorf("setup.afterSeeds[%d] must target a containerized service", i)
+			return fmt.Errorf("%s[%d] must target a containerized service", eventKind, i)
 		}
 		if err != nil {
-			a.recordEvent(previewID, "error", "setup.afterSeeds.failed", err.Error(), step.Service, timer.metadata(metadata))
-			return fmt.Errorf("setup.afterSeeds[%d] failed: %w: %s", i, err, string(out))
+			a.recordEvent(previewID, "error", eventKind+".failed", err.Error(), step.Service, timer.metadata(metadata))
+			return fmt.Errorf("%s[%d] failed: %w: %s", eventKind, i, err, string(out))
 		}
 		if markerPath != "" {
 			if err := ensureDir(filepath.Dir(markerPath)); err != nil {
@@ -114,21 +130,21 @@ func (a *App) runSetupSteps(previewID string, steps []SetupStep, cfg ProjectConf
 			}
 			metadata["marker"] = markerPath
 		}
-		a.recordEvent(previewID, "info", "setup.afterSeeds", "setup command completed", step.Service, timer.metadata(metadata))
+		a.recordEvent(previewID, "info", eventKind, "setup command completed", step.Service, timer.metadata(metadata))
 	}
 	return nil
 }
 
 func normalizeSetupPolicy(policy string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case "", "per-preview", "preview", "always":
+	case "", "per-preview", "preview", "always", "every-boot", "every_boot":
 		return "per-preview", nil
 	case "once-per-project", "once_per_project", "project", "once":
 		return "once-per-project", nil
 	case "once-per-fingerprint", "once_per_fingerprint", "fingerprint":
 		return "once-per-fingerprint", nil
 	default:
-		return "", fmt.Errorf("unsupported setup policy %q; use per-preview, once-per-project, or once-per-fingerprint", policy)
+		return "", fmt.Errorf("unsupported setup policy %q; use per-preview, once-per-project, once-per-fingerprint, or every-boot", policy)
 	}
 }
 
@@ -138,7 +154,7 @@ func setupStepFingerprintPaths(step SetupStep, cfg ProjectConfig) ([]string, err
 		paths = cfg.Warm.Fingerprint.Paths
 	}
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("fingerprint paths are required; set setup.afterSeeds[].fingerprint.paths or warm.fingerprint.paths")
+		return nil, fmt.Errorf("fingerprint paths are required; set setup step fingerprint.paths or warm.fingerprint.paths")
 	}
 	return normalizedFingerprintPaths(paths)
 }
@@ -146,7 +162,7 @@ func setupStepFingerprintPaths(step SetupStep, cfg ProjectConfig) ([]string, err
 func setupStepFingerprintRoot(index int, step SetupStep, cfg ProjectConfig, sources map[string]PreviewSource, projectPath string) (string, error) {
 	svc, ok := cfg.Services[step.Service]
 	if !ok {
-		return "", fmt.Errorf("setup.afterSeeds[%d] references unknown service %s", index, step.Service)
+		return "", fmt.Errorf("setup step[%d] references unknown service %s", index, step.Service)
 	}
 	if strings.TrimSpace(svc.Source) != "" {
 		src, ok := sources[svc.Source]
@@ -154,7 +170,7 @@ func setupStepFingerprintRoot(index int, step SetupStep, cfg ProjectConfig, sour
 			return "", fmt.Errorf("service %s references unknown source %s", step.Service, svc.Source)
 		}
 		if strings.TrimSpace(src.Path) == "" {
-			return "", fmt.Errorf("source %s has no path for setup.afterSeeds[%d] fingerprint", svc.Source, index)
+			return "", fmt.Errorf("source %s has no path for setup step[%d] fingerprint", svc.Source, index)
 		}
 		return src.Path, nil
 	}
@@ -168,7 +184,7 @@ func setupStepFingerprintRoot(index int, step SetupStep, cfg ProjectConfig, sour
 			}
 		}
 	}
-	return "", fmt.Errorf("setup.afterSeeds[%d] once-per-fingerprint requires a service source or project path for fingerprint paths", index)
+	return "", fmt.Errorf("setup step[%d] once-per-fingerprint requires a service source or project path for fingerprint paths", index)
 }
 
 func serviceHasPersistentDependencyVolume(svc ServiceConfig) bool {
@@ -186,7 +202,7 @@ func (a *App) setupStepMarkerPath(projectName string, index int, step SetupStep)
 	if projectName == "" {
 		projectName = "project"
 	}
-	id := shortStableID(fmt.Sprintf("%s\x00%d\x00%s\x00%s", projectName, index, step.Service, step.Command.Key()))
+	id := shortStableID(setupStepIdentity(fmt.Sprintf("%s\x00%d\x00%s\x00%s", projectName, index, step.Service, step.Command.Key()), step))
 	return filepath.Join(a.Home, "setup", projectName, id+".done")
 }
 
@@ -199,14 +215,26 @@ func (a *App) setupStepFingerprintMarkerPath(projectName, fingerprint string, pa
 	if fingerprint == "" {
 		fingerprint = "unknown"
 	}
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key(), strings.Join(paths, "\x00")))
+	base := fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key(), strings.Join(paths, "\x00"))
+	id := shortStableID(setupStepIdentity(base, step))
 	return filepath.Join(a.Home, "setup", projectName, "fingerprints", fingerprint, id+".done")
 }
 
 func (a *App) setupStepWarmMarkerPath(projectName, fingerprint string, index int, step SetupStep) string {
 	dir, projectName, fingerprint := a.warmMarkerDir(projectName, fingerprint)
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key()))
+	id := shortStableID(setupStepIdentity(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", projectName, fingerprint, index, step.Service, step.Command.Key()), step))
 	return filepath.Join(dir, id+".done")
+}
+
+func setupStepIdentity(base string, step SetupStep) string {
+	if name := strings.TrimSpace(step.Name); name != "" {
+		base += "\x00" + name
+	}
+	if step.Stdin != "" {
+		// Hash stdin so marker paths stay short and update when the inline program changes.
+		base += "\x00stdin:" + shortStableID(step.Stdin)
+	}
+	return base
 }
 
 func (a *App) warmMarkerDir(projectName, fingerprint string) (string, string, string) {
@@ -231,7 +259,7 @@ func (a *App) clearWarmSetupMarkers(projectName, fingerprint string) error {
 
 func (a *App) setupStepPreviewWarmMarkerPath(previewID, fingerprint string, index int, step SetupStep) string {
 	dir, previewID, fingerprint := a.previewWarmMarkerDir(previewID, fingerprint)
-	id := shortStableID(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", previewID, fingerprint, index, step.Service, step.Command.Key()))
+	id := shortStableID(setupStepIdentity(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s", previewID, fingerprint, index, step.Service, step.Command.Key()), step))
 	return filepath.Join(dir, id+".done")
 }
 

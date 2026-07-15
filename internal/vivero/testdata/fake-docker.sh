@@ -27,6 +27,12 @@ case "$cmd" in
 				if [ -f "$state/$name.expected-completion" ]; then expected="true"; fi
 				printf '%s|%s|%s\n' "$running" "$exit_code" "$expected"
 				;;
+			  *com.docker.compose.project*)
+				if [ -f "$state/$name.compose-project" ]; then cat "$state/$name.compose-project"; else printf '\n'; fi
+				;;
+			  *com.docker.compose.service*)
+				if [ -f "$state/$name.service" ]; then cat "$state/$name.service"; else printf '\n'; fi
+				;;
 			  *ExitCode*)
 				exit_code="0"
 				if [ -f "$state/$name.exited" ]; then exit_code="$(cat "$state/$name.exit-code" 2>/dev/null || echo 1)"; fi
@@ -241,36 +247,66 @@ case "$cmd" in
         done
         [ -n "$service" ] || service="web"
         [ -n "$project" ] || project="fake-compose"
-        name="compose-${project}-${service}"
         preview=""
         override=""
         for f in $files; do override="$f"; done
         if [ -n "$override" ] && [ -f "$override" ]; then
           preview="$(sed -n 's/.*vivero.preview: *["'\'' ]*\([^"'\'' ]*\).*/\1/p' "$override" | head -n1)"
         fi
-        [ -n "$preview" ] && printf '%s' "$preview" > "$state/$name.preview"
-        printf '%s' "$project" > "$state/$name.compose-project"
-        printf '%s' "$service" > "$state/$name.service"
-        printf '%s' "$(pwd)" > "$state/$name.cwd"
-        : > "$state/$name.ports"
-        if [ -n "$override" ] && [ -f "$override" ]; then
-          sed -n 's/.*127\.0\.0\.1::\([0-9][0-9]*\).*/\1/p' "$override" | while IFS= read -r port; do
-            [ -n "$port" ] || continue
-            printf '%s/tcp|127.0.0.1:%s\n' "$port" "$port" >> "$state/$name.ports"
-          done
-        fi
-        if [ ! -s "$state/$name.ports" ]; then
-          printf '3000/tcp|127.0.0.1:3000\n' >> "$state/$name.ports"
-        fi
-        : > "$state/$name.log"
-        (sleep 3600) >/dev/null 2>&1 &
-        echo $! > "$state/$name.pid"
+        start_one() {
+          svc_name="$1"
+          name="compose-${project}-${svc_name}"
+          [ -n "$preview" ] && printf '%s' "$preview" > "$state/$name.preview"
+          printf '%s' "$project" > "$state/$name.compose-project"
+          printf '%s' "$svc_name" > "$state/$name.service"
+          printf '%s' "$(pwd)" > "$state/$name.cwd"
+          : > "$state/$name.ports"
+          if [ -n "$override" ] && [ -f "$override" ]; then
+            # Extract ports for this service section only (gopkg yaml uses 4-space indent).
+            awk -v svc="$svc_name" '
+              $0 ~ "^[[:space:]]+" svc ":" {in_svc=1; next}
+              in_svc && $0 ~ /^[[:space:]]{2,4}[A-Za-z0-9_.-]+:/ && $0 !~ "^[[:space:]]+" svc ":" {in_svc=0}
+              in_svc {
+                while (match($0, /127\.0\.0\.1::[0-9]+/)) {
+                  port=substr($0, RSTART+11, RLENGTH-11)
+                  print port
+                  $0=substr($0, RSTART+RLENGTH)
+                }
+              }
+            ' "$override" | while IFS= read -r port; do
+              [ -n "$port" ] || continue
+              printf '%s/tcp|127.0.0.1:%s\n' "$port" "$port" >> "$state/$name.ports"
+            done
+          fi
+          if [ ! -s "$state/$name.ports" ] && [ "$svc_name" = "$service" ]; then
+            # Keep legacy fallback for overrides that omit ports.
+            if [ -n "$override" ] && [ -f "$override" ]; then
+              sed -n 's/.*127\.0\.0\.1::\([0-9][0-9]*\).*/\1/p' "$override" | while IFS= read -r port; do
+                [ -n "$port" ] || continue
+                printf '%s/tcp|127.0.0.1:%s\n' "$port" "$port" >> "$state/$name.ports"
+              done
+            fi
+          fi
+          if [ ! -s "$state/$name.ports" ] && [ "$svc_name" = "$service" ]; then
+            printf '3000/tcp|127.0.0.1:3000\n' >> "$state/$name.ports"
+          fi
+          : > "$state/$name.log"
+          (sleep 3600) >/dev/null 2>&1 &
+          echo $! > "$state/$name.pid"
+        }
+        # Start declared services so sibling composeService ports can resolve.
+        for svc_name in ${FAKE_DOCKER_COMPOSE_SERVICES:-$service}; do
+          start_one "$svc_name"
+        done
+        # Ensure the target exists even if services list is empty/missing it.
+        start_one "$service"
 		if [ -n "${FAKE_DOCKER_COMPOSE_UP_FAIL:-}" ]; then
+		  name="compose-${project}-${service}"
 		  printf '%s\n' "$FAKE_DOCKER_COMPOSE_UP_FAIL" > "$state/$name.log"
 		  echo "$FAKE_DOCKER_COMPOSE_UP_FAIL" >&2
 		  exit 7
 		fi
-        echo "$name"
+        echo "compose-${project}-${service}"
         exit 0
         ;;
       ps)
@@ -284,7 +320,7 @@ case "$cmd" in
 	  run)
 		while [ $# -gt 0 ]; do
 		  case "$1" in
-			--rm|-T|--no-TTY) shift ;;
+			--rm|-T|--no-TTY|-i|--interactive) shift ;;
 			*) break ;;
 		  esac
 		done
@@ -293,12 +329,16 @@ case "$cmd" in
 		[ -n "$project" ] || project="fake-compose"
 		printf 'run' > "$state/compose-${project}-${service}.setup-mode"
 		cd "$(pwd)"
+		if [ ! -t 0 ]; then
+		  cat > "$state/compose-${project}-${service}.stdin"
+		  exec "$@" < "$state/compose-${project}-${service}.stdin"
+		fi
 		exec "$@"
 		;;
 	  exec)
 		while [ $# -gt 0 ]; do
 		  case "$1" in
-			-T|--no-TTY) shift ;;
+			-T|--no-TTY|-i|--interactive) shift ;;
 			*) break ;;
 		  esac
 		done
@@ -309,6 +349,10 @@ case "$cmd" in
 		name="compose-${project}-${service}"
 		cwd="$(cat "$state/$name.cwd" 2>/dev/null || pwd)"
 		cd "$cwd"
+		if [ ! -t 0 ]; then
+		  cat > "$state/compose-${project}-${service}.stdin"
+		  exec "$@" < "$state/compose-${project}-${service}.stdin"
+		fi
 		exec "$@"
 		;;
       down)
@@ -329,6 +373,7 @@ case "$cmd" in
   ps)
     preview_filter=""
     compose_filter=""
+    service_filter=""
 	no_trunc=0
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -338,6 +383,7 @@ case "$cmd" in
           case "$2" in
             label=vivero.preview=*) preview_filter="${2#label=vivero.preview=}" ;;
             label=com.docker.compose.project=*) compose_filter="${2#label=com.docker.compose.project=}" ;;
+            label=com.docker.compose.service=*) service_filter="${2#label=com.docker.compose.service=}" ;;
           esac
           shift 2
           ;;
@@ -354,6 +400,10 @@ case "$cmd" in
       if [ -n "$compose_filter" ]; then
         [ -f "$state/$name.compose-project" ] || continue
         [ "$(cat "$state/$name.compose-project")" = "$compose_filter" ] || continue
+      fi
+      if [ -n "$service_filter" ]; then
+        [ -f "$state/$name.service" ] || continue
+        [ "$(cat "$state/$name.service")" = "$service_filter" ] || continue
       fi
 	  rendered="$name"
 	  if [ "$no_trunc" -eq 0 ]; then

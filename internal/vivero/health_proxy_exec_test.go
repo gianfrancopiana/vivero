@@ -268,7 +268,7 @@ func TestStartServiceRejectsFailedComposeDependencyDespiteHealthyTargetURL(t *te
 	source := t.TempDir()
 	svc := ServiceConfig{Source: "app", Runtime: "compose", Compose: ComposeConfig{File: "compose.yml", Service: "web"}, Ports: map[string]PortConfig{"http": {Container: 3000}}, Health: HealthConfig{ExpectStatus: 200}}
 	cfg := ProjectConfig{Project: ProjectMeta{Name: "compose-start"}, Services: map[string]ServiceConfig{"web": svc}}
-	_, err = a.startService(UpRequest{ID: "compose-start"}, "web", svc, map[string]PreviewSource{"app": {Name: "app", Path: source}}, cfg, false, true)
+	_, err = a.startService(UpRequest{ID: "compose-start"}, "web", svc, map[string]PreviewSource{"app": {Name: "app", Path: source}}, cfg, false, true, false)
 	if err == nil || !strings.Contains(err.Error(), "db-container") {
 		t.Fatalf("startService error = %v", err)
 	}
@@ -294,7 +294,7 @@ func TestStartServiceRejectsFailedComposeDependencyWithoutHealthOrURL(t *testing
 	a.containers = fake
 	svc := ServiceConfig{Source: "app", Runtime: "compose", Compose: ComposeConfig{File: "compose.yml", Service: "worker"}}
 	cfg := ProjectConfig{Project: ProjectMeta{Name: "compose-worker"}, Services: map[string]ServiceConfig{"worker": svc}}
-	_, err = a.startService(UpRequest{ID: "compose-worker"}, "worker", svc, map[string]PreviewSource{"app": {Name: "app", Path: t.TempDir()}}, cfg, false, true)
+	_, err = a.startService(UpRequest{ID: "compose-worker"}, "worker", svc, map[string]PreviewSource{"app": {Name: "app", Path: t.TempDir()}}, cfg, false, true, false)
 	if err == nil || !strings.Contains(err.Error(), "db-container") {
 		t.Fatalf("commandless startService error = %v", err)
 	}
@@ -324,7 +324,7 @@ func TestStartServiceRechecksComposeDependenciesAfterHealthCommand(t *testing.T)
 	a.containers = fake
 	svc := ServiceConfig{Source: "app", Runtime: "compose", Compose: ComposeConfig{File: "compose.yml", Service: "worker"}, Health: HealthConfig{Command: RuntimeCommand{Shell: "bin/health"}}}
 	cfg := ProjectConfig{Project: ProjectMeta{Name: "compose-health-command"}, Services: map[string]ServiceConfig{"worker": svc}}
-	_, err = a.startService(UpRequest{ID: "compose-health-command"}, "worker", svc, map[string]PreviewSource{"app": {Name: "app", Path: t.TempDir()}}, cfg, false, true)
+	_, err = a.startService(UpRequest{ID: "compose-health-command"}, "worker", svc, map[string]PreviewSource{"app": {Name: "app", Path: t.TempDir()}}, cfg, false, true, false)
 	if err == nil || !strings.Contains(err.Error(), "db-container") {
 		t.Fatalf("health-command startService error = %v", err)
 	}
@@ -501,7 +501,7 @@ func TestComposeUpFailureWithoutTargetIDSnapshotsProjectLogs(t *testing.T) {
 	defer a.Close()
 	svc := ServiceConfig{Source: "app", Runtime: "compose", Compose: ComposeConfig{File: "compose.yml", Service: "web"}}
 	cfg := ProjectConfig{Project: ProjectMeta{Name: "compose-failure"}, Services: map[string]ServiceConfig{"web": svc}}
-	state, err := a.startService(UpRequest{ID: "compose-up-failure"}, "web", svc, map[string]PreviewSource{"app": {Name: "app", Path: source}}, cfg, false, true)
+	state, err := a.startService(UpRequest{ID: "compose-up-failure"}, "web", svc, map[string]PreviewSource{"app": {Name: "app", Path: source}}, cfg, false, true, false)
 	if err == nil || !strings.Contains(err.Error(), "mysql dependency crashed") {
 		t.Fatalf("start error = %v", err)
 	}

@@ -336,10 +336,17 @@ func fileHash(path string) (string, error) {
 }
 
 func runCmd(dir string, env map[string]string, name string, args ...string) ([]byte, error) {
+	return runCmdWithStdin(dir, env, "", name, args...)
+}
+
+func runCmdWithStdin(dir string, env map[string]string, stdin string, name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	if env != nil {
 		cmd.Env = mergeEnv(env)
+	}
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
 	}
 	return cmd.CombinedOutput()
 }

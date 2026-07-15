@@ -72,6 +72,9 @@ func runtimeCommandConfigPath(path string) bool {
 	if strings.HasPrefix(path, "setup.afterSeeds[") && strings.HasSuffix(path, ".command") {
 		return true
 	}
+	if strings.HasPrefix(path, "setup.everyBoot[") && strings.HasSuffix(path, ".command") {
+		return true
+	}
 	if len(parts) == 4 && parts[0] == "agent" && parts[1] == "iteration" && (parts[2] == "restartCommand" || parts[2] == "dependencyChangedCommand") && parts[3] == "command" {
 		return true
 	}

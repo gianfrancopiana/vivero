@@ -11,15 +11,16 @@ import (
 const defaultPrimaryPortName = "http"
 
 type ServicePort struct {
-	Name          string
-	Container     int
-	Host          int
-	HostIP        string
-	Protocol      string
-	Primary       bool
-	Legacy        bool
-	PublicPath    string
-	PublicOrigins []string
+	Name           string
+	Container      int
+	Host           int
+	HostIP         string
+	Protocol       string
+	Primary        bool
+	Legacy         bool
+	ComposeService string
+	PublicPath     string
+	PublicOrigins  []string
 }
 
 func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
@@ -112,7 +113,8 @@ func servicePortPlan(svc ServiceConfig) ([]ServicePort, error) {
 			}
 			origins = append(origins, origin)
 		}
-		out = append(out, ServicePort{Name: name, Container: cfg.Container, Host: cfg.Host, HostIP: hostIP, Protocol: protocol, Primary: primary, PublicPath: publicPath, PublicOrigins: origins})
+		composeService := strings.TrimSpace(cfg.ComposeService)
+		out = append(out, ServicePort{Name: name, Container: cfg.Container, Host: cfg.Host, HostIP: hostIP, Protocol: protocol, Primary: primary, ComposeService: composeService, PublicPath: publicPath, PublicOrigins: origins})
 	}
 	if !primarySeen {
 		return nil, fmt.Errorf("primaryPort %q does not match a named port", primaryName)

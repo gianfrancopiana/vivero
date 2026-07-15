@@ -80,8 +80,11 @@ func (f *fakeContainerRuntime) StartService(home, projectName, previewID, servic
 	return f.containerID, nil
 }
 
-func (f *fakeContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
+func (f *fakeContainerRuntime) RunOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
 	f.runOnceCommands = append(f.runOnceCommands, fmt.Sprintf("%s/%s/%s/%s:%s", home, projectName, previewID, service, command.Display()))
+	if stdin != "" {
+		f.runOnceCommands[len(f.runOnceCommands)-1] += "|stdin=" + stdin
+	}
 	return []byte("ok"), nil
 }
 

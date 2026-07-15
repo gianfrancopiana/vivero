@@ -104,6 +104,9 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		if _, err := servicePortPlan(svc); err != nil {
 			return fmt.Errorf("%s service %s has invalid port configuration: %w", configPath, name, err)
 		}
+		if err := validateComposeServicePortConfig(configPath, name, svc); err != nil {
+			return err
+		}
 		if err := validateImageBuildCacheConfig(configPath, name, svc.Build.Cache); err != nil {
 			return err
 		}
@@ -181,25 +184,13 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 		}
 	}
 	for i, step := range cfg.Setup.AfterSeeds {
-		if _, err := normalizeSetupPolicy(step.Policy); err != nil {
-			return fmt.Errorf("%s setup.afterSeeds[%d]: %w", configPath, i, err)
-		}
-		if err := validateFingerprintPaths(configPath, fmt.Sprintf("setup.afterSeeds[%d].fingerprint.paths", i), step.Fingerprint.Paths); err != nil {
+		if err := validateSetupStep(configPath, "setup.afterSeeds", i, step, cfg); err != nil {
 			return err
 		}
-		if err := validateRuntimeCommand(configPath, "setup.afterSeeds", fmt.Sprint(i), "command", step.Command); err != nil {
+	}
+	for i, step := range cfg.Setup.EveryBoot {
+		if err := validateSetupStep(configPath, "setup.everyBoot", i, step, cfg); err != nil {
 			return err
-		}
-		if step.Command.IsZero() {
-			continue
-		}
-		service := strings.TrimSpace(step.Service)
-		if service == "" {
-			return fmt.Errorf("%s setup.afterSeeds[%d] must target a service", configPath, i)
-		}
-		_, ok := cfg.Services[service]
-		if !ok {
-			return fmt.Errorf("%s setup.afterSeeds[%d] references unknown service %s", configPath, i, service)
 		}
 	}
 	if err := validateWarmConfig(configPath, cfg.Warm); err != nil {
@@ -207,6 +198,43 @@ func validateProjectConfig(configPath string, cfg ProjectConfig) error {
 	}
 	if err := validateProfilesConfig(configPath, cfg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSetupStep(configPath, kind string, i int, step SetupStep, cfg ProjectConfig) error {
+	if _, err := normalizeSetupPolicy(step.Policy); err != nil {
+		return fmt.Errorf("%s %s[%d]: %w", configPath, kind, i, err)
+	}
+	if err := validateFingerprintPaths(configPath, fmt.Sprintf("%s[%d].fingerprint.paths", kind, i), step.Fingerprint.Paths); err != nil {
+		return err
+	}
+	if err := validateRuntimeCommand(configPath, kind, fmt.Sprint(i), "command", step.Command); err != nil {
+		return err
+	}
+	if strings.TrimSpace(step.Stdin) != "" && step.Command.IsZero() {
+		return fmt.Errorf("%s %s[%d] stdin requires command", configPath, kind, i)
+	}
+	if step.Command.IsZero() {
+		return nil
+	}
+	service := strings.TrimSpace(step.Service)
+	if service == "" {
+		return fmt.Errorf("%s %s[%d] must target a service", configPath, kind, i)
+	}
+	if _, ok := cfg.Services[service]; !ok {
+		return fmt.Errorf("%s %s[%d] references unknown service %s", configPath, kind, i, service)
+	}
+	return nil
+}
+
+func validateComposeServicePortConfig(configPath, service string, svc ServiceConfig) error {
+	if serviceRuntime(svc) != "compose" {
+		for name, port := range svc.Ports {
+			if strings.TrimSpace(port.ComposeService) != "" {
+				return fmt.Errorf("%s service %s named port %s composeService is only valid with runtime compose", configPath, service, name)
+			}
+		}
 	}
 	return nil
 }

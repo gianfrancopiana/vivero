@@ -131,6 +131,9 @@ func startDockerComposeService(home, projectName, previewID, service string, svc
 	if err != nil {
 		return "", err
 	}
+	if err := validateComposeServicePorts(spec, model, services); err != nil {
+		return "", err
+	}
 	if err := ensureDockerComposeDependencyVolumes(spec); err != nil {
 		return "", err
 	}
@@ -158,6 +161,10 @@ func startDockerComposeService(home, projectName, previewID, service string, svc
 }
 
 func runDockerComposeOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
+	return runDockerComposeOneShotWithStdin(home, projectName, previewID, service, svc, sources, env, command, "")
+}
+
+func runDockerComposeOneShotWithStdin(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run Compose setup steps: %w", err)
 	}
@@ -202,6 +209,9 @@ func runDockerComposeOneShot(home, projectName, previewID, service string, svc S
 	if err != nil {
 		return nil, err
 	}
+	if err := validateComposeServicePorts(spec, model, services); err != nil {
+		return nil, err
+	}
 	if err := ensureDockerComposeDependencyVolumes(spec); err != nil {
 		return nil, err
 	}
@@ -216,12 +226,15 @@ func runDockerComposeOneShot(home, projectName, previewID, service string, svc S
 	running := psErr == nil && firstNonEmptyLine(string(psOut)) != ""
 	args = dockerComposeBaseArgs(spec)
 	if running {
+		// Compose v2 `exec` attaches stdin without `-i`; `-i` is rejected as unknown.
 		args = append(args, "exec", "-T", spec.ComposeService)
+	} else if strings.TrimSpace(stdin) != "" {
+		args = append(args, "run", "--rm", "-i", "-T", spec.ComposeService)
 	} else {
 		args = append(args, "run", "--rm", "-T", spec.ComposeService)
 	}
 	args = append(args, command.RuntimeArgs()...)
-	out, err := runCmd(spec.Source, env, "docker", args...)
+	out, err := runCmdWithStdin(spec.Source, env, stdin, "docker", args...)
 	if !running {
 		if err != nil {
 			lines, logsErr := dockerComposeProjectLogs(previewID, service, serviceFailureLogTail)
@@ -402,6 +415,14 @@ func writeDockerComposeOverride(spec dockerComposeServiceSpec, services []string
 	if err := ensureDir(filepath.Dir(spec.OverrideFile)); err != nil {
 		return err
 	}
+	portsByService := map[string][]ServicePort{}
+	for _, port := range spec.Ports {
+		owner := strings.TrimSpace(port.ComposeService)
+		if owner == "" {
+			owner = spec.ComposeService
+		}
+		portsByService[owner] = append(portsByService[owner], port)
+	}
 	overrideServices := map[string]any{}
 	for _, service := range services {
 		labels := map[string]string{
@@ -417,9 +438,6 @@ func writeDockerComposeOverride(spec dockerComposeServiceSpec, services []string
 			if len(spec.NetworkAliases) > 0 {
 				entry["networks"] = map[string]any{"default": map[string]any{"aliases": spec.NetworkAliases}}
 			}
-			if len(spec.Ports) > 0 {
-				entry["ports"] = dockerComposeTaggedSequence("!override", dockerComposePortBindings(spec.Ports))
-			}
 			if len(spec.Env) > 0 {
 				entry["environment"] = sortedMapKeys(spec.Env)
 			}
@@ -434,6 +452,9 @@ func writeDockerComposeOverride(spec dockerComposeServiceSpec, services []string
 				}
 				entry["volumes"] = mounts
 			}
+		}
+		if ports := portsByService[service]; len(ports) > 0 {
+			entry["ports"] = dockerComposeTaggedSequence("!override", dockerComposePortBindings(ports))
 		}
 		overrideServices[service] = entry
 	}
@@ -462,6 +483,23 @@ func writeDockerComposeOverride(spec dockerComposeServiceSpec, services []string
 		return err
 	}
 	return atomicWriteFile(spec.OverrideFile, body, 0o600)
+}
+
+func validateComposeServicePorts(spec dockerComposeServiceSpec, model dockerComposeConfigModel, services []string) error {
+	closure := dockerComposeTargetClosure(model, spec.ComposeService)
+	for _, port := range spec.Ports {
+		owner := strings.TrimSpace(port.ComposeService)
+		if owner == "" || owner == spec.ComposeService {
+			continue
+		}
+		if !stringInSlice(owner, services) {
+			return fmt.Errorf("named port %s composeService %s is not defined in the Compose project", port.Name, owner)
+		}
+		if !closure[owner] {
+			return fmt.Errorf("named port %s composeService %s is outside target %s depends_on closure", port.Name, owner, spec.ComposeService)
+		}
+	}
+	return nil
 }
 
 func dockerComposeTaggedSequence(tag string, values []string) *yaml.Node {

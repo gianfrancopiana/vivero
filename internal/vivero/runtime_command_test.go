@@ -103,7 +103,7 @@ func TestStartServiceHealthFailureIncludesGenericDiagnostics(t *testing.T) {
 		Image:   "postgres:16",
 		Command: RuntimeCommand{Args: []string{"postgres", "-c", "max_connections=200"}},
 		Health:  HealthConfig{Command: RuntimeCommand{Args: []string{"pg_isready", "-U", "postgres"}}, Timeout: "1ms", Interval: "1ms"},
-	}, nil, ProjectConfig{Project: ProjectMeta{Name: "demo"}}, false, false)
+	}, nil, ProjectConfig{Project: ProjectMeta{Name: "demo"}}, false, false, false)
 	if err == nil {
 		t.Fatal("expected health failure")
 	}

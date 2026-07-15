@@ -180,6 +180,24 @@ func configDoctorCheckCompose(report *ConfigDoctorReport, root string, cfg Proje
 				report.addFinding("warning", "compose-host-ports-stripped", base+".compose", fmt.Sprintf("dependency service %s publishes host port(s) %s; Vivero will strip them to prevent concurrent-preview collisions", service, strings.Join(ports, ", ")))
 			}
 		}
+		if target.kind == "services" {
+			if ports, err := servicePortPlan(cfg.Services[target.name]); err == nil {
+				for _, port := range ports {
+					owner := strings.TrimSpace(port.ComposeService)
+					if owner == "" || owner == spec.ComposeService {
+						continue
+					}
+					path := base + ".ports." + port.Name + ".composeService"
+					if _, ok := model.Services[owner]; !ok {
+						report.addFinding("error", "compose-port-service-missing", path, fmt.Sprintf("named port %s composeService %s is not defined in the Compose project", port.Name, owner))
+						continue
+					}
+					if !closure[owner] {
+						report.addFinding("error", "compose-port-service-outside-closure", path, fmt.Sprintf("named port %s composeService %s is outside target %s depends_on closure", port.Name, owner, spec.ComposeService))
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -263,58 +281,65 @@ func configDoctorCheckBuildCache(report *ConfigDoctorReport, cfg ProjectConfig) 
 }
 
 func configDoctorCheckSetup(report *ConfigDoctorReport, root string, cfg ProjectConfig) {
-	for i, step := range cfg.Setup.AfterSeeds {
-		policy, err := normalizeSetupPolicy(step.Policy)
-		if err != nil {
-			report.addFinding("error", "setup-policy-invalid", fmt.Sprintf("setup.afterSeeds[%d].policy", i), err.Error())
-			continue
-		}
-		if policy != "once-per-project" && policy != "once-per-fingerprint" {
-			continue
-		}
-		base := fmt.Sprintf("setup.afterSeeds[%d]", i)
-		svc, ok := cfg.Services[step.Service]
-		if !ok || strings.TrimSpace(step.Service) == "" {
-			continue
-		}
-		if !serviceHasPersistentDependencyVolume(svc) {
-			report.addFinding("warning", "setup-persistent-volume-missing", base+".service", fmt.Sprintf("setup step for service %s uses %s but the service has no dependencyVolume with lifetime project or smart", step.Service, policy))
-		}
-		if policy != "once-per-fingerprint" {
-			continue
-		}
-		paths := step.Fingerprint.Paths
-		pathSource := base + ".fingerprint.paths"
-		if len(paths) == 0 {
-			paths = cfg.Warm.Fingerprint.Paths
-			pathSource = "warm.fingerprint.paths"
-		}
-		if len(paths) == 0 {
-			report.addFinding("warning", "setup-fingerprint-paths-missing", base+".fingerprint.paths", "once-per-fingerprint setup needs setup.afterSeeds[].fingerprint.paths or warm.fingerprint.paths")
-			continue
-		}
-		fingerprintRoot := root
-		if strings.TrimSpace(svc.Source) != "" {
-			if src, ok := cfg.Sources[svc.Source]; ok && strings.TrimSpace(src.Path) != "" {
-				if resolved, err := resolveSourcePath(root, src.Path); err == nil {
-					fingerprintRoot = resolved
+	check := func(kind string, steps []SetupStep) {
+		for i, step := range steps {
+			if strings.TrimSpace(step.Stdin) != "" && step.Command.IsZero() {
+				report.addFinding("error", "setup-stdin-without-command", fmt.Sprintf("%s[%d].stdin", kind, i), "stdin requires command")
+			}
+			policy, err := normalizeSetupPolicy(step.Policy)
+			if err != nil {
+				report.addFinding("error", "setup-policy-invalid", fmt.Sprintf("%s[%d].policy", kind, i), err.Error())
+				continue
+			}
+			if policy != "once-per-project" && policy != "once-per-fingerprint" {
+				continue
+			}
+			base := fmt.Sprintf("%s[%d]", kind, i)
+			svc, ok := cfg.Services[step.Service]
+			if !ok || strings.TrimSpace(step.Service) == "" {
+				continue
+			}
+			if !serviceHasPersistentDependencyVolume(svc) {
+				report.addFinding("warning", "setup-persistent-volume-missing", base+".service", fmt.Sprintf("setup step for service %s uses %s but the service has no dependencyVolume with lifetime project or smart", step.Service, policy))
+			}
+			if policy != "once-per-fingerprint" {
+				continue
+			}
+			paths := step.Fingerprint.Paths
+			pathSource := base + ".fingerprint.paths"
+			if len(paths) == 0 {
+				paths = cfg.Warm.Fingerprint.Paths
+				pathSource = "warm.fingerprint.paths"
+			}
+			if len(paths) == 0 {
+				report.addFinding("warning", "setup-fingerprint-paths-missing", base+".fingerprint.paths", "once-per-fingerprint setup needs fingerprint.paths or warm.fingerprint.paths")
+				continue
+			}
+			fingerprintRoot := root
+			if strings.TrimSpace(svc.Source) != "" {
+				if src, ok := cfg.Sources[svc.Source]; ok && strings.TrimSpace(src.Path) != "" {
+					if resolved, err := resolveSourcePath(root, src.Path); err == nil {
+						fingerprintRoot = resolved
+					}
+				}
+			}
+			for pathIndex, raw := range paths {
+				rel, err := normalizeFingerprintPath(raw)
+				if err != nil {
+					continue
+				}
+				full, err := resolveProjectPath(fingerprintRoot, filepath.FromSlash(rel))
+				if err != nil {
+					continue
+				}
+				if _, err := os.Stat(full); err != nil {
+					report.addFinding("warning", "setup-fingerprint-path-missing", fmt.Sprintf("%s[%d]", pathSource, pathIndex), fmt.Sprintf("fingerprint path does not exist yet: %s", full))
 				}
 			}
 		}
-		for pathIndex, raw := range paths {
-			rel, err := normalizeFingerprintPath(raw)
-			if err != nil {
-				continue
-			}
-			full, err := resolveProjectPath(fingerprintRoot, filepath.FromSlash(rel))
-			if err != nil {
-				continue
-			}
-			if _, err := os.Stat(full); os.IsNotExist(err) {
-				report.addFinding("warning", "setup-fingerprint-path-missing", fmt.Sprintf("%s[%d]", pathSource, pathIndex), fmt.Sprintf("fingerprint path %s does not exist yet", rel))
-			}
-		}
 	}
+	check("setup.afterSeeds", cfg.Setup.AfterSeeds)
+	check("setup.everyBoot", cfg.Setup.EveryBoot)
 }
 
 func configDoctorCheckAgent(report *ConfigDoctorReport, root string, cfg ProjectConfig) {

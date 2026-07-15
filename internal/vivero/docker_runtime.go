@@ -257,12 +257,20 @@ func startDockerService(home, projectName, previewID, service string, svc Servic
 }
 
 func (a *App) runDockerOneShot(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
-	return a.containerRuntime().RunOneShot(a.Home, projectName, previewID, service, svc, sources, env, command)
+	return a.runDockerOneShotWithStdin(projectName, previewID, service, svc, sources, env, command, "")
+}
+
+func (a *App) runDockerOneShotWithStdin(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
+	return a.containerRuntime().RunOneShot(a.Home, projectName, previewID, service, svc, sources, env, command, stdin)
 }
 
 func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
+	return runDockerOneShotWithStdin(home, projectName, previewID, service, svc, sources, env, command, "")
+}
+
+func runDockerOneShotWithStdin(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
 	if serviceRuntime(svc) == "compose" {
-		return nil, fmt.Errorf("setup.afterSeeds does not support runtime compose for service %s; keep setup in the app-owned Compose entrypoint or scripts", service)
+		return nil, fmt.Errorf("setup does not support runtime compose for service %s via the docker runtime path; use compose setup execution", service)
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker CLI not found; install Docker or OrbStack so Vivero can run containers: %w", err)
@@ -281,7 +289,11 @@ func runDockerOneShot(home, projectName, previewID, service string, svc ServiceC
 	if err != nil {
 		return nil, err
 	}
-	stdout, stderr, err := runDocker(args)
+	if strings.TrimSpace(stdin) != "" {
+		// Keep stdin open without allocating a TTY.
+		args = append([]string{"run", "-i"}, args[1:]...)
+	}
+	stdout, stderr, err := runDockerWithStdin(args, stdin)
 	combined := []byte(stdout + stderr)
 	if err != nil {
 		return combined, fmt.Errorf("docker %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr+"\n"+stdout))
@@ -290,7 +302,14 @@ func runDockerOneShot(home, projectName, previewID, service string, svc ServiceC
 }
 
 func runDocker(args []string) (stdout, stderr string, err error) {
+	return runDockerWithStdin(args, "")
+}
+
+func runDockerWithStdin(args []string, stdin string) (stdout, stderr string, err error) {
 	cmd := exec.Command("docker", args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
@@ -322,11 +341,19 @@ func dockerPublishedPorts(containerID string, ports []ServicePort) ([]PreviewPor
 		if hostIP == "" {
 			hostIP = "127.0.0.1"
 		}
+		lookupID := containerID
+		if owner := strings.TrimSpace(port.ComposeService); owner != "" {
+			siblingID, err := dockerComposeSiblingContainerID(containerID, owner)
+			if err != nil {
+				return nil, fmt.Errorf("named port %s composeService %s: %w", port.Name, owner, err)
+			}
+			lookupID = siblingID
+		}
 		if hostPort <= 0 {
 			query := fmt.Sprintf("%d/%s", port.Container, protocol)
-			body, err := runCmd("", nil, "docker", "port", containerID, query)
+			body, err := runCmd("", nil, "docker", "port", lookupID, query)
 			if err != nil {
-				return nil, fmt.Errorf("docker port %s %s: %w: %s", containerID, query, err, strings.TrimSpace(string(body)))
+				return nil, fmt.Errorf("docker port %s %s: %w: %s", lookupID, query, err, strings.TrimSpace(string(body)))
 			}
 			line := firstNonEmptyLine(string(body))
 			var parseErr error
@@ -338,6 +365,36 @@ func dockerPublishedPorts(containerID string, ports []ServicePort) ([]PreviewPor
 		out = append(out, PreviewPort{Name: port.Name, Container: port.Container, Host: hostPort, HostIP: hostIP, Protocol: protocol, Primary: port.Primary})
 	}
 	return out, nil
+}
+
+func dockerComposeSiblingContainerID(containerID, composeService string) (string, error) {
+	composeService = strings.TrimSpace(composeService)
+	if composeService == "" {
+		return "", fmt.Errorf("compose service is required")
+	}
+	projectBody, err := runCmd("", nil, "docker", "container", "inspect", "--format", `{{index .Config.Labels "com.docker.compose.project"}}`, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect compose project for %s: %w: %s", containerID, err, strings.TrimSpace(string(projectBody)))
+	}
+	project := firstNonEmptyLine(string(projectBody))
+	if project == "" {
+		return "", fmt.Errorf("container %s is not part of a Compose project", containerID)
+	}
+	serviceBody, err := runCmd("", nil, "docker", "container", "inspect", "--format", `{{index .Config.Labels "com.docker.compose.service"}}`, containerID)
+	if err == nil && firstNonEmptyLine(string(serviceBody)) == composeService {
+		return containerID, nil
+	}
+	body, err := runCmd("", nil, "docker", "ps", "-q", "--no-trunc",
+		"--filter", "label=com.docker.compose.project="+project,
+		"--filter", "label=com.docker.compose.service="+composeService)
+	if err != nil {
+		return "", fmt.Errorf("list compose service %s containers: %w: %s", composeService, err, strings.TrimSpace(string(body)))
+	}
+	siblingID := firstNonEmptyLine(string(body))
+	if siblingID == "" {
+		return "", fmt.Errorf("compose service %s is not running in project %s", composeService, project)
+	}
+	return siblingID, nil
 }
 
 func dockerSpecForService(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string) (dockerServiceSpec, error) {

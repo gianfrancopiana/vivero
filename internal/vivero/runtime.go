@@ -151,10 +151,25 @@ func (a *App) Up(req UpRequest) (PreviewRecord, error) {
 	if err := a.setPreviewStatus(req.ID, "starting_apps"); err != nil {
 		return p, cleanupFailedStartup(err)
 	}
-	if err := a.startAppServices(req, runtimeConfig, p.Sources, p.Services); err != nil {
+	deferReadiness := len(runtimeConfig.Setup.EveryBoot) > 0
+	if err := a.startAppServices(req, runtimeConfig, p.Sources, p.Services, deferReadiness); err != nil {
 		err = cleanupFailedStartup(err)
 		_ = a.setPreviewStatus(req.ID, "unhealthy")
 		return p, err
+	}
+	if deferReadiness {
+		everyBootTimer := startOperationTimer()
+		if err := a.runSetupStepsNamed("setup.everyBoot", req.ID, runtimeConfig.Setup.EveryBoot, runtimeConfig, p.Sources, warmState, project.Path); err != nil {
+			a.recordEvent(req.ID, "error", "setup.failed", err.Error(), "", everyBootTimer.metadata(nil))
+			err = cleanupFailedStartup(err)
+			_ = a.setPreviewStatus(req.ID, "unhealthy")
+			return p, err
+		}
+		if err := a.finalizeAppServicesReadiness(req, runtimeConfig, p.Services); err != nil {
+			err = cleanupFailedStartup(err)
+			_ = a.setPreviewStatus(req.ID, "unhealthy")
+			return p, err
+		}
 	}
 	if req.Wait {
 		if err := a.Wait(req.ID, req.Timeout); err != nil {

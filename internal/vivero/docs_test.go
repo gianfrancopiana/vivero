@@ -329,6 +329,7 @@ func TestBundledSkillDocumentsRuntimeTruthAndComposeSafety(t *testing.T) {
 		"Compose overrides are temporary",
 		"warns when that timeout is missing",
 		"Named ports always belong to that service container",
+		"`composeService`",
 		"`ports.<name>.hostIp`",
 		"`proxyListenHost`",
 		"sets `timedOut: true`, and returns exit code 124",
