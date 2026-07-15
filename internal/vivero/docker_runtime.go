@@ -256,16 +256,8 @@ func startDockerService(home, projectName, previewID, service string, svc Servic
 	return containerID, nil
 }
 
-func (a *App) runDockerOneShot(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
-	return a.runDockerOneShotWithStdin(projectName, previewID, service, svc, sources, env, command, "")
-}
-
 func (a *App) runDockerOneShotWithStdin(projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
 	return a.containerRuntime().RunOneShot(a.Home, projectName, previewID, service, svc, sources, env, command, stdin)
-}
-
-func runDockerOneShot(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand) ([]byte, error) {
-	return runDockerOneShotWithStdin(home, projectName, previewID, service, svc, sources, env, command, "")
 }
 
 func runDockerOneShotWithStdin(home, projectName, previewID, service string, svc ServiceConfig, sources map[string]PreviewSource, env map[string]string, command RuntimeCommand, stdin string) ([]byte, error) {
