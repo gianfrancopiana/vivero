@@ -265,6 +265,25 @@ func (a *App) servePublicPreview(w http.ResponseWriter, r *http.Request) bool {
 	basePublicHost := previewServicePublicHost(svc)
 	hostHeader := publicRouteHostHeader(baseHostHeader, host, basePublicHost)
 	proxyReq := publicPreviewProxyRequest(r, svc.URL, host)
+	// Honor publicPath port routes (e.g. a MinIO or websocket sidecar port
+	// published under a path prefix). The local per-preview rewrite proxy
+	// already routes these; without this branch the public router would send
+	// every path to the primary origin and path-routed ports would 404.
+	for _, route := range publicProxyRoutesForService(svc, svcCfg) {
+		if !publicRoutePathMatches(r.URL.Path, route.Path) {
+			continue
+		}
+		routeTarget, parseErr := url.Parse(route.Target)
+		if parseErr != nil || routeTarget.Scheme == "" || routeTarget.Host == "" {
+			continue
+		}
+		routeHost := route.HostHeader
+		if routeHost == "" {
+			routeHost = hostHeader
+		}
+		newPublicRouteHeaderRewriteProxy(routeTarget, routeHost, baseHostHeader, basePublicURL, svcCfg.PublicRewrite).ServeHTTP(w, proxyReq)
+		return true
+	}
 	newPublicRouteHeaderRewriteProxy(target, hostHeader, baseHostHeader, basePublicURL, svcCfg.PublicRewrite).ServeHTTP(w, proxyReq)
 	return true
 }
